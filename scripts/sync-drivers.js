@@ -35,8 +35,18 @@ function loadConfig() {
   const file = path.join(__dirname, 'fleet180-sync.json');
   let fromFile = {};
   if (fs.existsSync(file)) {
-    try { fromFile = JSON.parse(fs.readFileSync(file, 'utf8')); }
-    catch (e) { fail(`${file} går inte att läsa som JSON: ${e.message}`); }
+    // Notepad and PowerShell's Set-Content both like to prepend a UTF-8
+    // byte-order mark, which JSON.parse refuses with a message that says
+    // nothing useful. Strip it rather than make anyone debug it.
+    const raw = fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, '').trim();
+    if (raw) {
+      try { fromFile = JSON.parse(raw); }
+      catch (e) {
+        fail(`${file} går inte att läsa som JSON: ${e.message}\n` +
+          '     Filen ska se ut som fleet180-sync.example.json:\n' +
+          '     { "base": "...", "token": "...", "suite": "C:\\\\IBX\\\\route-suite-flat-4.0.0.0" }');
+      }
+    }
   }
   const suite = arg('suite') || process.env.ROUTE_SUITE_DIR || fromFile.suite ||
     path.resolve(__dirname, '..', '..');
@@ -60,11 +70,30 @@ function parseMaybe(value) {
   try { return JSON.parse(value); } catch (e) { return value; }
 }
 
-function readRoster(suiteDir) {
-  const storage = path.join(suiteDir, 'webserver', 'data', 'mirror', 'storage.json');
-  if (!fs.existsSync(storage)) {
-    fail(`Hittar inte ${storage}. Peka ut suiten med --suite=<mapp> eller kör webbservern en gång.`);
+const MIRROR = ['webserver', 'data', 'mirror', 'storage.json'];
+
+/**
+ * Find the suite, wherever this happens to be running.
+ *
+ * The same config file is read from two places: Windows, where `suite` is
+ * C:\IBX\..., and the scheduled job's Linux sandbox, where that folder is
+ * mounted under a different root. The script sits inside the suite either
+ * way, so its own location is the reliable fallback -- try the configured
+ * path first, then two levels up from here.
+ */
+function findSuite(configured) {
+  const candidates = [configured, path.resolve(__dirname, '..', '..')].filter(Boolean);
+  for (const dir of candidates) {
+    if (fs.existsSync(path.join(dir, ...MIRROR))) return dir;
   }
+  fail('Hittar inte webserver/data/mirror/storage.json. Letade i:\n' +
+    candidates.map(c => '       ' + c).join('\n') +
+    '\n     Peka ut suiten med --suite=<mapp>, eller kör webbservern en gång så att spegeln skapas.');
+}
+
+function readRoster(configuredDir) {
+  const suiteDir = findSuite(configuredDir);
+  const storage = path.join(suiteDir, ...MIRROR);
   const raw = JSON.parse(fs.readFileSync(storage, 'utf8'));
 
   const box = parseMaybe(raw['routeAssigner.matrix.v1']) || {};
@@ -89,7 +118,8 @@ function readRoster(suiteDir) {
   return {
     drivers: [...drivers.values()].sort((a, b) => collator.compare(a.name, b.name)),
     sourceUpdated: (box.meta && box.meta.updatedAt) || null,
-    skipped: inactive.size
+    skipped: inactive.size,
+    suiteDir
   };
 }
 
@@ -106,7 +136,7 @@ async function post(cfg, drivers) {
 
 (async () => {
   const cfg = loadConfig();
-  const { drivers, sourceUpdated, skipped } = readRoster(cfg.suite);
+  const { drivers, sourceUpdated, skipped, suiteDir } = readRoster(cfg.suite);
 
   if (!drivers.length) {
     fail('Förarlistan blev tom – vägrar skicka, det skulle tömma rullgardinen i formuläret.');
@@ -121,6 +151,7 @@ async function post(cfg, drivers) {
   fs.mkdirSync(path.dirname(cfg.out), { recursive: true });
   fs.writeFileSync(cfg.out, JSON.stringify(payload, null, 2) + '\n', 'utf8');
 
+  console.log(`läste ${suiteDir}`);
   console.log(`${drivers.length} förare (${skipped} på inaktiv-listan hoppades över)`);
   console.log(`matrisen senast ändrad: ${sourceUpdated || 'okänt'}`);
   console.log(`skrev ${cfg.out}`);
