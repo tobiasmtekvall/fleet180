@@ -9,6 +9,15 @@ function esc(s) {
 
 const STOCKHOLM = 'Europe/Stockholm';
 
+/* Arabic sets the whole document right-to-left; the rest are left-to-right.
+   Kept here rather than imported so the layout has no dependency cycle. */
+const LANG_META = {
+  sv: { htmlLang: 'sv', dir: 'ltr' },
+  en: { htmlLang: 'en', dir: 'ltr' },
+  ar: { htmlLang: 'ar', dir: 'rtl' },
+  hi: { htmlLang: 'hi', dir: 'ltr' }
+};
+
 function fmtDateTime(d) {
   if (!d) return '—';
   return new Intl.DateTimeFormat('sv-SE', {
@@ -35,9 +44,10 @@ function navbar(links) {
 </div>`;
 }
 
-function page({ title, body, links, bodyClass = '', head = '', scripts = '' }) {
+function page({ title, body, links, bodyClass = '', head = '', scripts = '', lang = 'sv' }) {
+  const meta = LANG_META[lang] || LANG_META.sv;
   return `<!DOCTYPE html>
-<html lang="sv">
+<html lang="${meta.htmlLang}" dir="${meta.dir}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">

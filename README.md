@@ -14,6 +14,9 @@ skriva om en fråga.
 | &nbsp;&nbsp;· Kontroller | `/admin` – lista, filter, CSV |
 | &nbsp;&nbsp;· Fordon | `/admin/vehicles` – lägg till, ändra, avställ |
 | &nbsp;&nbsp;· Formulär | `/admin/forms` – frågor, ordning, kopior |
+| &nbsp;&nbsp;· Förare | `/admin/drivers` – listan som synkas från Route Suite |
+| &nbsp;&nbsp;· Dagsmejl | `/admin/daily-summary` – förhandsgranska och skicka |
+| API | `/api/drivers`, `/api/checks`, `/api/photo/:id` (nyckel krävs) |
 | Hälsokontroll | `/health` |
 
 **Fordonen** vid första starten är 22 stycken: de 15 boxbilarna ur suitens
@@ -171,6 +174,97 @@ kräver dessutom ett verifierbart certifikat (fungerar inte mot Railways proxy).
 
 Startar databasen långsammare än appen gör appen sex försök med växande
 paus innan den ger upp; `DB_CONNECT_ATTEMPTS` ändrar antalet.
+
+
+---
+
+## Språk
+
+Formuläret finns på **svenska, engelska, arabiska och hindi**. Föraren byter
+med de små flaggorna ovanför formuläret. Bytet sker i sidan – **allt som redan
+är ifyllt står kvar**, inklusive tagna foton – och arabiska växlar hela sidan
+till höger-till-vänster. Valet sparas i telefonen, så nästa fordon öppnas på
+samma språk. Kvittot visas också på det språk kontrollen fylldes i.
+
+Svenskan är originalet; de andra tre är översättningar av den. Lägger du till
+en fråga i redigeraren översätter du den under *Alternativ, larm och
+översättningar* på frågans rad. En fråga utan översättning visas på svenska
+i stället för att bli tom.
+
+## Frågetyper
+
+| Typ | Vad föraren ser |
+|---|---|
+| Fritext | En rad text. |
+| **Rullgardin** | En lista att välja ur. Egna alternativ (ett per rad) eller **förarlistan**. |
+| Ja / Nej / Annat | Tre knappar. Kommentarsrutan öppnas vid *Nej* och krävs vid *Annat*. |
+| Foto | Öppnar kameran, flera bilder tillåtna. |
+| Informationstext | Bara text till föraren, inget svar. |
+
+Standardformuläret använder tre rullgardiner: **Namn och efternamn** (från
+förarlistan, i bokstavsordning), **Din rutt** (JK-EM-1 … JK-EM-20) och
+**AdBlue** (100 % ned till 30 % i steg om fem).
+
+### Larm – vad som räknas som "att åtgärda"
+
+Varje Ja/Nej-fråga har en egen inställning för *vilket* svar som betyder att
+något behöver fixas, eftersom polariteten skiljer sig: "Fungerar bakgavellyften?"
+är ett problem vid **Nej**, medan "Finns nya skador?" är ett problem vid **Ja**.
+*Annat* larmar alltid – någon behöver läsa kommentaren. Det är dessa svar som
+dagsmejlet och FLEET180-vyn i tillägget lyfter fram.
+
+## Förarlistan
+
+Listan ägs av Route Suite. `scripts/sync-drivers.js` läser suitens
+webbserverspegel (`webserver/data/mirror/storage.json` →
+`routeAssigner.matrix.v1` + `routeAssigner.home.matrix.v1`), tar bort dem som
+står på `budbee:drivers:inactive`, sorterar svenskt (Å Ä Ö sist), skriver
+`data/drivers.json` och postar listan till `/api/drivers`. Rullgardinen är
+uppdaterad inom sekunder – ingen ny deploy behövs.
+
+```bash
+cd okq8-sakerhetskontroll
+cp scripts/fleet180-sync.example.json scripts/fleet180-sync.json   # fyll i token
+node scripts/sync-drivers.js --dry-run    # visar listan, postar inget
+node scripts/sync-drivers.js              # skarpt
+```
+
+En förare som försvinner ur suiten markeras **inaktiv** i stället för att
+raderas, så en redan inskickad kontroll fortfarande går att läsa. En tom lista
+vägras – den skulle tömma rullgardinen och stoppa förarna.
+
+## Dagsmejlet
+
+Skickas en gång per dygn till `SUMMARY_TO` med vilka som lämnat in, vad som
+behöver åtgärdas, och vilka fordon som saknar kontroll. Tid styrs av
+`SUMMARY_HOUR` (standard 17, svensk tid). Utan `RESEND_API_KEY` skickas inget –
+men sammanfattningen finns alltid att läsa på `/admin/daily-summary`, där det
+också går att skicka dagens mejl direkt. En `jobs`-rad i databasen gör att en
+omstart eller en andra instans inte kan skicka samma dag två gånger.
+
+## API
+
+Alla `/api`-vägar kräver `API_TOKEN`, skickad som `X-Api-Key` (eller `?key=`
+för bild-URL:er, som inte kan bära en header). **Är `API_TOKEN` osatt är API:t
+avstängt** – en osatt hemlighet betyder aldrig "släpp in alla".
+
+| Väg | Vad |
+|---|---|
+| `POST /api/drivers` | Ersätter förarregistret. `{"drivers":[{"name":"..."}]}` |
+| `GET /api/checks?from=&to=` | Kontroller per dag, med larm, saknade fordon och foto-URL:er |
+| `GET /api/photo/:id` | En bild |
+
+## Chrome-tillägget
+
+`Meny → Import → FLEET180` i Route Suite speglar appens databas lokalt och
+visar en dag i taget: vem som gjort sin kontroll, vad som rapporterats att
+åtgärda, foton, och vilka fordon som saknas. Kalender och pilar fungerar som
+på Daily Route Analysis (piltangenterna vänster/höger går också). Sidan
+synkar tyst när den öppnas och läser annars ur spegeln, så den fungerar
+även utan nät. Första gången klistrar du in appens adress och `API_TOKEN`.
+
+Filerna är `fleet180.html`, `fleet180.css`, `fleet180.js` och
+`lib/fleet180.js` i tilläggsmappen, plus en rad i `nav.js`.
 
 ---
 

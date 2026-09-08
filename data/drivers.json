@@ -1,0 +1,212 @@
+{
+  "generatedAt": "2026-09-08T21:26:55.388Z",
+  "sourceUpdated": "2026-09-04T05:39:23.931Z",
+  "count": 41,
+  "drivers": [
+    {
+      "name": "Abdo Ghannoum",
+      "fleet": "box",
+      "type": "EXT"
+    },
+    {
+      "name": "Ahmed Ahmed",
+      "fleet": "box",
+      "type": "EXT"
+    },
+    {
+      "name": "Alvar Björk",
+      "fleet": "box",
+      "type": "BOX"
+    },
+    {
+      "name": "Amanda Claesson",
+      "fleet": "box",
+      "type": "Internal"
+    },
+    {
+      "name": "Belal Abdalla",
+      "fleet": "home",
+      "type": "Home"
+    },
+    {
+      "name": "Deepesh Madathiparambil",
+      "fleet": "box",
+      "type": "BOX"
+    },
+    {
+      "name": "Dilman Amen",
+      "fleet": "home",
+      "type": "Home"
+    },
+    {
+      "name": "Emmie Ragnar",
+      "fleet": "box",
+      "type": "BOX"
+    },
+    {
+      "name": "Filip Snarberg",
+      "fleet": "box",
+      "type": "Internal"
+    },
+    {
+      "name": "Gazmend Dubovci",
+      "fleet": "box",
+      "type": "EXT"
+    },
+    {
+      "name": "George Alshahin",
+      "fleet": "home",
+      "type": "Home"
+    },
+    {
+      "name": "George Grgos",
+      "fleet": "box",
+      "type": "Internal"
+    },
+    {
+      "name": "Geso Nellissey",
+      "fleet": "box",
+      "type": "BOX"
+    },
+    {
+      "name": "Harun Mahmic",
+      "fleet": "box",
+      "type": "BOX"
+    },
+    {
+      "name": "Hashem Mhimed",
+      "fleet": "box",
+      "type": "BOX"
+    },
+    {
+      "name": "Hussein Al-lami",
+      "fleet": "box",
+      "type": "BOX"
+    },
+    {
+      "name": "Ibrahim Alia",
+      "fleet": "home",
+      "type": "Home"
+    },
+    {
+      "name": "Jak Saifan",
+      "fleet": "home",
+      "type": "Home"
+    },
+    {
+      "name": "Jalal Alyafi",
+      "fleet": "box",
+      "type": "BOX"
+    },
+    {
+      "name": "Karmina Yalda",
+      "fleet": "box",
+      "type": "EXT"
+    },
+    {
+      "name": "Mariana Shamon",
+      "fleet": "box",
+      "type": "Internal"
+    },
+    {
+      "name": "Mayomi Rex Ogunieye",
+      "fleet": "box",
+      "type": "EXT"
+    },
+    {
+      "name": "Meja Rosenqvist",
+      "fleet": "box",
+      "type": "EXT"
+    },
+    {
+      "name": "Mejd Albarody",
+      "fleet": "box",
+      "type": "BOX"
+    },
+    {
+      "name": "Melwin Rosell",
+      "fleet": "box",
+      "type": "BOX"
+    },
+    {
+      "name": "Milad Qaryaqos",
+      "fleet": "box",
+      "type": "EXT"
+    },
+    {
+      "name": "Mirie Toma",
+      "fleet": "home",
+      "type": "Home"
+    },
+    {
+      "name": "Mohammed Baker",
+      "fleet": "box",
+      "type": "EXT"
+    },
+    {
+      "name": "Muhiyadiin Hassan",
+      "fleet": "box",
+      "type": "EXT"
+    },
+    {
+      "name": "Mushan Shahzad",
+      "fleet": "box",
+      "type": "EXT"
+    },
+    {
+      "name": "Ninweh Soko",
+      "fleet": "box",
+      "type": "Internal"
+    },
+    {
+      "name": "Oskar Olsson",
+      "fleet": "box",
+      "type": "EXT"
+    },
+    {
+      "name": "Raja Wahab Maqbool",
+      "fleet": "box",
+      "type": "EXT"
+    },
+    {
+      "name": "Rfel Hana",
+      "fleet": "home",
+      "type": "Home"
+    },
+    {
+      "name": "Sara Molin",
+      "fleet": "box",
+      "type": "Internal"
+    },
+    {
+      "name": "Simon Bergman",
+      "fleet": "box",
+      "type": "Internal"
+    },
+    {
+      "name": "Tiklit Welday",
+      "fleet": "home",
+      "type": "Home"
+    },
+    {
+      "name": "Tobias Oscarsson",
+      "fleet": "box",
+      "type": "Internal"
+    },
+    {
+      "name": "Tommy Östlund",
+      "fleet": "box",
+      "type": "Internal"
+    },
+    {
+      "name": "Wille Zäther",
+      "fleet": "box",
+      "type": "BOX"
+    },
+    {
+      "name": "Zeeshan Amhad",
+      "fleet": "box",
+      "type": "BOX"
+    }
+  ]
+}

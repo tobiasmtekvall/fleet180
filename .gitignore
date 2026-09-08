@@ -8,3 +8,6 @@ npm-debug.log*
 
 # Obsoleta filer som ersattes 2026-09-08; ta bort mappen i Utforskaren.
 _to_delete/
+
+# Innehåller API-nyckeln till appen – ska aldrig till GitHub.
+scripts/fleet180-sync.json

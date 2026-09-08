@@ -1,0 +1,5 @@
+{
+  "base": "https://fleet180-production.up.railway.app",
+  "token": "SAMMA-VARDE-SOM-API_TOKEN-I-RAILWAY",
+  "suite": "C:\\IBX\\route-suite-flat-4.0.0.0"
+}

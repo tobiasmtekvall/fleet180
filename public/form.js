@@ -11,11 +11,51 @@
   var MAX_PER_FIELD = 6;
   var COMMENT_CHOICES = { nej: true, annat: true };
 
-  var form = document.getElementById('checkForm');
+  var form = document.getElementById('checkForm') || document.getElementById('previewForm');
   if (!form) return;
+  var preview = form.id === 'previewForm';
   var notice = document.getElementById('notice');
   var submitBtn = document.getElementById('submitBtn');
+  var langField = document.getElementById('langField');
   var store = {};           // fältnamn -> [{blob, name}]
+
+  var UI = window.FLEET180_UI || {};
+  var LANGS = window.FLEET180_LANGS || [{ code: 'sv', dir: 'ltr', htmlLang: 'sv' }];
+  var lang = (langField && langField.value) || 'sv';
+
+  function t(key) { return (UI[lang] && UI[lang][key]) || (UI.sv && UI.sv[key]) || key; }
+
+  /* Flags swap the text that is already in the page (every language sits in
+     data-t-<code> attributes) instead of reloading, so half-filled answers,
+     photos taken and the scroll position all survive the switch. */
+  function applyLang(code) {
+    var meta = null;
+    for (var i = 0; i < LANGS.length; i++) if (LANGS[i].code === code) meta = LANGS[i];
+    if (!meta) return;
+    lang = code;
+    if (langField) langField.value = code;
+
+    each(document.querySelectorAll('[data-t-' + code + ']'), function (el) {
+      var text = el.getAttribute('data-t-' + code);
+      if (text === null) return;
+      if (el.tagName === 'INPUT' && el.type === 'text') el.placeholder = text;
+      else if (el.tagName === 'LABEL' && el.querySelector('.star')) {
+        el.childNodes[0].nodeValue = text;   // keep the required marker
+      } else el.textContent = text;
+    });
+
+    document.documentElement.lang = meta.htmlLang;
+    document.documentElement.dir = meta.dir;
+    each(document.querySelectorAll('.flag'), function (b) {
+      b.classList.toggle('on', b.dataset.lang === code);
+    });
+    each(form.querySelectorAll('[data-kind="yesno"]'), function (f) { syncComment(f.dataset.name); });
+    try { localStorage.setItem('fleet180.lang', code); } catch (e) { /* privat läge */ }
+  }
+
+  each(document.querySelectorAll('.flag'), function (btn) {
+    btn.addEventListener('click', function () { applyLang(btn.dataset.lang); });
+  });
 
   function each(list, fn) { Array.prototype.forEach.call(list, fn); }
   function showNotice(msg) {
@@ -37,7 +77,7 @@
     box.classList.toggle('open', !!show);
     var required = checked && checked.value === 'annat';
     box.querySelector('input').classList.toggle('form-control', true);
-    box.querySelector('label').textContent = required ? 'Kommentar (obligatorisk)' : 'Kommentar';
+    box.querySelector('label').textContent = required ? t('commentRequired') : t('comment');
   }
   each(form.querySelectorAll('[data-kind="yesno"]'), function (field) {
     var name = field.dataset.name;
@@ -63,7 +103,7 @@
       files.forEach(function (file) {
         if (!/^image\//.test(file.type)) return;
         if (store[input.name].length >= MAX_PER_FIELD) {
-          showNotice('Max ' + MAX_PER_FIELD + ' bilder per fråga.');
+          showNotice(t('maxPhotos'));
           return;
         }
         shrink(file, function (blob, dataUrl) {
@@ -130,6 +170,8 @@
     if (err) { err.textContent = msg; err.classList.add('show'); }
     var input = field.querySelector('input[type="text"]');
     if (input && field.dataset.kind === 'text') input.classList.add('invalid');
+    var sel = field.querySelector('select');
+    if (sel) sel.classList.add('invalid');
   }
   function clearError(field) {
     field.classList.remove('field-invalid');
@@ -146,7 +188,13 @@
       if (kind === 'text') {
         var input = field.querySelector('input[type="text"]');
         if (input && input.hasAttribute('required') && !input.value.trim()) {
-          setError(field, 'Fältet är obligatoriskt.');
+          setError(field, t('required'));
+          if (!firstBad) firstBad = field;
+        }
+      } else if (kind === 'select') {
+        var sel = field.querySelector('select');
+        if (sel && sel.hasAttribute('required') && !sel.value) {
+          setError(field, t('chooseError'));
           if (!firstBad) firstBad = field;
         }
       } else if (kind === 'yesno') {
@@ -155,14 +203,14 @@
         var isRequired = !!field.querySelector('input[data-required="1"]');
         if (!checked) {
           if (isRequired) {
-            setError(field, 'Välj Ja, Nej eller Annat.');
+            setError(field, t('chooseYesNo'));
             if (!firstBad) firstBad = field;
           }
         } else if (checked.value === 'annat') {
           var box = commentBox(name);
           var text = box ? box.querySelector('input').value.trim() : '';
           if (!text) {
-            setError(field, 'Skriv en kommentar när du svarar Annat.');
+            setError(field, t('commentNeeded'));
             if (!firstBad) firstBad = field;
           }
         }
@@ -183,11 +231,18 @@
       if (field && inp.value.trim()) clearError(field);
     });
   });
+  each(form.querySelectorAll('select'), function (sel) {
+    sel.addEventListener('change', function () {
+      var field = sel.closest('.field');
+      if (field && sel.value) clearError(field);
+    });
+  });
 
   /* ---- skicka ---- */
   form.addEventListener('submit', function (e) {
     e.preventDefault();
     hideNotice();
+    if (preview) return;
     if (!validate()) return;
 
     var fd = new FormData();
@@ -197,6 +252,10 @@
     each(form.querySelectorAll('input[type="radio"]:checked'), function (inp) {
       fd.append(inp.name, inp.value);
     });
+    each(form.querySelectorAll('select'), function (sel) {
+      fd.append(sel.name, sel.value);
+    });
+    fd.append('__lang', lang);
     Object.keys(store).forEach(function (field) {
       store[field].forEach(function (entry, i) {
         fd.append(field, entry.blob, field + '-' + (i + 1) + '.jpg');
@@ -204,7 +263,7 @@
     });
 
     submitBtn.disabled = true;
-    submitBtn.textContent = 'Skickar…';
+    submitBtn.textContent = t('sending');
 
     fetch(form.action, { method: 'POST', body: fd, headers: { 'Accept': 'application/json' } })
       .then(function (r) {
@@ -216,13 +275,19 @@
       })
       .catch(function (err) {
         submitBtn.disabled = false;
-        submitBtn.textContent = 'Bekräfta och skicka';
-        showNotice('Kunde inte skicka kontrollen: ' + err.message +
-          '. Kontrollera nätverket och försök igen.');
+        submitBtn.textContent = t('submit');
+        showNotice(t('sendFailed') + err.message + t('tryAgain'));
       });
   });
 
   document.getElementById('printBtn').addEventListener('click', function () { window.print(); });
+
+  /* A language chosen on one vehicle's page is the one the next page opens
+     in -- a driver picks their language once, not at every check. */
+  try {
+    var saved = localStorage.getItem('fleet180.lang');
+    if (saved && saved !== lang) applyLang(saved);
+  } catch (e) { /* privat läge: strunt samma */ }
 
   document.getElementById('clearBtn').addEventListener('click', function () {
     form.reset();

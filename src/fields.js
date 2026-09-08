@@ -8,10 +8,17 @@
  */
 
 const KINDS = [
-  { value: 'text',  label: 'Fritext',            hint: 'En rad text.' },
-  { value: 'yesno', label: 'Ja / Nej / Annat',   hint: 'Tre knappar. Kommentar krävs vid "Annat" och kan fyllas i vid "Nej".' },
-  { value: 'photo', label: 'Foto',               hint: 'Öppnar kameran. Flera bilder tillåtna.' },
-  { value: 'info',  label: 'Informationstext',   hint: 'Bara text till föraren, inget svar.' }
+  { value: 'text',   label: 'Fritext',           hint: 'En rad text.' },
+  { value: 'select', label: 'Rullgardin',        hint: 'Föraren väljer ur en lista. Skriv alternativen ett per rad, eller välj förarlistan som källa.' },
+  { value: 'yesno',  label: 'Ja / Nej / Annat',  hint: 'Tre knappar. Kommentar krävs vid "Annat" och kan fyllas i vid "Nej".' },
+  { value: 'photo',  label: 'Foto',              hint: 'Öppnar kameran. Flera bilder tillåtna.' },
+  { value: 'info',   label: 'Informationstext',  hint: 'Bara text till föraren, inget svar.' }
+];
+
+/** Where a dropdown's options come from. */
+const SOURCES = [
+  { value: '',        label: 'Egna alternativ' },
+  { value: 'drivers', label: 'Förarlistan (synkas från Route Suite)' }
 ];
 
 const KIND_VALUES = KINDS.map(k => k.value);
@@ -36,7 +43,7 @@ const ROLES = [
 
 /** Answers as posted -> the shape stored in the answers JSONB column. */
 function readAnswer(field, body) {
-  if (field.kind === 'text') {
+  if (field.kind === 'text' || field.kind === 'select') {
     return String(body[field.name] ?? '').trim().slice(0, 2000);
   }
   if (field.kind === 'yesno') {
@@ -52,18 +59,25 @@ function readAnswer(field, body) {
 }
 
 /** null when the answer is acceptable, otherwise why it is not. */
-function answerProblem(field, value) {
+function answerProblem(field, value, allowed) {
   if (field.kind === 'text') {
-    if (field.required && !String(value || '').trim()) return 'Fältet är obligatoriskt.';
+    if (field.required && !String(value || '').trim()) return 'required';
+    return null;
+  }
+  if (field.kind === 'select') {
+    const v = String(value || '').trim();
+    if (!v) return field.required ? 'choose' : null;
+    // A dropdown may only carry one of its own options: the list is the
+    // whole point, and a posted value outside it is either a stale page
+    // or someone editing the request.
+    if (allowed && allowed.length && !allowed.includes(v)) return 'notInList';
     return null;
   }
   if (field.kind === 'yesno') {
     const choice = value && value.choice;
-    if (!choice) return field.required ? 'Välj Ja, Nej eller Annat.' : null;
-    if (!CHOICE_LABEL[choice]) return 'Ogiltigt svar.';
-    if (choice === 'annat' && !String(value.comment || '').trim()) {
-      return 'Skriv en kommentar när du svarar Annat.';
-    }
+    if (!choice) return field.required ? 'chooseYesNo' : null;
+    if (!CHOICE_LABEL[choice]) return 'invalid';
+    if (choice === 'annat' && !String(value.comment || '').trim()) return 'commentRequired';
     return null;
   }
   return null;
@@ -98,10 +112,41 @@ function formatAnswer(field, value) {
 
 /** Does this question hold an answer at all? (info and photo do not.) */
 function isAnswerable(field) {
-  return field.kind === 'text' || field.kind === 'yesno';
+  return field.kind === 'text' || field.kind === 'select' || field.kind === 'yesno';
+}
+
+/**
+ * Does this answer mean something needs attention?
+ *
+ * The polarity is per question, not global: "does the tail lift work" is a
+ * problem on Nej, "is there new damage" is a problem on Ja. `alert_on`
+ * carries that per field, so the daily mail and the extension's day view
+ * flag the right rows instead of guessing from the wording.
+ */
+function isAlerting(field, value) {
+  const on = Array.isArray(field.alert_on) ? field.alert_on
+    : Array.isArray(field.alertOn) ? field.alertOn : [];
+  if (!on.length) return false;
+  if (field.kind === 'yesno') {
+    if (value && typeof value === 'object') return !!value.choice && on.includes(value.choice);
+    // Legacy free text from before the editor: "Nej, trasig lampa" should
+    // still flag, so match on how the answer opens rather than exactly.
+    const text = typeof value === 'string' ? value.trim().toLowerCase() : '';
+    if (!text) return false;
+    return on.some(choice => text === choice || text.startsWith(choice + ' ') ||
+      text.startsWith(choice + ',') || text.startsWith(choice + '.'));
+  }
+  const v = typeof value === 'string' ? value.trim() : '';
+  return !!v && on.includes(v);
+}
+
+/** Options a dropdown offers: its own list, or a live source. */
+function optionsFor(field, sources) {
+  if (field.source === 'drivers') return (sources && sources.drivers) || [];
+  return Array.isArray(field.options) ? field.options : [];
 }
 
 module.exports = {
-  KINDS, KIND_VALUES, KIND_LABEL, CHOICES, CHOICE_LABEL, COMMENT_CHOICES,
-  ROLES, readAnswer, answerProblem, formatAnswer, isAnswerable
+  KINDS, KIND_VALUES, KIND_LABEL, SOURCES, CHOICES, CHOICE_LABEL, COMMENT_CHOICES,
+  ROLES, readAnswer, answerProblem, formatAnswer, isAnswerable, isAlerting, optionsFor
 };

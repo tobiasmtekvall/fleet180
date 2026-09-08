@@ -245,7 +245,33 @@ CREATE TABLE IF NOT EXISTS form_fields (
   role      TEXT    NOT NULL DEFAULT '',
   UNIQUE (form_id, name)
 );
+ALTER TABLE form_fields ADD COLUMN IF NOT EXISTS options  JSONB NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE form_fields ADD COLUMN IF NOT EXISTS source   TEXT  NOT NULL DEFAULT '';
+ALTER TABLE form_fields ADD COLUMN IF NOT EXISTS alert_on JSONB NOT NULL DEFAULT '[]'::jsonb;
+ALTER TABLE form_fields ADD COLUMN IF NOT EXISTS i18n     JSONB NOT NULL DEFAULT '{}'::jsonb;
 CREATE INDEX IF NOT EXISTS form_fields_order_idx ON form_fields (form_id, position);
+
+ALTER TABLE forms ADD COLUMN IF NOT EXISTS i18n JSONB NOT NULL DEFAULT '{}'::jsonb;
+
+-- The driver roster, replaced wholesale by the nightly sync from the
+-- Route Suite. Never edited by hand here; whatever the suite says wins.
+CREATE TABLE IF NOT EXISTS drivers (
+  id         BIGSERIAL PRIMARY KEY,
+  name       TEXT    NOT NULL UNIQUE,
+  fleet      TEXT    NOT NULL DEFAULT '',
+  type       TEXT    NOT NULL DEFAULT '',
+  active     BOOLEAN NOT NULL DEFAULT true,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS drivers_name_idx ON drivers (name);
+
+-- One row per background job, so a restart cannot send the daily mail twice.
+CREATE TABLE IF NOT EXISTS jobs (
+  name      TEXT PRIMARY KEY,
+  last_run  TIMESTAMPTZ,
+  last_key  TEXT,
+  note      TEXT
+);
 
 CREATE TABLE IF NOT EXISTS vehicles (
   id          BIGSERIAL PRIMARY KEY,
@@ -277,6 +303,7 @@ CREATE TABLE IF NOT EXISTS submissions (
 ALTER TABLE submissions ADD COLUMN IF NOT EXISTS form_id    BIGINT;
 ALTER TABLE submissions ADD COLUMN IF NOT EXISTS form_title TEXT;
 ALTER TABLE submissions ADD COLUMN IF NOT EXISTS questions  JSONB;
+ALTER TABLE submissions ADD COLUMN IF NOT EXISTS lang       TEXT NOT NULL DEFAULT 'sv';
 CREATE INDEX IF NOT EXISTS submissions_plate_time_idx ON submissions (plate, submitted_at DESC);
 CREATE INDEX IF NOT EXISTS submissions_time_idx ON submissions (submitted_at DESC);
 
@@ -301,15 +328,19 @@ async function seedIfEmpty(client) {
   const { rows } = await client.query('SELECT COUNT(*)::int AS n FROM forms');
   if (rows[0].n === 0) {
     const form = await client.query(
-      `INSERT INTO forms (key, title, is_default) VALUES ($1,$2,true) RETURNING id`,
-      [seed.FORM_KEY, seed.FORM_TITLE]);
+      `INSERT INTO forms (key, title, is_default, i18n) VALUES ($1,$2,true,$3) RETURNING id`,
+      [seed.FORM_KEY, seed.FORM_TITLE, JSON.stringify(seed.FORM_I18N || {})]);
     const formId = form.rows[0].id;
     let pos = 0;
     for (const f of seed.DEFAULT_FIELDS) {
       await client.query(
-        `INSERT INTO form_fields (form_id, position, name, kind, label, section, required, role)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
-        [formId, pos += 10, f.name, f.kind, f.label, f.section || '', !!f.required, f.role || '']);
+        `INSERT INTO form_fields
+           (form_id, position, name, kind, label, section, required, role,
+            options, source, alert_on, i18n)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+        [formId, pos += 10, f.name, f.kind, f.label, f.section || '', !!f.required, f.role || '',
+         JSON.stringify(f.options || []), f.source || '',
+         JSON.stringify(f.alertOn || []), JSON.stringify(f.i18n || {})]);
     }
     console.log(`[db] seeded default form with ${seed.DEFAULT_FIELDS.length} questions`);
   }
@@ -462,8 +493,11 @@ async function createForm({ title, copyFromId = null }) {
     const id = f.rows[0].id;
     if (copyFromId) {
       await client.query(
-        `INSERT INTO form_fields (form_id, position, name, kind, label, section, required, role)
-         SELECT $1, position, name, kind, label, section, required, role
+        `INSERT INTO form_fields
+           (form_id, position, name, kind, label, section, required, role,
+            options, source, alert_on, i18n)
+         SELECT $1, position, name, kind, label, section, required, role,
+                options, source, alert_on, i18n
            FROM form_fields WHERE form_id = $2`, [id, copyFromId]);
     }
     await client.query('COMMIT');
@@ -499,14 +533,20 @@ async function nextFieldName(formId) {
   }
 }
 
-async function addField(formId, { kind, label, section = '', required = false, role = '' }) {
+async function addField(formId, {
+  kind, label, section = '', required = false, role = '',
+  options = [], source = '', alertOn = [], i18n = {}
+}) {
   const name = await nextFieldName(formId);
   const r = await pool.query(
-    `INSERT INTO form_fields (form_id, position, name, kind, label, section, required, role)
+    `INSERT INTO form_fields
+       (form_id, position, name, kind, label, section, required, role,
+        options, source, alert_on, i18n)
      VALUES ($1, COALESCE((SELECT MAX(position) FROM form_fields WHERE form_id = $1), 0) + 10,
-             $2,$3,$4,$5,$6,$7)
+             $2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
      RETURNING *`,
-    [formId, name, kind, label, section, required, role]);
+    [formId, name, kind, label, section, required, role,
+     JSON.stringify(options), source, JSON.stringify(alertOn), JSON.stringify(i18n)]);
   await touchForm(formId);
   return r.rows[0];
 }
@@ -517,10 +557,16 @@ async function getField(id) {
   return r.rows[0] || null;
 }
 
-async function updateField(id, { kind, label, section, required, role }) {
+async function updateField(id, {
+  kind, label, section, required, role, options, source, alertOn, i18n
+}) {
   const r = await pool.query(
-    `UPDATE form_fields SET kind = $2, label = $3, section = $4, required = $5, role = $6
-      WHERE id = $1 RETURNING form_id`, [id, kind, label, section, required, role]);
+    `UPDATE form_fields SET kind = $2, label = $3, section = $4, required = $5,
+            role = $6, options = $7, source = $8, alert_on = $9, i18n = $10
+      WHERE id = $1 RETURNING form_id`,
+    [id, kind, label, section, required, role,
+     JSON.stringify(options || []), source || '',
+     JSON.stringify(alertOn || []), JSON.stringify(i18n || {})]);
   if (r.rows.length) await touchForm(r.rows[0].form_id);
 }
 
@@ -564,26 +610,34 @@ async function moveField(id, direction) {
  * ------------------------------------------------------------------ */
 
 async function saveSubmission({
-  plate, owner, form, answers, roles, photos, userAgent, clientIp
+  plate, owner, form, answers, roles, photos, userAgent, clientIp, lang
 }) {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    // The snapshot has to carry alert_on as well as the wording: without it
+    // a check saved today could not be re-evaluated tomorrow, and the daily
+    // mail would quietly report nothing to fix. i18n rides along so an old
+    // check still reads in the language it was filed in.
     const questions = form.fields.map(f => ({
       name: f.name, kind: f.kind, label: f.label,
-      section: f.section, required: f.required, role: f.role
+      section: f.section, required: f.required, role: f.role,
+      alert_on: Array.isArray(f.alert_on) ? f.alert_on : [],
+      options: Array.isArray(f.options) ? f.options : [],
+      source: f.source || '',
+      i18n: f.i18n || {}
     }));
     const res = await client.query(
       `INSERT INTO submissions
          (plate, owner, form_key, form_id, form_title, driver_name, route, odometer,
-          answers, questions, photo_count, user_agent, client_ip)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+          answers, questions, photo_count, user_agent, client_ip, lang)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
        RETURNING id, submitted_at`,
       [
         plate, owner || '', form.key, form.id, form.title,
         roles.driver || null, roles.route || null, roles.odometer || null,
         JSON.stringify(answers), JSON.stringify(questions),
-        photos.length, userAgent || null, clientIp || null
+        photos.length, userAgent || null, clientIp || null, lang || 'sv'
       ]
     );
     const id = res.rows[0].id;
@@ -650,6 +704,108 @@ async function latestPerVehicle() {
   return new Map(r.rows.map(row => [row.plate, row]));
 }
 
+
+/* ------------------------------------------------------------------ *
+ * Drivers                                                             *
+ *                                                                     *
+ * Owned by the Route Suite, not by this app: the nightly sync posts    *
+ * the whole roster and it replaces what was here. Names that vanish    *
+ * from the suite are marked inactive rather than deleted, so a check   *
+ * signed by someone who has since left still resolves.                *
+ * ------------------------------------------------------------------ */
+
+const SV_COLLATOR = new Intl.Collator('sv', { sensitivity: 'base' });
+
+async function listDrivers({ includeInactive = false } = {}) {
+  const r = await pool.query(
+    `SELECT name, fleet, type, active, updated_at FROM drivers
+      ${includeInactive ? '' : 'WHERE active'}`);
+  // Sorted here, not in SQL: Swedish puts Å Ä Ö after Z, and a database
+  // collation that does that is not guaranteed to exist on every Postgres
+  // image. Intl always gets it right.
+  return r.rows.sort((a, b) => SV_COLLATOR.compare(a.name, b.name));
+}
+
+/** Replaces the roster. Returns what changed, for the sync log. */
+async function replaceDrivers(list) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const before = await client.query('SELECT name, active FROM drivers');
+    const seen = new Set();
+    let added = 0;
+    for (const d of list) {
+      const name = String(d.name || '').trim().slice(0, 200);
+      if (!name || seen.has(name)) continue;
+      seen.add(name);
+      const r = await client.query(
+        `INSERT INTO drivers (name, fleet, type, active, updated_at)
+         VALUES ($1,$2,$3,true,now())
+         ON CONFLICT (name) DO UPDATE
+           SET fleet = EXCLUDED.fleet, type = EXCLUDED.type,
+               active = true, updated_at = now()
+         RETURNING (xmax = 0) AS inserted`,
+        [name, String(d.fleet || '').slice(0, 40), String(d.type || '').slice(0, 40)]);
+      if (r.rows[0].inserted) added++;
+    }
+    const gone = await client.query(
+      `UPDATE drivers SET active = false, updated_at = now()
+        WHERE active AND NOT (name = ANY($1::text[])) RETURNING name`,
+      [[...seen]]);
+    await client.query('COMMIT');
+    return { total: seen.size, added, deactivated: gone.rows.map(r => r.name), before: before.rowCount };
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+/* ------------------------------------------------------------------ *
+ * Background jobs                                                     *
+ * ------------------------------------------------------------------ */
+
+/** True only for the first caller with this key -- the daily mail guard. */
+async function claimJob(name, key) {
+  const r = await pool.query(
+    `INSERT INTO jobs (name, last_run, last_key) VALUES ($1, now(), $2)
+     ON CONFLICT (name) DO UPDATE SET last_run = now(), last_key = $2
+       WHERE jobs.last_key IS DISTINCT FROM $2
+     RETURNING name`, [name, key]);
+  return r.rowCount > 0;
+}
+
+async function jobState(name) {
+  const r = await pool.query('SELECT * FROM jobs WHERE name = $1', [name]);
+  return r.rows[0] || null;
+}
+
+/** Every submission in a day (Europe/Stockholm), for the mail and the API. */
+async function submissionsBetween(fromDate, toDate) {
+  const r = await pool.query(
+    `SELECT id, plate, owner, form_id, form_key, form_title, submitted_at, lang,
+            driver_name, route, odometer, answers, questions, photo_count
+       FROM submissions
+      WHERE submitted_at >= ($1::date AT TIME ZONE 'Europe/Stockholm')
+        AND submitted_at <  (($2::date + 1) AT TIME ZONE 'Europe/Stockholm')
+      ORDER BY submitted_at`, [fromDate, toDate]);
+  return r.rows;
+}
+
+async function photoIdsFor(submissionIds) {
+  if (!submissionIds.length) return new Map();
+  const r = await pool.query(
+    `SELECT id, submission_id, field, mime, byte_size FROM photos
+      WHERE submission_id = ANY($1::bigint[]) ORDER BY id`, [submissionIds]);
+  const out = new Map();
+  for (const row of r.rows) {
+    if (!out.has(String(row.submission_id))) out.set(String(row.submission_id), []);
+    out.get(String(row.submission_id)).push(row);
+  }
+  return out;
+}
+
 module.exports = {
   init,
   listVehicles, getVehicle, getVehicleById, createVehicle, updateVehicle,
@@ -657,5 +813,6 @@ module.exports = {
   listForms, getForm, getDefaultForm, getFormForVehicle, createForm,
   updateForm, deleteForm, addField, getField, updateField, deleteField, moveField,
   saveSubmission, listSubmissions, getSubmission, getPhoto, latestPerVehicle,
+  listDrivers, replaceDrivers, claimJob, jobState, submissionsBetween, photoIdsFor,
   get pool() { return pool; }
 };

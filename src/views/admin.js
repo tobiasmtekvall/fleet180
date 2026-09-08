@@ -1,7 +1,8 @@
 'use strict';
 
 const { page, esc, fmtDateTime } = require('./layout');
-const { KINDS, KIND_LABEL, ROLES, formatAnswer } = require('../fields');
+const { KINDS, KIND_LABEL, ROLES, SOURCES, CHOICES, formatAnswer } = require('../fields');
+const i18n = require('../i18n');
 const { OWNER_LABEL, FLEET_LABEL } = require('./index');
 
 const LINKS = [
@@ -13,7 +14,9 @@ const LINKS = [
 const TABS = [
   { href: '/admin', text: 'Kontroller', key: 'checks' },
   { href: '/admin/vehicles', text: 'Fordon', key: 'vehicles' },
-  { href: '/admin/forms', text: 'Formulär', key: 'forms' }
+  { href: '/admin/forms', text: 'Formulär', key: 'forms' },
+  { href: '/admin/drivers', text: 'Förare', key: 'drivers' },
+  { href: '/admin/daily-summary', text: 'Dagsmejl', key: 'mail' }
 ];
 
 function nav(active) {
@@ -278,25 +281,69 @@ const KIND_OPTIONS = KINDS.map(k => ({ value: k.value, label: k.label }));
 const ROLE_OPTIONS = ROLES.map(r => ({ value: r.value, label: r.label }));
 
 function fieldRow(form, f, isFirst, isLast) {
+  const opts = Array.isArray(f.options) ? f.options : [];
+  const alert = Array.isArray(f.alert_on) ? f.alert_on : [];
+  const blob = f.i18n || {};
+
+  /* The extras -- dropdown options, alert polarity, the three translations
+     -- live in a <details> so the list of questions stays readable. They
+     post through the same form as the row above them, so one Save writes
+     everything. */
+  const extras = `
+        <details class="q-extra">
+          <summary>Alternativ, larm och översättningar</summary>
+          <div class="q-extra-body">
+            <div class="q-col">
+              <label class="q-lab">Rullgardinens alternativ (ett per rad)</label>
+              <textarea class="form-control" name="options" rows="4"
+                        placeholder="JK-EM-1&#10;JK-EM-2">${esc(opts.join('\n'))}</textarea>
+              <label class="q-lab">Hämta listan från</label>
+              ${select('source', SOURCES.map(o => ({ value: o.value, label: o.label })), f.source)}
+            </div>
+            <div class="q-col">
+              <label class="q-lab">Larma när svaret är</label>
+              <div class="q-checks">
+                ${CHOICES.map(c => `<label class="check"><input type="checkbox" name="alert_${esc(c.value)}" value="1"${
+                  alert.includes(c.value) ? ' checked' : ''}> ${esc(c.label)}</label>`).join('')}
+              </div>
+              <p class="q-hint">Styr vad dagsmejlet och FLEET180-vyn lyfter fram.
+                 "Fungerar X?" larmar på Nej, "Finns nya skador?" larmar på Ja.</p>
+            </div>
+            <div class="q-col q-col-wide">
+              ${i18n.CODES.filter(c => c !== 'sv').map(c => {
+                const m = i18n.LANGS.find(l => l.code === c);
+                return `<label class="q-lab">${m.flag} ${esc(m.label)} – frågans text</label>
+              <input class="form-control" type="text" name="label_${c}" value="${esc((blob[c] && blob[c].label) || '')}"
+                     placeholder="(tomt = svenska visas)">
+              <label class="q-lab">${m.flag} avsnitt</label>
+              <input class="form-control" type="text" name="section_${c}" value="${esc((blob[c] && blob[c].section) || '')}">`;
+              }).join('')}
+            </div>
+          </div>
+        </details>`;
+
   return `<tr>
-    <td style="width:46px;white-space:nowrap;padding-right:0">
+    <td style="width:46px;white-space:nowrap;padding-right:0;vertical-align:top">
       <form method="post" action="/admin/forms/${esc(form.id)}/fields/${esc(f.id)}/move" class="stack">
         <button class="btn btn-ghost btn-sm" name="dir" value="up" type="submit"${isFirst ? ' disabled' : ''}>▲</button>
         <button class="btn btn-ghost btn-sm" name="dir" value="down" type="submit"${isLast ? ' disabled' : ''}>▼</button>
       </form>
     </td>
     <td colspan="5" style="padding:9px 10px">
-      <form class="row-form" method="post" action="/admin/forms/${esc(form.id)}/fields/${esc(f.id)}">
-        <input class="form-control grow" type="text" name="label" value="${esc(f.label)}" required>
-        ${select('kind', KIND_OPTIONS, f.kind)}
-        <input class="form-control" type="text" name="section" value="${esc(f.section)}"
-               placeholder="Avsnitt" style="width:190px">
-        ${select('role', ROLE_OPTIONS, f.role)}
-        <label class="check"><input type="checkbox" name="required" value="1"${f.required ? ' checked' : ''}> Obligatorisk</label>
-        <span class="q-kind mono">${esc(f.name)}</span>
-        <button class="btn btn-primary btn-sm" type="submit">Spara</button>
-        <button class="btn btn-danger btn-sm" type="submit"
-                formaction="/admin/forms/${esc(form.id)}/fields/${esc(f.id)}/delete">Ta bort</button>
+      <form method="post" action="/admin/forms/${esc(form.id)}/fields/${esc(f.id)}">
+        <div class="row-form">
+          <input class="form-control grow" type="text" name="label" value="${esc(f.label)}" required>
+          ${select('kind', KIND_OPTIONS, f.kind)}
+          <input class="form-control" type="text" name="section" value="${esc(f.section)}"
+                 placeholder="Avsnitt" style="width:190px">
+          ${select('role', ROLE_OPTIONS, f.role)}
+          <label class="check"><input type="checkbox" name="required" value="1"${f.required ? ' checked' : ''}> Obligatorisk</label>
+          <span class="q-kind mono">${esc(f.name)}</span>
+          <button class="btn btn-primary btn-sm" type="submit">Spara</button>
+          <button class="btn btn-danger btn-sm" type="submit"
+                  formaction="/admin/forms/${esc(form.id)}/fields/${esc(f.id)}/delete">Ta bort</button>
+        </div>
+${extras}
       </form>
     </td>
   </tr>`;
@@ -324,7 +371,8 @@ ${nav('forms')}
 ${flash(message)}
 
   <p class="lede">Används av: ${users}.
-     <a href="/admin/forms/${esc(form.id)}/preview">Förhandsgranska</a></p>
+     Förhandsgranska: ${i18n.LANGS.map(l =>
+       `<a href="/admin/forms/${esc(form.id)}/preview?lang=${l.code}" title="${esc(l.label)}">${l.flag}</a>`).join(' ')}</p>
 
   <div class="card">
     <div class="card-header">Formulärets namn</div>
@@ -349,15 +397,23 @@ ${rows || '<tr><td class="muted" style="padding:20px">Inga frågor ännu – lä
     <div class="card-header">Ny fråga
       <span class="step-tag">${esc(KINDS.map(k => k.label + ': ' + k.hint).join('  ·  '))}</span></div>
     <div class="card-body">
-      <form class="row-form" method="post" action="/admin/forms/${esc(form.id)}/fields">
-        <input class="form-control grow" type="text" name="label" placeholder="Frågans text" required>
-        ${select('kind', KIND_OPTIONS, 'yesno')}
-        <input class="form-control" type="text" name="section"
-               placeholder="Avsnitt" style="width:190px"
-               value="${esc(form.fields.length ? form.fields[form.fields.length - 1].section : '')}">
-        ${select('role', ROLE_OPTIONS, '')}
-        <label class="check"><input type="checkbox" name="required" value="1" checked> Obligatorisk</label>
-        <button class="btn btn-primary" type="submit">Lägg till fråga</button>
+      <form method="post" action="/admin/forms/${esc(form.id)}/fields">
+        <div class="row-form">
+          <input class="form-control grow" type="text" name="label" placeholder="Frågans text" required>
+          ${select('kind', KIND_OPTIONS, 'yesno')}
+          <input class="form-control" type="text" name="section"
+                 placeholder="Avsnitt" style="width:190px"
+                 value="${esc(form.fields.length ? form.fields[form.fields.length - 1].section : '')}">
+          ${select('role', ROLE_OPTIONS, '')}
+          <label class="check"><input type="checkbox" name="required" value="1" checked> Obligatorisk</label>
+          <button class="btn btn-primary" type="submit">Lägg till fråga</button>
+        </div>
+        <div class="row-form" style="margin-top:8px">
+          <input class="form-control grow" type="text" name="optionsLine"
+                 placeholder="Rullgardin: alternativ separerade med komma (t.ex. 100%, 95%, 90%)">
+          ${select('source', SOURCES.map(o => ({ value: o.value, label: o.label })), '')}
+          <span class="q-hint">Larm och översättningar sätts efteråt på raden ovan.</span>
+        </div>
       </form>
     </div>
   </div>
@@ -369,7 +425,44 @@ ${rows || '<tr><td class="muted" style="padding:20px">Inga frågor ännu – lä
   return page({ title: `${form.title} – formulär`, body: html, links: LINKS });
 }
 
+function adminDriversPage({ drivers, message, lastSync }) {
+  const rows = drivers.length ? drivers.map(d => `<tr>
+      <td>${esc(d.name)}</td>
+      <td><span class="chip">${esc(d.type || '—')}</span></td>
+      <td>${esc(d.fleet || '—')}</td>
+      <td>${d.active ? 'Aktiv' : '<span class="muted">Inaktiv</span>'}</td>
+      <td class="mono muted">${esc(fmtDateTime(d.updated_at))}</td>
+    </tr>`).join('\n')
+    : `<tr><td colspan="5" class="muted" style="padding:20px">
+         Inga förare synkade ännu. Kör synken på din dator, eller posta listan till
+         <span class="mono">/api/drivers</span>.</td></tr>`;
+
+  const html = `  <div class="page-head">
+    <h1>Förare</h1>
+    <div class="muted">${drivers.filter(d => d.active).length} aktiva av ${drivers.length}</div>
+  </div>
+${nav('drivers')}
+${flash(message)}
+
+  <p class="lede">Listan ägs av Route Suite och skrivs över av synken – den redigeras inte här.
+     Namnen fyller rullgardinen <em>Namn och efternamn</em> i formuläret, i bokstavsordning.
+     En förare som försvinner ur suiten markeras inaktiv i stället för att raderas, så att en
+     kontroll som redan är signerad fortfarande går att läsa.
+     ${lastSync ? `Senaste synk: <strong>${esc(fmtDateTime(lastSync))}</strong>.` : ''}</p>
+
+  <div class="card">
+    <table class="table">
+      <thead><tr><th>Namn</th><th>Typ</th><th>Flotta</th><th>Status</th><th>Uppdaterad</th></tr></thead>
+      <tbody>
+${rows}
+      </tbody>
+    </table>
+  </div>`;
+
+  return page({ title: 'Förare – administration', body: html, links: LINKS });
+}
+
 module.exports = {
   adminListPage, adminDetailPage, adminVehiclesPage,
-  adminFormsPage, adminFormEditorPage
+  adminFormsPage, adminFormEditorPage, adminDriversPage
 };
