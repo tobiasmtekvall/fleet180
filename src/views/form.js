@@ -192,7 +192,9 @@ ${cards}
   return page({
     title: `${vehicle.plate} – ${titles[code]}`,
     body,
-    links: [{ href: '/', text: i18n.t(code, 'allVehicles') }],
+    // No navigation: a driver reached this page from a QR code on one
+    // vehicle and should see that vehicle's form and nothing else.
+    links: preview ? [{ href: '/admin/forms', text: 'Formulär' }] : [],
     lang: code,
     scripts: `<script>window.FLEET180_UI=${JSON.stringify(i18n.UI)};window.FLEET180_LANGS=${JSON.stringify(i18n.LANGS)};</script>
 <script src="/form.js"></script>`

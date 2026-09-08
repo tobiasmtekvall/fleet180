@@ -34,11 +34,17 @@ const FAVICON =
 function navbar(links) {
   const items = (links || [])
     .map(l => `<a href="${esc(l.href)}">${esc(l.text)}</a>`).join('');
+  // With no links the page is a driver's sandbox: the brand is not a way
+  // back to the fleet list, because there is no way back.
+  const brand = items
+    ? `<a class="brand" href="/">`
+    : `<div class="brand">`;
+  const brandEnd = items ? '</a>' : '</div>';
   return `<div class="navbar">
-  <a class="brand" href="/">
+  ${brand}
     <div class="brand-mark"><span></span></div>
     <div class="brand-text">FLEET<em>180</em></div>
-  </a>
+  ${brandEnd}
   <div class="op-badge">instabox</div>
   <div class="navlinks">${items}</div>
 </div>`;

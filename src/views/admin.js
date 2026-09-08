@@ -16,6 +16,7 @@ const TABS = [
   { href: '/admin/vehicles', text: 'Fordon', key: 'vehicles' },
   { href: '/admin/forms', text: 'Formulär', key: 'forms' },
   { href: '/admin/drivers', text: 'Förare', key: 'drivers' },
+  { href: '/admin/stats', text: 'Statistik', key: 'stats' },
   { href: '/admin/daily-summary', text: 'Dagsmejl', key: 'mail' }
 ];
 
@@ -54,7 +55,8 @@ function adminListPage({ rows, total, filters, limit, offset, vehicles }) {
 
   const body = rows.length ? rows.map(r => `<tr>
       <td class="mono">${esc(fmtDateTime(r.submitted_at))}</td>
-      <td class="mono" style="font-weight:700">${esc(r.plate)}</td>
+      <td class="mono" style="font-weight:700"><a href="/admin?plate=${esc(r.plate)}"
+          title="Bara ${esc(r.plate)}">${esc(r.plate)}</a></td>
       <td>${esc(r.driver_name || '—')}</td>
       <td>${esc(r.route || '—')}</td>
       <td class="mono">${esc(r.odometer || '—')}</td>
@@ -63,10 +65,18 @@ function adminListPage({ rows, total, filters, limit, offset, vehicles }) {
     </tr>`).join('\n')
     : `<tr><td colspan="7" class="muted" style="padding:20px">Inga kontroller matchar filtret.</td></tr>`;
 
+  // Ten at a time, newest first, with the window spelled out -- "11-20 av
+  // 63" tells you where you are in a way that two bare arrows do not.
+  const from = total ? offset + 1 : 0;
+  const to = Math.min(offset + limit, total);
   const prev = offset > 0
-    ? `<a class="btn btn-ghost" href="/admin${qs({ ...filters, offset: Math.max(0, offset - limit) })}">← Föregående</a>` : '';
+    ? `<a class="btn btn-ghost" href="/admin${qs({ ...filters, offset: Math.max(0, offset - limit) })}">← Senare</a>`
+    : '<span class="btn btn-ghost" style="opacity:.4;cursor:default">← Senare</span>';
   const next = offset + limit < total
-    ? `<a class="btn btn-ghost" href="/admin${qs({ ...filters, offset: offset + limit })}">Nästa →</a>` : '';
+    ? `<a class="btn btn-ghost" href="/admin${qs({ ...filters, offset: offset + limit })}">Tidigare →</a>`
+    : '<span class="btn btn-ghost" style="opacity:.4;cursor:default">Tidigare →</span>';
+  const where = `<span class="muted">${total ? `${from}–${to} av ${total}` : 'inga träffar'}${
+    filters.plate ? ' för ' + esc(filters.plate) : ''}</span>`;
 
   const html = `  <div class="page-head">
     <h1>Administration</h1>
@@ -97,7 +107,9 @@ ${body}
     </table>
   </div>
 
-  <div class="actions" style="justify-content:space-between">${prev || '<span></span>'}${next || '<span></span>'}</div>`;
+  <div class="actions" style="justify-content:space-between;align-items:center">
+    ${prev}${where}${next}
+  </div>`;
 
   return page({ title: 'Administration – säkerhetskontroller', body: html, links: LINKS });
 }
@@ -142,9 +154,12 @@ ${rows}
     </table></div>
   </div>
 
-  <div class="actions no-print">
-    <button class="btn btn-secondary" type="button" onclick="window.print()">Skriv ut / PDF</button>
-    <a class="btn btn-primary" href="/admin">Tillbaka till listan</a>
+  <div class="actions no-print" style="justify-content:space-between">
+    <a class="btn btn-danger" href="/admin/s/${esc(s.id)}/delete">Ta bort kontrollen</a>
+    <span>
+      <button class="btn btn-secondary" type="button" onclick="window.print()">Skriv ut / PDF</button>
+      <a class="btn btn-primary" href="/admin?plate=${esc(s.plate)}">Tillbaka till ${esc(s.plate)}</a>
+    </span>
   </div>`;
 
   return page({ title: `Kontroll ${s.id} – ${s.plate}`, body: html, links: LINKS });
@@ -425,6 +440,38 @@ ${rows || '<tr><td class="muted" style="padding:20px">Inga frågor ännu – lä
   return page({ title: `${form.title} – formulär`, body: html, links: LINKS });
 }
 
+/**
+ * Deleting a check is irreversible and takes its photos with it, so it gets
+ * its own page rather than a button that fires on one stray click.
+ */
+function adminDeletePage({ s }) {
+  const html = `  <div class="page-head">
+    <h1>Ta bort kontroll #${esc(s.id)}?</h1>
+    <div class="plate">${esc(s.plate)}</div>
+  </div>
+${nav('checks')}
+
+  <div class="card">
+    <div class="card-header">Det här försvinner</div>
+    <div class="card-body">
+      <table class="kv">
+        <tr><td>Fordon</td><td>${esc(s.plate)}</td></tr>
+        <tr><td>Förare</td><td>${esc(s.driver_name || '—')}</td></tr>
+        <tr><td>Rutt</td><td>${esc(s.route || '—')}</td></tr>
+        <tr><td>Tidpunkt</td><td>${esc(fmtDateTime(s.submitted_at))}</td></tr>
+        <tr><td>Foton</td><td>${esc((s.photos || []).length)}</td></tr>
+      </table>
+      <p class="lede" style="margin-top:14px">Kontrollen och dess foton raderas permanent.
+         Det går inte att ångra, och statistiken räknas om utan den.</p>
+      <form method="post" action="/admin/s/${esc(s.id)}/delete" class="actions" style="justify-content:flex-start">
+        <button class="btn btn-danger" type="submit">Ja, ta bort</button>
+        <a class="btn btn-ghost" href="/admin/s/${esc(s.id)}">Avbryt</a>
+      </form>
+    </div>
+  </div>`;
+  return page({ title: `Ta bort kontroll ${s.id}`, body: html, links: LINKS });
+}
+
 function adminDriversPage({ drivers, message, lastSync }) {
   const rows = drivers.length ? drivers.map(d => `<tr>
       <td>${esc(d.name)}</td>
@@ -463,6 +510,7 @@ ${rows}
 }
 
 module.exports = {
+  nav: nav,
   adminListPage, adminDetailPage, adminVehiclesPage,
-  adminFormsPage, adminFormEditorPage, adminDriversPage
+  adminFormsPage, adminFormEditorPage, adminDriversPage, adminDeletePage
 };

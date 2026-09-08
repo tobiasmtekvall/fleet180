@@ -70,12 +70,11 @@ ${answerRows(submission, fallbackFields, code)}
 
   <div class="actions no-print">
     <button type="button" class="btn btn-secondary" onclick="window.print()">${esc(i18n.t(code, 'print'))}</button>
-    <a class="btn btn-ghost" href="/v/${esc(submission.plate)}${q}">${esc(i18n.t(code, 'newCheck'))} ${esc(submission.plate)}</a>
-    <a class="btn btn-primary" href="/">${esc(i18n.t(code, 'allVehicles'))}</a>
+    <a class="btn btn-primary" href="/v/${esc(submission.plate)}${q}">${esc(i18n.t(code, 'newCheck'))} ${esc(submission.plate)}</a>
   </div>`;
 
   return page({ title: `${i18n.t(code, 'receiptNo')} ${submission.id} – ${submission.plate}`, body,
-    lang: code, links: [{ href: '/', text: i18n.t(code, 'allVehicles') }] });
+    lang: code, links: [] });
 }
 
 module.exports = { receiptPage, answerRows };

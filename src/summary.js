@@ -8,6 +8,7 @@
  */
 
 const { isAnswerable, isAlerting, formatAnswer } = require('./fields');
+const { normName } = require('./stats');
 
 const STOCKHOLM = 'Europe/Stockholm';
 
@@ -37,7 +38,7 @@ function localHour(d = new Date()) {
  * `fallback` is the default form's questions, used for checks submitted
  * before the form editor existed and therefore carrying no snapshot.
  */
-function buildDay({ date, submissions, vehicles, fallback = [] }) {
+function buildDay({ date, submissions, vehicles, fallback = [], assignments = [] }) {
   const checks = [];
   const issues = [];
 
@@ -81,19 +82,51 @@ function buildDay({ date, submissions, vehicles, fallback = [] }) {
   const missing = vehicles.filter(v => !checkedPlates.has(v.plate)).map(v => v.plate);
   const doubled = [...checkedPlates].filter(p => checks.filter(c => c.plate === p).length > 1);
 
+  /* The day's assignments, each answered: did that driver file a check?
+     Matched on the driver's name rather than the plate, because vans get
+     swapped in the yard and the question is whether the person did their
+     check, not whether they ended up in the van the planner picked. */
+  const byDriver = new Map();
+  for (const c of checks) {
+    const key = normName(c.driver);
+    if (!key) continue;
+    if (!byDriver.has(key)) byDriver.set(key, []);
+    byDriver.get(key).push(c);
+  }
+  const seen = new Map();
+  const assigned = assignments.map(a => {
+    const key = normName(a.driver);
+    const filed = byDriver.get(key) || [];
+    const used = seen.get(key) || 0;
+    const check = filed[used] || null;
+    if (check) seen.set(key, used + 1);
+    return {
+      plate: a.plate, driver: a.driver, route: a.route || '', type: a.type || '',
+      done: Boolean(check),
+      checkedPlate: check ? check.plate : '',
+      time: check ? check.time : '',
+      flags: check ? check.flags.length : 0
+    };
+  });
+  const assignedDone = assigned.filter(a => a.done).length;
+
   return {
     date,
     checks,
     issues,
     missing,
     doubled,
+    assigned,
     counts: {
       checks: checks.length,
       vehicles: vehicles.length,
       checked: checkedPlates.size,
       missing: missing.length,
       issues: issues.length,
-      photos: checks.reduce((n, c) => n + c.photos, 0)
+      photos: checks.reduce((n, c) => n + c.photos, 0),
+      assigned: assigned.length,
+      assignedDone,
+      assignedMissing: assigned.length - assignedDone
     }
   };
 }
@@ -126,6 +159,26 @@ function renderHtml(day, baseUrl) {
       </tr>`).join('')
     : `<tr><td colspan="5" style="padding:10px;color:#6c757d">Ingen kontroll inskickad.</td></tr>`;
 
+  const assignedRows = (day.assigned || []).length
+    ? day.assigned.map(a => `<tr>
+        <td style="padding:5px 10px;border-bottom:1px solid #eee;white-space:nowrap"><strong>${esc(a.plate)}</strong></td>
+        <td style="padding:5px 10px;border-bottom:1px solid #eee">${esc(a.driver)}</td>
+        <td style="padding:5px 10px;border-bottom:1px solid #eee">${esc(a.route || '—')}</td>
+        <td style="padding:5px 10px;border-bottom:1px solid #eee;white-space:nowrap">${a.done
+          ? `<span style="color:#256b38">✓ ${esc(a.time)}</span>` +
+            (a.checkedPlate && a.checkedPlate !== a.plate ? ` <span style="color:#6c757d">(${esc(a.checkedPlate)})</span>` : '')
+          : '<span style="color:#a33">ingen kontroll</span>'}</td>
+      </tr>`).join('')
+    : '';
+
+  const assignedBlock = (day.assigned || []).length ? `
+  <h2 style="font-size:16px;margin:22px 0 8px">Dagens tilldelning
+    <span style="font-weight:400;color:#6c757d;font-size:13px">
+      – ${esc(day.counts.assignedDone)} av ${esc(day.counts.assigned)} har gjort sin kontroll</span></h2>
+  <table style="width:100%;border-collapse:collapse;font-size:14px;background:#fff;border:1px solid #e6e6e6">
+    ${assignedRows}
+  </table>` : '';
+
   return `<!DOCTYPE html><html lang="sv"><body style="margin:0;padding:0;background:#f4f5f7">
 <div style="max-width:680px;margin:0 auto;padding:20px;font-family:Helvetica,Arial,sans-serif;color:#212529">
   <p style="margin:0 0 4px;font-size:13px;color:#6c757d">Fleet 180 · säkerhetskontroll</p>
@@ -140,6 +193,8 @@ function renderHtml(day, baseUrl) {
     ${day.counts.missing ? `<br>Utan kontroll: <strong>${esc(day.missing.join(', '))}</strong>.` : ''}
     ${day.doubled.length ? `<br>Flera kontroller samma dag: ${esc(day.doubled.join(', '))}.` : ''}
   </p>
+
+  ${assignedBlock}
 
   <h2 style="font-size:16px;margin:22px 0 8px">Att åtgärda</h2>
   <table style="width:100%;border-collapse:collapse;font-size:14px;background:#fff;border:1px solid #e6e6e6">
@@ -165,6 +220,14 @@ function renderText(day) {
     `${day.counts.checks} kontroller från ${day.counts.checked} av ${day.counts.vehicles} fordon.`,
     ''
   ];
+  if ((day.assigned || []).length) {
+    lines.push(`TILLDELNING (${day.counts.assignedDone}/${day.counts.assigned} inlämnade):`);
+    for (const a of day.assigned) {
+      lines.push(`  ${a.plate}  ${a.driver}  ${a.route || '—'}  ` +
+        (a.done ? `OK ${a.time}` : 'INGEN KONTROLL'));
+    }
+    lines.push('');
+  }
   lines.push('ATT ÅTGÄRDA:');
   if (day.issues.length) {
     for (const i of day.issues) lines.push(`  ${i.plate}  ${i.question} -> ${i.answer}  (${i.driver} ${i.time})`);
@@ -181,7 +244,8 @@ function renderText(day) {
 }
 
 function subject(day) {
-  const parts = [`Fleet 180 ${day.date}: ${day.counts.checks} kontroller`];
+  const parts = [`Fleet 180 ${day.date}: ${day.counts.checks} kontroller` +
+    (day.counts.assigned ? ` (${day.counts.assignedDone}/${day.counts.assigned} tilldelade)` : '')];
   if (day.counts.issues) parts.push(`${day.counts.issues} att åtgärda`);
   if (day.counts.missing) parts.push(`${day.counts.missing} utan kontroll`);
   return parts.join(', ');

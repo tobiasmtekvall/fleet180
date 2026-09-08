@@ -248,3 +248,16 @@ footer{border-top:1px solid var(--border);padding:18px 24px;color:var(--muted);f
 .q-checks{display:flex;gap:12px;flex-wrap:wrap;padding:4px 0}
 .q-hint{font-size:12px;color:var(--muted);margin:4px 0 0;line-height:1.45}
 .q-extra textarea.form-control{height:auto;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:13px}
+
+/* ---------- Driver statistics ---------- */
+.rank{color:var(--muted);font-variant-numeric:tabular-nums;width:34px}
+.statbar{display:inline-block;width:90px;height:8px;border-radius:999px;background:#eef0f2;
+  overflow:hidden;vertical-align:middle;margin-right:8px}
+.statbar-fill{display:block;height:100%;background:var(--primary)}
+.statbar-fill.good{background:#3a9d5d}
+.statbar-fill.ok{background:#d8a13a}
+.statbar-fill.bad{background:#c3564f}
+.statbar-num{font-variant-numeric:tabular-nums;font-size:13px;color:var(--muted)}
+.good-text{color:#256b38}
+.ok-text{color:#8a6314}
+.bad-text{color:#a33}

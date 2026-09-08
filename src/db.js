@@ -1,5 +1,6 @@
 'use strict';
 
+const crypto = require('crypto');
 const { Pool } = require('pg');
 const seed = require('./seed');
 const { normalisePlate } = require('./plate');
@@ -304,8 +305,28 @@ ALTER TABLE submissions ADD COLUMN IF NOT EXISTS form_id    BIGINT;
 ALTER TABLE submissions ADD COLUMN IF NOT EXISTS form_title TEXT;
 ALTER TABLE submissions ADD COLUMN IF NOT EXISTS questions  JSONB;
 ALTER TABLE submissions ADD COLUMN IF NOT EXISTS lang       TEXT NOT NULL DEFAULT 'sv';
+-- Unguessable handle for the receipt. A driver scanning a QR code may read
+-- their own receipt and nobody else's, so the id alone is not enough.
+ALTER TABLE submissions ADD COLUMN IF NOT EXISTS public_key TEXT;
 CREATE INDEX IF NOT EXISTS submissions_plate_time_idx ON submissions (plate, submitted_at DESC);
 CREATE INDEX IF NOT EXISTS submissions_time_idx ON submissions (submitted_at DESC);
+
+-- Who was expected to check which vehicle, per day. Pushed from the Route
+-- Suite's assigner; this app never decides an assignment itself.
+CREATE TABLE IF NOT EXISTS assignments (
+  id          BIGSERIAL PRIMARY KEY,
+  date        DATE    NOT NULL,
+  plate       TEXT    NOT NULL,
+  driver      TEXT    NOT NULL,
+  route       TEXT    NOT NULL DEFAULT '',
+  type        TEXT    NOT NULL DEFAULT '',
+  fleet       TEXT    NOT NULL DEFAULT 'box',
+  source_at   TIMESTAMPTZ,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (date, plate, driver)
+);
+CREATE INDEX IF NOT EXISTS assignments_date_idx ON assignments (date DESC);
+CREATE INDEX IF NOT EXISTS assignments_driver_idx ON assignments (driver);
 
 CREATE TABLE IF NOT EXISTS photos (
   id             BIGSERIAL PRIMARY KEY,
@@ -685,14 +706,15 @@ async function saveSubmission({
     const res = await client.query(
       `INSERT INTO submissions
          (plate, owner, form_key, form_id, form_title, driver_name, route, odometer,
-          answers, questions, photo_count, user_agent, client_ip, lang)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
-       RETURNING id, submitted_at`,
+          answers, questions, photo_count, user_agent, client_ip, lang, public_key)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+       RETURNING id, submitted_at, public_key`,
       [
         plate, owner || '', form.key, form.id, form.title,
         roles.driver || null, roles.route || null, roles.odometer || null,
         JSON.stringify(answers), JSON.stringify(questions),
-        photos.length, userAgent || null, clientIp || null, lang || 'sv'
+        photos.length, userAgent || null, clientIp || null, lang || 'sv',
+        crypto.randomBytes(9).toString('base64url')
       ]
     );
     const id = res.rows[0].id;
@@ -703,7 +725,7 @@ async function saveSubmission({
         [id, p.field, p.label || null, p.filename || null, p.mime, p.buffer, p.buffer.length]);
     }
     await client.query('COMMIT');
-    return { id: String(id), submittedAt: res.rows[0].submitted_at };
+    return { id: String(id), submittedAt: res.rows[0].submitted_at, key: res.rows[0].public_key };
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
     throw err;
@@ -861,6 +883,73 @@ async function photoIdsFor(submissionIds) {
   return out;
 }
 
+
+/* ------------------------------------------------------------------ *
+ * Assignments                                                         *
+ * ------------------------------------------------------------------ */
+
+/**
+ * Replace the assignments for the days covered by this push.
+ *
+ * Scoped by day rather than merged: the assigner is re-run and its answer
+ * for a day supersedes the previous one, so a route that moved to another
+ * driver must not leave the old pairing behind and double-count.
+ */
+async function replaceAssignments(rows) {
+  const dates = [...new Set(rows.map(r => r.date))];
+  if (!dates.length) return { days: 0, rows: 0 };
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query('DELETE FROM assignments WHERE date = ANY($1::date[])', [dates]);
+    let n = 0;
+    for (const r of rows) {
+      const res = await client.query(
+        `INSERT INTO assignments (date, plate, driver, route, type, fleet, source_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7)
+         ON CONFLICT (date, plate, driver) DO NOTHING`,
+        [r.date, r.plate, r.driver, r.route || '', r.type || '', r.fleet || 'box',
+         r.sourceAt || null]);
+      n += res.rowCount;
+    }
+    await client.query('COMMIT');
+    return { days: dates.length, rows: n, dates: dates.sort() };
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+async function assignmentsBetween(from, to) {
+  const r = await pool.query(
+    `SELECT to_char(date, 'YYYY-MM-DD') AS date, plate, driver, route, type, fleet
+       FROM assignments WHERE date >= $1::date AND date <= $2::date
+      ORDER BY date, route, plate`, [from, to]);
+  return r.rows;
+}
+
+async function assignmentRange() {
+  const r = await pool.query(
+    `SELECT to_char(MIN(date),'YYYY-MM-DD') AS first,
+            to_char(MAX(date),'YYYY-MM-DD') AS last, COUNT(*)::int AS n
+       FROM assignments`);
+  return r.rows[0];
+}
+
+/* ------------------------------------------------------------------ *
+ * Deleting a check                                                    *
+ * ------------------------------------------------------------------ */
+
+/** Photos go with it (ON DELETE CASCADE); nothing else references a check. */
+async function deleteSubmission(id) {
+  if (!/^\d+$/.test(String(id))) return null;
+  const r = await pool.query(
+    'DELETE FROM submissions WHERE id = $1 RETURNING id, plate, driver_name, submitted_at', [id]);
+  return r.rows[0] || null;
+}
+
 module.exports = {
   init,
   listVehicles, getVehicle, getVehicleById, createVehicle, updateVehicle,
@@ -869,5 +958,6 @@ module.exports = {
   updateForm, deleteForm, addField, getField, updateField, deleteField, moveField,
   saveSubmission, listSubmissions, getSubmission, getPhoto, latestPerVehicle,
   listDrivers, replaceDrivers, claimJob, jobState, submissionsBetween, photoIdsFor,
+  replaceAssignments, assignmentsBetween, assignmentRange, deleteSubmission,
   get pool() { return pool; }
 };

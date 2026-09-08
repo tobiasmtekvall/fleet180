@@ -19,9 +19,12 @@ const { formPage } = require('./views/form');
 const { receiptPage } = require('./views/receipt');
 const {
   adminListPage, adminDetailPage, adminVehiclesPage,
-  adminFormsPage, adminFormEditorPage, adminDriversPage
+  adminFormsPage, adminFormEditorPage, adminDriversPage, adminDeletePage,
+  nav: adminNav
 } = require('./views/admin');
 const { qrPage } = require('./views/qr');
+const { statsPage } = require('./views/stats');
+const { buildDriverStats } = require('./stats');
 const summaryLib = require('./summary');
 const mail = require('./mail');
 const { page, esc, fmtDateTime } = require('./views/layout');
@@ -75,16 +78,22 @@ function wantsJson(req) {
   return (req.get('accept') || '').includes('application/json');
 }
 
-function errorPage(res, status, heading, text) {
+/**
+ * `back` is the only way out of an error page, and it is deliberately
+ * absent for a driver: an error must not become a door to the fleet list.
+ */
+function errorPage(res, status, heading, text, back = null) {
   res.status(status).send(page({
     title: heading,
-    links: [{ href: '/', text: 'Fordon' }],
+    links: back ? [{ href: back.href, text: back.text }] : [],
     body: `<div class="page-head"><h1>${esc(heading)}</h1></div>
-           <p class="lede">${esc(text)}</p>
-           <div class="actions" style="justify-content:flex-start">
-             <a class="btn btn-primary" href="/">Till fordonslistan</a></div>`
+           <p class="lede">${esc(text)}</p>` +
+      (back ? `<div class="actions" style="justify-content:flex-start">
+             <a class="btn btn-primary" href="${esc(back.href)}">${esc(back.text)}</a></div>` : '')
   }));
 }
+
+const TO_ADMIN = { href: '/admin', text: 'Till administrationen' };
 
 /**
  * Live lists a dropdown can be built from. Only fetched when a question
@@ -117,7 +126,14 @@ const FAVICON = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">' +
 app.get('/favicon.ico', (req, res) =>
   res.type('image/svg+xml').set('Cache-Control', 'public, max-age=86400').send(FAVICON));
 
-app.get('/', async (req, res, next) => {
+/**
+ * A driver scanning a QR code must land on that vehicle's form and reach
+ * nothing else: not the fleet list, not the other vehicles' QR codes, not
+ * anyone else's check. So everything except `/v/<PLATE>`, its POST and the
+ * driver's own receipt sits behind the admin login. The vehicle list moved
+ * with it -- it is a management view, not a driver's landing page.
+ */
+app.get('/', adminAuth, async (req, res, next) => {
   try {
     const [vehicles, latest] = await Promise.all([db.listVehicles(), db.latestPerVehicle()]);
     res.send(indexPage({ vehicles, latest }));
@@ -203,7 +219,8 @@ app.post('/v/:plate', upload, async (req, res, next) => {
       userAgent: (req.get('user-agent') || '').slice(0, 400),
       clientIp: req.ip, lang
     });
-    const redirect = `/kvitto/${saved.id}${lang === i18n.DEFAULT_LANG ? '' : '?lang=' + lang}`;
+    const redirect = `/kvitto/${saved.id}?k=${encodeURIComponent(saved.key)}` +
+      (lang === i18n.DEFAULT_LANG ? '' : '&lang=' + lang);
     if (wantsJson(req)) return res.json({ ok: true, id: saved.id, redirect });
     res.redirect(303, redirect);
   } catch (err) { next(err); }
@@ -213,6 +230,14 @@ app.get('/kvitto/:id', async (req, res, next) => {
   try {
     const s = await db.getSubmission(req.params.id);
     if (!s) return errorPage(res, 404, 'Kvittot finns inte', 'Kontrollen kunde inte hittas.');
+    // The receipt is the driver's own, reachable only with the key handed
+    // out at submit -- otherwise counting upwards from /kvitto/1 would walk
+    // through every check in the fleet. Admins read them under /admin.
+    const key = String(req.query.k || '');
+    if (!s.public_key || key !== s.public_key) {
+      return errorPage(res, 404, 'Kvittot finns inte',
+        'Länken saknar sin nyckel. Öppna kvittot från bekräftelsen du fick när du skickade in kontrollen.');
+    }
     res.send(receiptPage({
       submission: s,
       fallbackFields: await fallbackFields(),
@@ -227,7 +252,7 @@ app.get('/kvitto/:id', async (req, res, next) => {
 
 const QR_OPTS = { errorCorrectionLevel: 'M', margin: 1, width: 600, color: { dark: '#12324f', light: '#ffffff' } };
 
-app.get('/qr', async (req, res, next) => {
+app.get('/qr', adminAuth, async (req, res, next) => {
   try {
     const here = requestOrigin(req);
     const configured = defaultBase(req);
@@ -249,7 +274,7 @@ app.get('/qr', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-app.get('/qr/:plate.png', async (req, res, next) => {
+app.get('/qr/:plate.png', adminAuth, async (req, res, next) => {
   try {
     const vehicle = await db.getVehicle(req.params.plate);
     if (!vehicle) return errorPage(res, 404, 'Okänt fordon', 'Reg.nr finns inte i appen.');
@@ -320,20 +345,74 @@ app.get('/api/drivers', apiAuth, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+/**
+ * Vehicle assignments from the Route Suite's assigner.
+ *
+ * The app never decides who drives what -- it only records what the suite
+ * decided, so that "did this driver check the vehicle they were given" has
+ * an answer. A push replaces the days it covers rather than merging: a
+ * re-run of the assigner supersedes its own earlier answer for that day.
+ */
+app.post('/api/assignments', apiAuth, async (req, res, next) => {
+  try {
+    const list = Array.isArray(req.body) ? req.body
+      : Array.isArray(req.body && req.body.assignments) ? req.body.assignments : null;
+    if (!list) {
+      return res.status(400).json({ ok: false,
+        error: 'Skicka {"assignments":[{"date":"YYYY-MM-DD","plate":"...","driver":"..."}]}.' });
+    }
+    const clean = [];
+    for (const a of list) {
+      const date = String((a && a.date) || '').slice(0, 10);
+      const plate = normalisePlate(a && a.plate);
+      const driver = String((a && a.driver) || '').trim().slice(0, 200);
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !plate || !driver) continue;
+      clean.push({
+        date, plate, driver,
+        route: String(a.route || '').slice(0, 60),
+        type: String(a.type || '').slice(0, 40),
+        fleet: a.fleet === 'home' ? 'home' : 'box',
+        sourceAt: a.sourceAt || null
+      });
+    }
+    if (!clean.length) {
+      return res.status(400).json({ ok: false, error: 'Inga giltiga rader i listan.' });
+    }
+    const result = await db.replaceAssignments(clean);
+    console.log(`[api] assignments: ${result.rows} rader över ${result.days} dagar ` +
+      `(${result.dates[0]} – ${result.dates[result.dates.length - 1]})`);
+    res.json({ ok: true, ...result });
+  } catch (err) { next(err); }
+});
+
+app.get('/api/assignments', apiAuth, async (req, res, next) => {
+  try {
+    const day = s => (/^\d{4}-\d{2}-\d{2}$/.test(String(s || '')) ? String(s) : '');
+    const to = day(req.query.to) || summaryLib.dayKey();
+    const from = day(req.query.from) || to;
+    res.json({ ok: true, from, to, assignments: await db.assignmentsBetween(from, to) });
+  } catch (err) { next(err); }
+});
+
 /** Everything the extension needs to mirror a span of days. */
 app.get('/api/checks', apiAuth, async (req, res, next) => {
   try {
     const day = s => (/^\d{4}-\d{2}-\d{2}$/.test(String(s || '')) ? String(s) : '');
     const to = day(req.query.to) || summaryLib.dayKey();
     const from = day(req.query.from) || to;
-    const [rows, vehicles, fallback] = await Promise.all([
-      db.submissionsBetween(from, to), db.listVehicles({ includeInactive: true }), fallbackFields()
+    const [rows, vehicles, fallback, allAssignments] = await Promise.all([
+      db.submissionsBetween(from, to), db.listVehicles({ includeInactive: true }), fallbackFields(),
+      db.assignmentsBetween(from, to)
     ]);
     const photos = await db.photoIdsFor(rows.map(r => Number(r.id)));
 
     // Grouped by day, already carrying the flags, so the extension renders
     // what the daily mail says rather than re-deriving the polarity itself.
+    // Days with assignments but no checks are included on purpose: a day
+    // where nobody filed anything is the one worth seeing, and building the
+    // list from submissions alone would silently drop it.
     const byDay = new Map();
+    for (const a of allAssignments) if (!byDay.has(a.date)) byDay.set(a.date, []);
     for (const row of rows) {
       const key = summaryLib.dayKey(row.submitted_at);
       if (!byDay.has(key)) byDay.set(key, []);
@@ -341,7 +420,10 @@ app.get('/api/checks', apiAuth, async (req, res, next) => {
     }
     const days = [];
     for (const [date, subs] of [...byDay.entries()].sort()) {
-      const built = summaryLib.buildDay({ date, submissions: subs, vehicles, fallback });
+      const built = summaryLib.buildDay({
+        date, submissions: subs, vehicles, fallback,
+        assignments: allAssignments.filter(a => a.date === date)
+      });
       built.checks = built.checks.map(c => ({
         ...c,
         photos: (photos.get(c.id) || []).map(p => ({
@@ -415,7 +497,7 @@ function flashOf(req) {
 app.get('/admin', async (req, res, next) => {
   try {
     const filters = readFilters(req);
-    const limit = 100;
+    const limit = 10;   // ten checks at a time, walked with the arrows
     const offset = Math.max(0, parseInt(req.query.offset, 10) || 0);
     const [{ rows, total }, vehicles] = await Promise.all([
       db.listSubmissions({ ...filters, limit, offset }),
@@ -428,8 +510,26 @@ app.get('/admin', async (req, res, next) => {
 app.get('/admin/s/:id', async (req, res, next) => {
   try {
     const s = await db.getSubmission(req.params.id);
-    if (!s) return errorPage(res, 404, 'Kontrollen finns inte', 'Ingen kontroll med det numret.');
+    if (!s) return errorPage(res, 404, 'Kontrollen finns inte', 'Ingen kontroll med det numret.', TO_ADMIN);
     res.send(adminDetailPage({ s, fallbackFields: await fallbackFields() }));
+  } catch (err) { next(err); }
+});
+
+app.get('/admin/s/:id/delete', async (req, res, next) => {
+  try {
+    const s = await db.getSubmission(req.params.id);
+    if (!s) return errorPage(res, 404, 'Kontrollen finns inte', 'Ingen kontroll med det numret.', TO_ADMIN);
+    res.send(adminDeletePage({ s }));
+  } catch (err) { next(err); }
+});
+
+app.post('/admin/s/:id/delete', async (req, res, next) => {
+  try {
+    const gone = await db.deleteSubmission(req.params.id);
+    if (!gone) return back(res, '/admin', 'Kontrollen fanns inte.');
+    console.log(`[admin] raderade kontroll ${gone.id} (${gone.plate}, ${gone.driver_name || 'okänd förare'})`);
+    back(res, `/admin?plate=${encodeURIComponent(gone.plate)}`,
+      `Kontrollen från ${fmtDateTime(gone.submitted_at)} för ${gone.plate} är borttagen.`);
   } catch (err) { next(err); }
 });
 
@@ -495,12 +595,13 @@ app.get('/admin/export.csv', async (req, res, next) => {
 
 /** One day's figures, shared by the mail, the preview page and the API. */
 async function summaryFor(date) {
-  const [submissions, vehicles, fallback] = await Promise.all([
+  const [submissions, vehicles, fallback, assignments] = await Promise.all([
     db.submissionsBetween(date, date),
     db.listVehicles(),
-    fallbackFields()
+    fallbackFields(),
+    db.assignmentsBetween(date, date)
   ]);
-  return summaryLib.buildDay({ date, submissions, vehicles, fallback });
+  return summaryLib.buildDay({ date, submissions, vehicles, fallback, assignments });
 }
 
 async function sendDailySummary(date, { force = false } = {}) {
@@ -584,6 +685,54 @@ app.post('/admin/daily-summary/send', async (req, res, next) => {
     const result = await sendDailySummary(date, { force: true });
     back(res, `/admin/daily-summary?date=${date}`,
       result.sent ? `Mejlet skickat till ${result.to}.` : `Inte skickat: ${result.reason}`);
+  } catch (err) { next(err); }
+});
+
+
+/* ---------------------------- statistics -------------------------- */
+
+/**
+ * The period defaults to everything the assignments cover, because a
+ * fixed "last 30 days" would show an empty page for weeks after the
+ * first sync and look broken rather than young.
+ */
+async function statsFor(req) {
+  const day = s => (/^\d{4}-\d{2}-\d{2}$/.test(String(s || '')) ? String(s) : '');
+  const range = await db.assignmentRange();
+  const to = day(req.query.to) || range.last || summaryLib.dayKey();
+  const from = day(req.query.from) || range.first || to;
+
+  const [assignments, submissions, fallback] = await Promise.all([
+    db.assignmentsBetween(from, to),
+    db.submissionsBetween(from, to),
+    fallbackFields()
+  ]);
+  const withDay = submissions.map(s => ({ ...s, day: summaryLib.dayKey(s.submitted_at) }));
+  return { from, to, range, stats: buildDriverStats({ assignments, submissions: withDay, fallback }) };
+}
+
+app.get('/admin/stats', async (req, res, next) => {
+  try {
+    const { from, to, range, stats } = await statsFor(req);
+    res.send(statsPage({ stats, from, to, range, message: flashOf(req), nav: adminNav('stats') }));
+  } catch (err) { next(err); }
+});
+
+app.get('/admin/stats.csv', async (req, res, next) => {
+  try {
+    const { from, to, stats } = await statsFor(req);
+    const header = ['Förare', 'Tilldelade', 'Gjorda', 'Missade', 'Extra', 'Genomförande',
+      'Omsorg', 'Kommentarsandel', 'Medianord', 'Rapporterade brister', 'Foton', 'Poäng', 'Not'];
+    const num = x => (x === null || x === undefined ? '' : String(Math.round(x * 1000) / 10).replace('.', ','));
+    const lines = [header.map(csvCell).join(';')];
+    for (const r of stats.rows) {
+      lines.push([r.name, r.expected, r.done, r.missed, r.extra, num(r.completion),
+        num(r.care), num(r.commentRate), r.medianWords ?? '', r.flags, r.photos,
+        num(r.score), r.note].map(csvCell).join(';'));
+    }
+    res.type('text/csv; charset=utf-8')
+      .set('Content-Disposition', `attachment; filename="forarstatistik-${from}_${to}.csv"`)
+      .send('\ufeff' + lines.join('\r\n'));
   } catch (err) { next(err); }
 });
 
@@ -729,7 +878,7 @@ app.post('/admin/forms', async (req, res, next) => {
 app.get('/admin/forms/:id', async (req, res, next) => {
   try {
     const form = await db.getForm(req.params.id);
-    if (!form) return errorPage(res, 404, 'Formuläret finns inte', 'Inget formulär med det numret.');
+    if (!form) return errorPage(res, 404, 'Formuläret finns inte', 'Inget formulär med det numret.', { href: '/admin/forms', text: 'Till formulären' });
     const vehicles = await db.listVehicles({ includeInactive: true });
     res.send(adminFormEditorPage({
       form,
@@ -742,7 +891,7 @@ app.get('/admin/forms/:id', async (req, res, next) => {
 app.get('/admin/forms/:id/preview', async (req, res, next) => {
   try {
     const form = await db.getForm(req.params.id);
-    if (!form) return errorPage(res, 404, 'Formuläret finns inte', 'Inget formulär med det numret.');
+    if (!form) return errorPage(res, 404, 'Formuläret finns inte', 'Inget formulär med det numret.', { href: '/admin/forms', text: 'Till formulären' });
     res.send(formPage({
       vehicle: { plate: 'EXEMPEL' }, form, preview: true,
       lang: i18n.langOf(req.query.lang), sources: await formSources(form)
