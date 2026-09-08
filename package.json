@@ -1,0 +1,20 @@
+{
+  "name": "okq8-sakerhetskontroll",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Sakerhetskontroll B-bil (Jonkoping) - one form per OKQ8 vehicle, submissions stored in Postgres, printable QR codes.",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "qr": "node scripts/generate-qr.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "multer": "^2.0.1",
+    "pg": "^8.13.1",
+    "qrcode": "^1.5.4"
+  }
+}
