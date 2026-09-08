@@ -1,21 +1,36 @@
 'use strict';
 
 const { page, esc, fmtDateTime } = require('./layout');
-const { FORM_TITLE, FIELDS } = require('../form-def');
+const { formatAnswer } = require('../fields');
 
-function receiptPage({ submission }) {
+/**
+ * A submission is rendered from the questions it was answered against --
+ * `questions`, snapshotted at submit time -- not from today's form. A
+ * question deleted last week still shows on last month's check. Rows
+ * written before the form editor existed have no snapshot; those fall
+ * back to the form passed in.
+ */
+function answerRows(submission, fallbackFields) {
+  const questions = submission.questions && submission.questions.length
+    ? submission.questions
+    : (fallbackFields || []);
   const answers = submission.answers || {};
-  const rows = FIELDS.map(f => {
-    let a;
-    if (f.kind === 'file') {
-      const n = (submission.photos || []).filter(p => p.field === f.name).length;
-      a = n ? `${n} foto${n > 1 ? 'n' : ''}` : '—';
-    } else {
-      a = (answers[f.name] || '').trim() || '—';
-    }
-    return `<tr><td>${esc(f.label)}</td><td>${esc(a)}</td></tr>`;
-  }).join('\n');
 
+  return questions.map(q => {
+    let text;
+    if (q.kind === 'photo') {
+      const n = (submission.photos || []).filter(p => p.field === q.name).length;
+      text = n ? `${n} foto${n > 1 ? 'n' : ''}` : '—';
+    } else if (q.kind === 'info') {
+      return `<tr><td colspan="2" class="muted">${esc(q.label)}</td></tr>`;
+    } else {
+      text = formatAnswer(q, answers[q.name]);
+    }
+    return `<tr><td>${esc(q.label)}</td><td>${esc(text)}</td></tr>`;
+  }).join('\n');
+}
+
+function receiptPage({ submission, fallbackFields }) {
   const body = `  <div class="page-head">
     <h1>Kontroll registrerad</h1>
     <div class="plate">${esc(submission.plate)}</div>
@@ -26,7 +41,7 @@ function receiptPage({ submission }) {
     <p class="muted" style="margin:0">
       Kvitto nr <strong>${esc(submission.id)}</strong> ·
       ${esc(fmtDateTime(submission.submitted_at))} ·
-      ${esc(FORM_TITLE)}
+      ${esc(submission.form_title || submission.form_key)}
     </p>
   </div>
 
@@ -34,7 +49,7 @@ function receiptPage({ submission }) {
     <div class="card-header">Ifylld kontroll<span class="step-tag">${esc(submission.plate)}</span></div>
     <div class="card-body">
       <table class="kv">
-${rows}
+${answerRows(submission, fallbackFields)}
       </table>
     </div>
   </div>
@@ -49,4 +64,4 @@ ${rows}
     links: [{ href: '/', text: 'Alla fordon' }] });
 }
 
-module.exports = { receiptPage };
+module.exports = { receiptPage, answerRows };

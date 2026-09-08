@@ -5,3 +5,6 @@ qr-out/
 !.env.example
 npm-debug.log*
 .DS_Store
+
+# Obsoleta filer som ersattes 2026-09-08; ta bort mappen i Utforskaren.
+_to_delete/

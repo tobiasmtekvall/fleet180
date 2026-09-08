@@ -1,11 +1,36 @@
 'use strict';
 
 const { page, esc } = require('./layout');
-const { FORM_TITLE } = require('../form-def');
 
-function qrPage({ cards, baseUrl }) {
+function warning({ here, configured, forced }) {
+  if (forced) {
+    return `<div class="warn no-print">
+      <strong>Koderna nedan pekar på ${esc(here)}</strong> – adressen du surfar på.
+      Miljövariabeln <span class="mono">PUBLIC_BASE_URL</span> säger fortfarande
+      <span class="mono">${esc(configured)}</span>. Ta bort eller rätta den variabeln i
+      Railway, annars gäller den igen nästa gång sidan öppnas utan
+      <span class="mono">?base=here</span>.
+    </div>`;
+  }
+  return `<div class="warn no-print">
+    <strong>Kontrollera adressen innan du skriver ut.</strong>
+    Koderna nedan pekar på <span class="mono">${esc(configured)}</span>, men du läser
+    den här sidan på <span class="mono">${esc(here)}</span>. Stämmer inte den första
+    adressen leder de utskrivna koderna ingenstans.
+    <div style="margin-top:10px">
+      <a class="btn btn-primary" href="/qr?base=here">Använd ${esc(here)} i stället</a>
+    </div>
+    <p style="margin:10px 0 0">
+      Permanent rättning: Railway → appens service → <em>Variables</em> → ta bort
+      <span class="mono">PUBLIC_BASE_URL</span> (då används adressen anropet kom in på),
+      eller sätt den till rätt adress.
+    </p>
+  </div>`;
+}
+
+function qrPage({ cards, baseUrl, mismatch }) {
   const grid = cards.map(c => `<div class="qr-card">
-      <div class="qr-title">${esc(FORM_TITLE)}</div>
+      <div class="qr-title">Säkerhetskontroll</div>
       <img src="${c.dataUrl}" alt="QR-kod ${esc(c.plate)}">
       <div class="qr-plate">${esc(c.plate)}</div>
       <div class="qr-sub">${esc(c.url)}</div>
@@ -14,6 +39,7 @@ function qrPage({ cards, baseUrl }) {
   const body = `  <div class="page-head">
     <h1>QR-koder</h1>
   </div>
+${mismatch ? warning(mismatch) : ''}
   <p class="lede no-print">
     En kod per OKQ8-fordon. Skanning öppnar säkerhetskontrollen för just det fordonet.
     Skriv ut sidan, klipp ut och sätt koden i respektive hytt.<br>

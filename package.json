@@ -1,8 +1,8 @@
 {
-  "name": "okq8-sakerhetskontroll",
+  "name": "fleet180-sakerhetskontroll",
   "version": "1.0.0",
   "private": true,
-  "description": "Sakerhetskontroll B-bil (Jonkoping) - one form per OKQ8 vehicle, submissions stored in Postgres, printable QR codes.",
+  "description": "Sakerhetskontroll - one form per vehicle, editable forms and vehicles, submissions in Postgres, printable QR codes.",
   "engines": {
     "node": ">=20"
   },

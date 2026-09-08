@@ -1,4 +1,4 @@
-/* Fleet 360 look, carried over from the original
+/* The look, carried over from the original Fleet 360
    "(Jonkoping) Sakerhetskontroll B-bil" page. */
 :root{
   --text:#212529;
@@ -135,6 +135,9 @@ select.form-control{height:38px;padding:6px 10px}
 .chip{display:inline-block;border:1px solid var(--border);border-radius:999px;
   padding:1px 9px;font-size:12px;color:var(--muted)}
 .chip-okq8{border-color:#b9c6d6;color:#375a80}
+/* Green for ours, plain outline for a rental, a bare dash for unset --
+   the same quiet convention the Route Suite uses in its Owner column. */
+.chip-own{border-color:#b7dfc2;background:#f3faf5;color:#256b38}
 .muted{color:var(--muted)}
 .filters{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:18px}
 .filters .f{display:flex;flex-direction:column;gap:4px}
@@ -170,3 +173,49 @@ footer{border-top:1px solid var(--border);padding:18px 24px;color:var(--muted);f
   .qr-grid{grid-template-columns:repeat(3,1fr)}
   .qr-card{border-color:#999}
 }
+
+/* Warning shown on /qr when the encoded address is not the one you
+   are browsing -- a stale PUBLIC_BASE_URL prints codes that go nowhere. */
+.warn{
+  border:1px solid #ffe08a;background:#fff9e6;border-radius:4px;
+  padding:14px 18px;margin:0 0 20px;font-size:15px;line-height:1.55;
+}
+.warn .mono{background:#fff;border:1px solid #f0dfae;border-radius:3px;padding:1px 5px}
+
+/* ---------- Ja / Nej / Annat ---------- */
+.choices{display:flex;gap:10px;flex-wrap:wrap}
+.choice{
+  display:inline-flex;align-items:center;gap:8px;margin:0;cursor:pointer;
+  border:1px solid var(--border);border-radius:999px;
+  padding:9px 18px;font-size:16px;background:#fff;min-height:44px;
+}
+.choice:hover{background:#f4f7fb;border-color:#b9c6d6}
+.choice input{width:18px;height:18px;margin:0;accent-color:var(--primary)}
+.choice:has(input:checked){border-color:var(--primary);background:#eef4fc;font-weight:600}
+.choice input:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
+.comment{display:none;margin-top:10px}
+.comment.open{display:block}
+.comment label{font-size:14px;color:var(--muted);margin-bottom:5px}
+.field-invalid .choices .choice{border-color:#e9a2a6}
+.info-field p{margin:0;padding:12px 14px;background:#f7f7f9;border-radius:6px;color:#444}
+
+/* ---------- Admin: vehicles and form editor ---------- */
+.admin-nav{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 20px}
+.admin-nav a{
+  text-decoration:none;border:1px solid var(--border);border-radius:999px;
+  padding:6px 14px;font-size:14px;color:var(--text);background:#fff;
+}
+.admin-nav a:hover{background:#f4f5f7}
+.admin-nav a.on{background:var(--primary);border-color:var(--primary);color:#fff}
+.row-form{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:0}
+.row-form .form-control{border-color:var(--border);height:34px;font-size:14px;width:auto}
+.row-form input[type="text"]{min-width:110px}
+.row-form .grow{flex:1 1 260px;min-width:180px}
+.btn-sm{font-size:13px;padding:5px 10px}
+.btn-danger{background:#fff;border-color:#e3b6b9;color:#a33}
+.btn-danger:hover{background:#fdf3f4}
+.check{display:inline-flex;align-items:center;gap:6px;font-size:13px;color:var(--muted);margin:0}
+.check input{width:16px;height:16px;margin:0}
+.stack{display:flex;flex-direction:column;gap:4px}
+.q-kind{font-size:12px;color:var(--muted);white-space:nowrap}
+.ok-msg{border:1px solid #bfe3c7;background:#f6fbf7;border-radius:4px;padding:10px 16px;margin-bottom:18px}

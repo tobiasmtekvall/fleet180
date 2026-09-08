@@ -28,7 +28,7 @@ function navbar(links) {
   return `<div class="navbar">
   <a class="brand" href="/">
     <div class="brand-mark"><span></span></div>
-    <div class="brand-text">FLEET<em>360</em></div>
+    <div class="brand-text">FLEET<em>180</em></div>
   </a>
   <div class="op-badge">instabox</div>
   <div class="navlinks">${items}</div>
@@ -52,7 +52,7 @@ ${navbar(links)}
 <div class="wrap">
 ${body}
 </div>
-<footer>© ${new Date().getFullYear()} - Fleet 360 · Säkerhetskontroll OKQ8-fordon</footer>
+<footer>© ${new Date().getFullYear()} - Fleet 180 · Säkerhetskontroll</footer>
 ${scripts}
 </body>
 </html>`;

@@ -1,13 +1,15 @@
 /* Klientlogik för säkerhetskontrollen.
    Bilder krymps i webbläsaren innan de skickas, så en mobilkamera på
    4-6 MB blir ~200-400 kB i databasen. Utan JavaScript fungerar
-   formuläret ändå - då postas filerna i originalstorlek. */
+   formuläret ändå - då postas filerna i originalstorlek och
+   kommentarsrutorna syns hela tiden. */
 (function () {
   'use strict';
 
   var MAX_EDGE = 1600;      // px, längsta sidan
   var JPEG_QUALITY = 0.82;
   var MAX_PER_FIELD = 6;
+  var COMMENT_CHOICES = { nej: true, annat: true };
 
   var form = document.getElementById('checkForm');
   if (!form) return;
@@ -15,6 +17,7 @@
   var submitBtn = document.getElementById('submitBtn');
   var store = {};           // fältnamn -> [{blob, name}]
 
+  function each(list, fn) { Array.prototype.forEach.call(list, fn); }
   function showNotice(msg) {
     notice.textContent = msg;
     notice.classList.add('show');
@@ -22,8 +25,35 @@
   }
   function hideNotice() { notice.classList.remove('show'); }
 
+  /* ---- Ja / Nej / Annat: kommentarsrutan följer valet ---- */
+  function commentBox(name) {
+    return form.querySelector('[data-comment-for="' + name + '"]');
+  }
+  function syncComment(name) {
+    var box = commentBox(name);
+    if (!box) return;
+    var checked = form.querySelector('input[name="' + name + '"]:checked');
+    var show = checked && COMMENT_CHOICES[checked.value];
+    box.classList.toggle('open', !!show);
+    var required = checked && checked.value === 'annat';
+    box.querySelector('input').classList.toggle('form-control', true);
+    box.querySelector('label').textContent = required ? 'Kommentar (obligatorisk)' : 'Kommentar';
+  }
+  each(form.querySelectorAll('[data-kind="yesno"]'), function (field) {
+    var name = field.dataset.name;
+    syncComment(name);
+    each(field.querySelectorAll('input[type="radio"]'), function (radio) {
+      radio.addEventListener('change', function () {
+        syncComment(name);
+        clearError(field);
+      });
+    });
+    var input = commentBox(name) && commentBox(name).querySelector('input');
+    if (input) input.addEventListener('input', function () { clearError(field); });
+  });
+
   /* ---- kamera / filväljare ---- */
-  Array.prototype.forEach.call(document.querySelectorAll('.camera-btn'), function (btn) {
+  each(document.querySelectorAll('.camera-btn'), function (btn) {
     var input = document.getElementById(btn.dataset.target);
     store[input.name] = [];
     btn.addEventListener('click', function () { input.click(); });
@@ -94,30 +124,63 @@
   }
 
   /* ---- validering ---- */
+  function setError(field, msg) {
+    field.classList.add('field-invalid');
+    var err = field.querySelector('.err');
+    if (err) { err.textContent = msg; err.classList.add('show'); }
+    var input = field.querySelector('input[type="text"]');
+    if (input && field.dataset.kind === 'text') input.classList.add('invalid');
+  }
+  function clearError(field) {
+    field.classList.remove('field-invalid');
+    var err = field.querySelector('.err');
+    if (err) err.classList.remove('show');
+    each(field.querySelectorAll('.invalid'), function (i) { i.classList.remove('invalid'); });
+  }
+
   function validate() {
     var firstBad = null;
-    Array.prototype.forEach.call(form.querySelectorAll('input[required]'), function (inp) {
-      var bad = !inp.value.trim();
-      inp.classList.toggle('invalid', bad);
-      var err = inp.parentNode.querySelector('.err');
-      if (err) err.classList.toggle('show', bad);
-      if (bad && !firstBad) firstBad = inp;
+    each(form.querySelectorAll('.field'), function (field) {
+      clearError(field);
+      var kind = field.dataset.kind;
+      if (kind === 'text') {
+        var input = field.querySelector('input[type="text"]');
+        if (input && input.hasAttribute('required') && !input.value.trim()) {
+          setError(field, 'Fältet är obligatoriskt.');
+          if (!firstBad) firstBad = field;
+        }
+      } else if (kind === 'yesno') {
+        var name = field.dataset.name;
+        var checked = form.querySelector('input[name="' + name + '"]:checked');
+        var isRequired = !!field.querySelector('input[data-required="1"]');
+        if (!checked) {
+          if (isRequired) {
+            setError(field, 'Välj Ja, Nej eller Annat.');
+            if (!firstBad) firstBad = field;
+          }
+        } else if (checked.value === 'annat') {
+          var box = commentBox(name);
+          var text = box ? box.querySelector('input').value.trim() : '';
+          if (!text) {
+            setError(field, 'Skriv en kommentar när du svarar Annat.');
+            if (!firstBad) firstBad = field;
+          }
+        }
+      }
     });
     if (firstBad) {
       firstBad.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      firstBad.focus({ preventScroll: true });
+      var focusable = firstBad.querySelector('input');
+      if (focusable) focusable.focus({ preventScroll: true });
       return false;
     }
     return true;
   }
 
-  Array.prototype.forEach.call(form.querySelectorAll('input[required]'), function (inp) {
+  each(form.querySelectorAll('input[type="text"]'), function (inp) {
     inp.addEventListener('input', function () {
-      if (inp.value.trim()) {
-        inp.classList.remove('invalid');
-        var err = inp.parentNode.querySelector('.err');
-        if (err) err.classList.remove('show');
-      }
+      var field = inp.closest('.field');
+      if (field && inp.value.trim()) clearError(field);
     });
   });
 
@@ -128,36 +191,35 @@
     if (!validate()) return;
 
     var fd = new FormData();
-    Array.prototype.forEach.call(form.querySelectorAll('input[type="text"]'), function (inp) {
+    each(form.querySelectorAll('input[type="text"]'), function (inp) {
       fd.append(inp.name, inp.value.trim());
+    });
+    each(form.querySelectorAll('input[type="radio"]:checked'), function (inp) {
+      fd.append(inp.name, inp.value);
     });
     Object.keys(store).forEach(function (field) {
       store[field].forEach(function (entry, i) {
-        fd.append(field, entry.blob, (field + '-' + (i + 1) + '.jpg'));
+        fd.append(field, entry.blob, field + '-' + (i + 1) + '.jpg');
       });
     });
 
     submitBtn.disabled = true;
     submitBtn.textContent = 'Skickar…';
 
-    fetch(form.action, {
-      method: 'POST',
-      body: fd,
-      headers: { 'Accept': 'application/json' }
-    }).then(function (r) {
-      return r.json().catch(function () { return { ok: false, error: 'Serverfel ' + r.status }; });
-    }).then(function (data) {
-      if (data && data.ok && data.redirect) {
-        window.location.href = data.redirect;
-        return;
-      }
-      throw new Error((data && data.error) || 'Okänt fel');
-    }).catch(function (err) {
-      submitBtn.disabled = false;
-      submitBtn.textContent = 'Bekräfta och skicka';
-      showNotice('Kunde inte skicka kontrollen: ' + err.message +
-        '. Kontrollera nätverket och försök igen.');
-    });
+    fetch(form.action, { method: 'POST', body: fd, headers: { 'Accept': 'application/json' } })
+      .then(function (r) {
+        return r.json().catch(function () { return { ok: false, error: 'Serverfel ' + r.status }; });
+      })
+      .then(function (data) {
+        if (data && data.ok && data.redirect) { window.location.href = data.redirect; return; }
+        throw new Error((data && data.error) || 'Okänt fel');
+      })
+      .catch(function (err) {
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Bekräfta och skicka';
+        showNotice('Kunde inte skicka kontrollen: ' + err.message +
+          '. Kontrollera nätverket och försök igen.');
+      });
   });
 
   document.getElementById('printBtn').addEventListener('click', function () { window.print(); });
@@ -165,9 +227,9 @@
   document.getElementById('clearBtn').addEventListener('click', function () {
     form.reset();
     Object.keys(store).forEach(function (k) { store[k] = []; });
-    Array.prototype.forEach.call(document.querySelectorAll('.thumbs'), function (t) { t.innerHTML = ''; });
-    Array.prototype.forEach.call(form.querySelectorAll('.invalid'), function (i) { i.classList.remove('invalid'); });
-    Array.prototype.forEach.call(form.querySelectorAll('.err.show'), function (i) { i.classList.remove('show'); });
+    each(document.querySelectorAll('.thumbs'), function (t) { t.innerHTML = ''; });
+    each(form.querySelectorAll('.field'), clearError);
+    each(form.querySelectorAll('[data-kind="yesno"]'), function (f) { syncComment(f.dataset.name); });
     hideNotice();
     window.scrollTo({ top: 0, behavior: 'smooth' });
   });
