@@ -357,6 +357,56 @@ async function seedIfEmpty(client) {
   }
 }
 
+
+/**
+ * Bring an existing database up to the current seed.
+ *
+ * seedIfEmpty only fires on a virgin database, which meant every seed
+ * improvement after the first deploy -- the dropdowns, the alert rules,
+ * the translations -- was written in code and never reached the live rows.
+ * This closes that gap once.
+ *
+ * Deliberately timid. A field is only touched when it still looks
+ * untouched: the Swedish wording must be unchanged (proof the admin has
+ * not rewritten the question) and each property is filled in only where it
+ * is still empty. Anything edited in /admin wins. It runs once, recorded in
+ * `jobs`, so removing a translation by hand does not see it reappear at the
+ * next restart.
+ */
+const SEED_UPGRADE_KEY = 'seed-upgrade-2026-09-08-dropdowns-i18n';
+
+async function upgradeSeededFields(client) {
+  const done = await client.query('SELECT 1 FROM jobs WHERE name = $1', [SEED_UPGRADE_KEY]);
+  if (done.rowCount) return null;
+
+  let fields = 0;
+  for (const f of seed.DEFAULT_FIELDS) {
+    const r = await client.query(
+      `UPDATE form_fields SET
+         kind     = CASE WHEN kind = 'text' AND $3 <> 'text' THEN $3 ELSE kind END,
+         options  = CASE WHEN options  = '[]'::jsonb THEN $4::jsonb ELSE options END,
+         source   = CASE WHEN source   = ''          THEN $5      ELSE source END,
+         alert_on = CASE WHEN alert_on = '[]'::jsonb THEN $6::jsonb ELSE alert_on END,
+         i18n     = CASE WHEN i18n     = '{}'::jsonb THEN $7::jsonb ELSE i18n END
+       WHERE name = $1 AND label = $2`,
+      [f.name, f.label, f.kind,
+       JSON.stringify(f.options || []), f.source || '',
+       JSON.stringify(f.alertOn || []), JSON.stringify(f.i18n || {})]);
+    fields += r.rowCount;
+  }
+
+  const titles = await client.query(
+    `UPDATE forms SET i18n = $1::jsonb WHERE title = $2 AND i18n = '{}'::jsonb`,
+    [JSON.stringify(seed.FORM_I18N || {}), seed.FORM_TITLE]);
+
+  await client.query(
+    `INSERT INTO jobs (name, last_run, note) VALUES ($1, now(), $2)
+     ON CONFLICT (name) DO NOTHING`,
+    [SEED_UPGRADE_KEY, `${fields} frågor, ${titles.rowCount} formulärtitlar`]);
+
+  return { fields, titles: titles.rowCount };
+}
+
 async function init() {
   pool = await connectWithRetry();
   await pool.query(SCHEMA);
@@ -364,7 +414,12 @@ async function init() {
   try {
     await client.query('BEGIN');
     await seedIfEmpty(client);
+    const upgraded = await upgradeSeededFields(client);
     await client.query('COMMIT');
+    if (upgraded && (upgraded.fields || upgraded.titles)) {
+      console.log(`[db] uppgraderade ${upgraded.fields} frågor och ${upgraded.titles} formulärtitlar ` +
+        'till aktuell mall (rullgardiner, larm, översättningar)');
+    }
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
     throw err;
