@@ -9,7 +9,7 @@
   var MAX_EDGE = 1600;      // px, längsta sidan
   var JPEG_QUALITY = 0.82;
   var MAX_PER_FIELD = 6;
-  var COMMENT_CHOICES = { nej: true, annat: true };
+  var COMMENT_FALLBACK = { nej: true, annat: true };
 
   var form = document.getElementById('checkForm') || document.getElementById('previewForm');
   if (!form) return;
@@ -69,11 +69,21 @@
   function commentBox(name) {
     return form.querySelector('[data-comment-for="' + name + '"]');
   }
+  /* Which answers open the comment box is decided per question by the
+     server (data-comment-on): "have you damaged the car?" wants the
+     description on Ja, "does the lighting work?" on Nej. */
+  function opensComment(name, value) {
+    var field = form.querySelector('[data-kind="yesno"][data-name="' + name + '"]');
+    var list = field && field.dataset.commentOn;
+    if (!list) return !!COMMENT_FALLBACK[value];
+    return list.split(' ').indexOf(value) > -1;
+  }
+
   function syncComment(name) {
     var box = commentBox(name);
     if (!box) return;
     var checked = form.querySelector('input[name="' + name + '"]:checked');
-    var show = checked && COMMENT_CHOICES[checked.value];
+    var show = checked && opensComment(name, checked.value);
     box.classList.toggle('open', !!show);
     var required = checked && checked.value === 'annat';
     box.querySelector('input').classList.toggle('form-control', true);

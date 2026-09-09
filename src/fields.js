@@ -31,8 +31,24 @@ const CHOICES = [
 ];
 const CHOICE_LABEL = Object.fromEntries(CHOICES.map(c => [c.value, c.label]));
 
-/** Comment box is offered for these choices; required only for "Annat". */
+/** Fallback for questions with no alert polarity of their own. */
 const COMMENT_CHOICES = new Set(['nej', 'annat']);
+
+/**
+ * Which answers open the comment box for this question.
+ *
+ * It follows the question's own polarity rather than a fixed Nej/Annat:
+ * "have you damaged the vehicle?" flags on Ja, and Ja is exactly where the
+ * driver needs to write what happened. Getting this wrong silently discards
+ * what they typed, which is worse than not asking.
+ */
+function commentChoices(field) {
+  const on = Array.isArray(field && field.alert_on) ? field.alert_on
+    : Array.isArray(field && field.alertOn) ? field.alertOn : [];
+  const set = new Set(on.length ? on : COMMENT_CHOICES);
+  set.add('annat');           // "Annat" always needs saying what
+  return set;
+}
 
 const ROLES = [
   { value: '',         label: '—' },
@@ -52,7 +68,7 @@ function readAnswer(field, body) {
     if (!choice && !comment) return null;
     return {
       choice: CHOICE_LABEL[choice] ? choice : '',
-      comment: COMMENT_CHOICES.has(choice) ? comment : ''
+      comment: commentChoices(field).has(choice) ? comment : ''
     };
   }
   return null; // photo and info carry no posted value
@@ -147,6 +163,6 @@ function optionsFor(field, sources) {
 }
 
 module.exports = {
-  KINDS, KIND_VALUES, KIND_LABEL, SOURCES, CHOICES, CHOICE_LABEL, COMMENT_CHOICES,
+  KINDS, KIND_VALUES, KIND_LABEL, SOURCES, CHOICES, CHOICE_LABEL, COMMENT_CHOICES, commentChoices,
   ROLES, readAnswer, answerProblem, formatAnswer, isAnswerable, isAlerting, optionsFor
 };

@@ -428,6 +428,75 @@ async function upgradeSeededFields(client) {
   return { fields, titles: titles.rowCount };
 }
 
+/**
+ * Add the three hand-back questions to forms that are already in the
+ * database, and renumber the section headings from "av 4" to "av 5".
+ *
+ * Same caution as the upgrade above: a form only counts as a standard form
+ * if its first question still reads exactly as the template's, and a
+ * question is only inserted where its key is free. Runs once, recorded in
+ * `jobs`, so a question deleted on purpose does not come back.
+ */
+const RETURN_UPGRADE_KEY = 'seed-return-questions-2026-09-09';
+
+async function addReturnQuestions(client) {
+  const done = await client.query('SELECT 1 FROM jobs WHERE name = $1', [RETURN_UPGRADE_KEY]);
+  if (done.rowCount) return null;
+
+  const anchor = seed.DEFAULT_FIELDS.find(f => f.role === 'odometer');
+  const forms = await client.query(
+    `SELECT DISTINCT form_id FROM form_fields WHERE name = $1 AND label = $2`,
+    [anchor.name, anchor.label]);
+
+  let inserted = 0, renamed = 0;
+  for (const { form_id: formId } of forms.rows) {
+    // Section headings first, so the new card lands among correct numbers.
+    for (const { from, to } of seed.SECTION_RENAMES) {
+      const rows = await client.query(
+        'SELECT id, i18n FROM form_fields WHERE form_id = $1 AND section = $2', [formId, from]);
+      for (const row of rows.rows) {
+        const blob = row.i18n || {};
+        for (const [code, text] of Object.entries(seed.SECTION_TEXT(to))) {
+          if (blob[code]) blob[code] = { ...blob[code], section: text };
+        }
+        await client.query('UPDATE form_fields SET section = $2, i18n = $3::jsonb WHERE id = $1',
+          [row.id, to, JSON.stringify(blob)]);
+        renamed++;
+      }
+    }
+
+    // Then the questions, immediately after the odometer.
+    const at = await client.query(
+      'SELECT position FROM form_fields WHERE form_id = $1 AND name = $2', [formId, anchor.name]);
+    if (!at.rowCount) continue;
+    const base = Number(at.rows[0].position);
+
+    let step = 0;
+    for (const f of seed.RETURN_FIELDS) {
+      step++;
+      const taken = await client.query(
+        'SELECT 1 FROM form_fields WHERE form_id = $1 AND name = $2', [formId, f.name]);
+      if (taken.rowCount) continue;
+      await client.query(
+        `INSERT INTO form_fields
+           (form_id, position, name, kind, label, section, required, role,
+            options, source, alert_on, i18n)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,'', '[]'::jsonb, '', $8::jsonb, $9::jsonb)`,
+        [formId, base + step, f.name, f.kind, f.label, f.section, !!f.required,
+         JSON.stringify(f.alertOn || []), JSON.stringify(f.i18n || {})]);
+      inserted++;
+    }
+    await client.query('UPDATE forms SET updated_at = now() WHERE id = $1', [formId]);
+  }
+
+  await client.query(
+    `INSERT INTO jobs (name, last_run, note) VALUES ($1, now(), $2)
+     ON CONFLICT (name) DO NOTHING`,
+    [RETURN_UPGRADE_KEY, `${inserted} frågor i ${forms.rowCount} formulär, ${renamed} avsnittsrubriker`]);
+
+  return { inserted, renamed, forms: forms.rowCount };
+}
+
 async function init() {
   pool = await connectWithRetry();
   await pool.query(SCHEMA);
@@ -436,7 +505,12 @@ async function init() {
     await client.query('BEGIN');
     await seedIfEmpty(client);
     const upgraded = await upgradeSeededFields(client);
+    const added = await addReturnQuestions(client);
     await client.query('COMMIT');
+    if (added && (added.inserted || added.renamed)) {
+      console.log(`[db] lade till ${added.inserted} frågor och numrerade om ${added.renamed} ` +
+        `avsnittsrader i ${added.forms} formulär`);
+    }
     if (upgraded && (upgraded.fields || upgraded.titles)) {
       console.log(`[db] uppgraderade ${upgraded.fields} frågor och ${upgraded.titles} formulärtitlar ` +
         'till aktuell mall (rullgardiner, larm, översättningar)');

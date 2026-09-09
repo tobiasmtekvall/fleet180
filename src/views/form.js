@@ -1,7 +1,7 @@
 'use strict';
 
 const { page, esc } = require('./layout');
-const { CHOICES, optionsFor } = require('../fields');
+const { CHOICES, optionsFor, commentChoices } = require('../fields');
 const i18n = require('../i18n');
 
 /* Consecutive questions that name the same section share one card, which
@@ -85,7 +85,10 @@ function renderField(f, lang, sources) {
               <span ${langAttrs(texts)}>${esc(texts[lang])}</span>
             </label>`;
     }).join('');
-    return `        <div class="field" data-kind="yesno" data-name="${esc(f.name)}">
+    // The choices that open the comment box travel with the field, because
+    // they are per question -- see commentChoices().
+    const opens = [...commentChoices(f)].join(' ');
+    return `        <div class="field" data-kind="yesno" data-name="${esc(f.name)}" data-comment-on="${esc(opens)}">
           <label id="lbl-${esc(f.name)}" ${labelAttrs}>${esc(labels[lang])}${star}</label>
           <div class="choices" role="radiogroup" aria-labelledby="lbl-${esc(f.name)}">${choices}
           </div>

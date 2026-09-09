@@ -15,25 +15,42 @@ const FORM_I18N = {
   hi: { title: '(Jönköping) सुरक्षा जाँच – वैन' }
 };
 
-const S1 = 'Del 1 av 4 – Förare och fordon';
-const S2 = 'Del 2 av 4 – Belysning, däck, kaross, bakgavellyft';
-const S3 = 'Del 3 av 4 – Vätskor och tankning';
-const S4 = 'Del 4 av 4 – Instrumentpanel, hytt och övrigt';
+const S1 = 'Del 1 av 5 – Förare och fordon';
+const SR = 'Del 2 av 5 – Innan du lämnar bilen';
+const S2 = 'Del 3 av 5 – Belysning, däck, kaross, bakgavellyft';
+const S3 = 'Del 4 av 5 – Vätskor och tankning';
+const S4 = 'Del 5 av 5 – Instrumentpanel, hytt och övrigt';
 
 const SEC = {
-  [S1]: { en: 'Part 1 of 4 – Driver and vehicle',
-          ar: 'الجزء 1 من 4 – السائق والمركبة',
-          hi: 'भाग 1/4 – चालक और वाहन' },
-  [S2]: { en: 'Part 2 of 4 – Lights, tyres, bodywork, tail lift',
-          ar: 'الجزء 2 من 4 – الإضاءة، الإطارات، الهيكل، رافعة الباب الخلفي',
-          hi: 'भाग 2/4 – लाइट, टायर, बॉडी, टेल लिफ्ट' },
-  [S3]: { en: 'Part 3 of 4 – Fluids and fuelling',
-          ar: 'الجزء 3 من 4 – السوائل والتزوّد بالوقود',
-          hi: 'भाग 3/4 – तरल पदार्थ और ईंधन' },
-  [S4]: { en: 'Part 4 of 4 – Dashboard, cab and other',
-          ar: 'الجزء 4 من 4 – لوحة القيادة والمقصورة وأمور أخرى',
-          hi: 'भाग 4/4 – डैशबोर्ड, केबिन और अन्य' }
+  [S1]: { en: 'Part 1 of 5 – Driver and vehicle',
+          ar: 'الجزء 1 من 5 – السائق والمركبة',
+          hi: 'भाग 1/5 – चालक और वाहन' },
+  [SR]: { en: 'Part 2 of 5 – Before you leave the vehicle',
+          ar: 'الجزء 2 من 5 – قبل أن تترك المركبة',
+          hi: 'भाग 2/5 – वाहन छोड़ने से पहले' },
+  [S2]: { en: 'Part 3 of 5 – Lights, tyres, bodywork, tail lift',
+          ar: 'الجزء 3 من 5 – الإضاءة، الإطارات، الهيكل، رافعة الباب الخلفي',
+          hi: 'भाग 3/5 – लाइट, टायर, बॉडी, टेल लिफ्ट' },
+  [S3]: { en: 'Part 4 of 5 – Fluids and fuelling',
+          ar: 'الجزء 4 من 5 – السوائل والتزوّد بالوقود',
+          hi: 'भाग 4/5 – तरल पदार्थ और ईंधन' },
+  [S4]: { en: 'Part 5 of 5 – Dashboard, cab and other',
+          ar: 'الجزء 5 من 5 – لوحة القيادة والمقصورة وأمور أخرى',
+          hi: 'भाग 5/5 – डैशबोर्ड, केबिन और अन्य' }
 };
+
+/**
+ * The section headings as they read before the return questions were added,
+ * mapped to what they read now. The migration uses this to renumber a form
+ * that is already in the database -- a heading saying "Del 2 av 4" above the
+ * third of five cards is the kind of small wrongness drivers stop trusting.
+ */
+const SECTION_RENAMES = [
+  { from: 'Del 1 av 4 – Förare och fordon', to: S1 },
+  { from: 'Del 2 av 4 – Belysning, däck, kaross, bakgavellyft', to: S2 },
+  { from: 'Del 3 av 4 – Vätskor och tankning', to: S3 },
+  { from: 'Del 4 av 4 – Instrumentpanel, hytt och övrigt', to: S4 }
+];
 
 /** Helper: build the per-field i18n blob from label translations. */
 function tr(section, en, ar, hi) {
@@ -82,6 +99,32 @@ const DEFAULT_FIELDS = [
     i18n: tr(S1, "Enter the vehicle's odometer (mil):",
              'أدخل عدّاد المسافة للمركبة (ميل سويدي):',
              'वाहन का ओडोमीटर दर्ज करें (स्वीडिश मील):') },
+
+  /* Asked when the driver hands the vehicle back, which is why they sit
+     directly after the name and route rather than at the end: a driver who
+     has already answered sixteen questions is not reading the seventeenth.
+     The polarity differs per question -- forgetting to switch something off
+     is a problem on Nej, taking equipment or causing damage on Ja. */
+  { name: 'r1', kind: 'yesno', section: SR, required: true, alertOn: ['nej', 'annat'],
+    label: 'Har du stängt av bakgavellyftens strömbrytare och lastutrymmets belysning (när det är aktuellt)?',
+    i18n: tr(SR,
+      'Have you turned off the tail lift switch and the cargo lights (when applicable)?',
+      'هل أطفأت مفتاح الرافعة الخلفية وأضواء صندوق الشحن (عند الحاجة)؟',
+      'क्या आपने टेल लिफ्ट का स्विच और कार्गो लाइटें बंद कर दी हैं (जहाँ लागू हो)?') },
+
+  { name: 'r2', kind: 'yesno', section: SR, required: true, alertOn: ['ja', 'annat'],
+    label: 'Har du tagit någon laddkabel, mobilhållare eller spännband från den här bilen?',
+    i18n: tr(SR,
+      'Have you taken any charging cable, phone holder or ratchet strap from this vehicle?',
+      'هل أخذت أي كابل شحن أو حامل هاتف أو حزام ربط من هذه المركبة؟',
+      'क्या आपने इस वाहन से कोई चार्जिंग केबल, फ़ोन होल्डर या रैचेट स्ट्रैप लिया है?') },
+
+  { name: 'r3', kind: 'yesno', section: SR, required: true, alertOn: ['ja', 'annat'],
+    label: 'Har du orsakat NÅGON skada på den här bilen i dag?',
+    i18n: tr(SR,
+      'Have you caused ANY damage to this vehicle today?',
+      'هل تسببت في أي ضرر لهذه المركبة اليوم؟',
+      'क्या आपने आज इस वाहन को कोई भी नुकसान पहुँचाया है?') },
 
   { name: 'f3', kind: 'yesno', section: S2, required: true, alertOn: ['nej', 'annat'],
     label: 'Fungerar utvändig belysning som tex hel/halvjus, blinkers, bromsljus, sidopositions ljus? Om nej, beskriv vilken lampa som inte fungerar',
@@ -224,6 +267,15 @@ const DEFAULT_VEHICLES = [
   { plate: 'WBH37M', owner: '',     fleet: 'home' }
 ];
 
+/** Every language's text for one section heading. */
+function SECTION_TEXT(section) {
+  return SEC[section] || {};
+}
+
+/** The questions added on 2026-09-09, for the migration to place. */
+const RETURN_FIELDS = DEFAULT_FIELDS.filter(f => f.section === SR);
+
 module.exports = {
-  FORM_KEY, FORM_TITLE, FORM_I18N, DEFAULT_FIELDS, DEFAULT_VEHICLES, ROUTES, ADBLUE
+  FORM_KEY, FORM_TITLE, FORM_I18N, DEFAULT_FIELDS, DEFAULT_VEHICLES, ROUTES, ADBLUE,
+  SECTION_RENAMES, RETURN_FIELDS, SECTION_RETURN: SR, SECTION_TEXT
 };
