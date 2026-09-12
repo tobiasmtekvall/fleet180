@@ -383,3 +383,31 @@ footer{border-top:1px solid var(--border);padding:18px 24px;color:var(--muted);f
  * dashboard: a prefix nobody can verify is a prefix nobody should trust. */
 .odo-hint{margin:4px 0 0;font-size:12px;color:var(--muted);line-height:1.45}
 .odo-hint span+span{margin-inline-start:4px}
+
+/* ---------- Warning lights: symbols above the list ----------
+ *
+ * The grid and the dropdown are one control (see form.js). The symbols are
+ * what a driver actually matches against the dashboard, so they are big
+ * enough to recognise at arm's length and coloured the way the lamp itself
+ * is: red means stop, amber means get it seen to. */
+.lamp-grid{
+  display:grid;grid-template-columns:repeat(auto-fill,minmax(78px,1fr));
+  gap:6px;margin:8px 0 10px;
+}
+.lamp{
+  display:flex;flex-direction:column;align-items:center;gap:4px;
+  padding:8px 4px 6px;background:#fff;cursor:pointer;
+  border:1px solid var(--border);border-radius:10px;
+  font:inherit;color:inherit;text-align:center;
+}
+.lamp-ico{display:block;width:30px;height:30px}
+.lamp-ico svg{width:30px;height:30px;display:block}
+.lamp-name{font-size:10.5px;line-height:1.2;color:#4a5560;word-break:break-word}
+.lamp-red .lamp-ico{color:#c62828}
+.lamp-amber .lamp-ico{color:#b26a00}
+.lamp:hover{border-color:#9aa5b1}
+.lamp[aria-pressed="true"]{
+  border-color:var(--primary);background:#eef5fd;
+  box-shadow:0 0 0 2px rgba(27,110,194,.18);
+}
+.lamp[aria-pressed="true"] .lamp-name{color:#12324f;font-weight:600}

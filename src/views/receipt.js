@@ -24,7 +24,7 @@ function answerRows(submission, fallbackFields, lang = 'sv') {
       const n = (submission.photos || []).filter(p => p.field === q.name).length;
       text = n ? `${n} foto${n > 1 ? 'n' : ''}` : '—';
     } else if (q.kind === 'info') {
-      return `<tr><td colspan="2" class="muted">${esc(label)}</td></tr>`;
+      return `<tr><td colspan="2" class="muted">${esc(i18n.isolateLatin(label, lang))}</td></tr>`;
     } else {
       const value = answers[q.name];
       // Ja/Nej/Annat reads back in the language the receipt is shown in;
@@ -41,7 +41,8 @@ function answerRows(submission, fallbackFields, lang = 'sv') {
         text = formatAnswer(q, value);
       }
     }
-    return `<tr><td>${esc(label)}</td><td>${esc(text)}</td></tr>`;
+    return `<tr><td>${esc(i18n.isolateLatin(label, lang))}</td>` +
+           `<td>${esc(i18n.isolateLatin(text, lang))}</td></tr>`;
   }).join('\n');
 }
 
@@ -51,7 +52,11 @@ function pickText(question, pick, lang) {
   if (!value) return '';
   const list = question.comment_options || question.commentOptions || [];
   const i = list.indexOf(value);
-  if (i < 0 || lang === i18n.DEFAULT_LANG) return value;
+  if (i < 0) return value;
+  /* Swedish is looked up like any other language rather than assumed to be
+     the stored value: a list of dashboard symbols stores a code ("engine"),
+     so Swedish is named in the snapshot too. A plain list has no Swedish half
+     -- there the value IS the Swedish wording, and the fallback returns it. */
   const translated = ((question.i18n || {})[lang] || {}).commentOptions || [];
   return (translated[i] || '').trim() || value;
 }

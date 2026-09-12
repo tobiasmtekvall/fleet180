@@ -284,6 +284,34 @@
     img.src = url;
   }
 
+  /* ---- varningslampor: symbolerna och listan är samma val --------------
+     The grid of symbols above a follow-up list is not a second control: it
+     writes into the same <select> the server reads, so validation, storage
+     and the receipt know nothing about it. A driver who prefers the list gets
+     the list; one who is matching the lamp on the dashboard taps the picture. */
+  each(document.querySelectorAll('.lamp-grid'), function (grid) {
+    var sel = document.getElementById(grid.dataset.for);
+    if (!sel) return;
+
+    function mark() {
+      each(grid.querySelectorAll('.lamp'), function (b) {
+        b.setAttribute('aria-pressed', b.dataset.value === sel.value ? 'true' : 'false');
+      });
+    }
+    each(grid.querySelectorAll('.lamp'), function (b) {
+      b.addEventListener('click', function () {
+        // Tapping the chosen one again clears it, so a mis-tap is undoable
+        // without hunting for the empty row at the top of the list.
+        sel.value = (sel.value === b.dataset.value) ? '' : b.dataset.value;
+        mark();
+        var field = sel.closest('.field');
+        if (field && sel.value) clearError(field);
+      });
+    });
+    sel.addEventListener('change', mark);
+    mark();
+  });
+
   /* ---- mätarställning -----------------------------------------------
      The field opens holding all but the last few digits of the previous
      reading (the server put them there). Here it only stays a number, and

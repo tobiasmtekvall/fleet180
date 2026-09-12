@@ -6,6 +6,7 @@ const i18n = require('../i18n');
 const { sameName } = require('../assignment');
 const { flagSvg } = require('./flags');
 const odo = require('../odometer');
+const { icon } = require('../telltales');
 
 /* Consecutive questions that name the same section share one card, which
    is how the original four-part page is reproduced without the section
@@ -26,8 +27,16 @@ function groupBySection(fields) {
  * why a half-filled form survives a language change -- nothing is re-fetched
  * and no input is ever recreated.
  */
+/* Each language's wording, as attributes the flags swap in place. A Latin
+   run inside Arabic is fenced off first -- see i18n.isolateLatin. */
 function langAttrs(texts, prefix = 't') {
-  return i18n.CODES.map(c => `data-${prefix}-${c}="${esc(texts[c] || '')}"`).join(' ');
+  return i18n.CODES.map(c =>
+    `data-${prefix}-${c}="${esc(i18n.isolateLatin(texts[c] || '', c))}"`).join(' ');
+}
+
+/** The same wording, for the language the page is being served in. */
+function show(texts, lang) {
+  return esc(i18n.isolateLatin(texts[lang] || texts[i18n.DEFAULT_LANG] || '', lang));
 }
 
 function uiAttrs(key) {
@@ -53,13 +62,13 @@ function renderField(f, lang, sources, ctx = {}) {
 
   if (f.kind === 'info') {
     return `        <div class="field info-field">
-          <p ${labelAttrs}>${esc(labels[lang])}</p>
+          <p ${labelAttrs}>${show(labels, lang)}</p>
         </div>`;
   }
 
   if (f.kind === 'photo') {
     return `        <div class="field" data-kind="photo">
-          <label for="${esc(f.name)}" ${labelAttrs}>${esc(labels[lang])}</label>
+          <label for="${esc(f.name)}" ${labelAttrs}>${show(labels, lang)}</label>
           <div class="uploader">
             <button type="button" class="camera-btn" data-target="${esc(f.name)}" ${uiAttrs('openCamera')}>${esc(i18n.t(lang, 'openCamera'))}</button>
             <input type="file" id="${esc(f.name)}" name="${esc(f.name)}" accept="image/*" capture="environment" multiple hidden>
@@ -84,7 +93,7 @@ function renderField(f, lang, sources, ctx = {}) {
       `<div class="err show">Listan är tom – ${f.source === 'drivers'
         ? 'inga förare har synkats ännu.' : 'lägg till alternativ i formulärredigeraren.'}</div>`;
     return `        <div class="field" data-kind="select" data-name="${esc(f.name)}">
-          <label for="${esc(f.name)}" ${labelAttrs}>${esc(labels[lang])}${star}</label>
+          <label for="${esc(f.name)}" ${labelAttrs}>${show(labels, lang)}${star}</label>
           <select class="${cls}" id="${esc(f.name)}" name="${esc(f.name)}"${f.required ? ' required' : ''}>
             ${options}
           </select>
@@ -102,7 +111,7 @@ function renderField(f, lang, sources, ctx = {}) {
       return `
             <label class="choice">
               <input type="radio" name="${esc(f.name)}" value="${esc(c.value)}"${f.required ? ' data-required="1"' : ''}>
-              <span ${langAttrs(texts)}>${esc(texts[lang])}</span>
+              <span ${langAttrs(texts)}>${show(texts, lang)}</span>
             </label>`;
     }).join('');
     // The choices that open the comment box travel with the field, because
@@ -114,24 +123,37 @@ function renderField(f, lang, sources, ctx = {}) {
        stays the Swedish one. */
     const picks = commentOptionsFor(f);
     const pickI18n = (f.i18n || {});
+    /* One label per language for each option. A plain list stores its Swedish
+       wording as the value, so Swedish falls back to the value itself; a list
+       that came from the vehicle stores a code, and every language — Swedish
+       included — is named in the i18n blob. */
+    const pickLabel = (o, i, c) => {
+      const list = (pickI18n[c] && pickI18n[c].commentOptions) || [];
+      return (list[i] || '').trim() || (c === i18n.DEFAULT_LANG ? o : '') || o;
+    };
+    /* The little question above the list. A question that brought its own
+       ("Where on the vehicle?") uses it; anything else falls back to the one
+       general phrasing. */
+    const pickHead = {};
+    for (const c of i18n.CODES) {
+      const own = pickI18n[c] && pickI18n[c].pickLabel;
+      pickHead[c] = (own && String(own).trim()) || i18n.t(c, 'pickLabel');
+    }
     const pickBox = picks.length ? `
           <div class="comment-pick">
-            <label for="${esc(f.name)}__pick" ${uiAttrs('pickLabel')}>${esc(i18n.t(lang, 'pickLabel'))}<span class="star">*</span></label>
+            <label for="${esc(f.name)}__pick" ${langAttrs(pickHead)}>${show(pickHead, lang)}<span class="star">*</span></label>
             <select class="form-control" id="${esc(f.name)}__pick" name="${esc(f.name)}__pick">
               <option value="" ${uiAttrs('choose')}>${esc(i18n.t(lang, 'choose'))}</option>
 ${picks.map((o, i) => {
   const texts = {};
-  for (const c of i18n.CODES) {
-    const list = c === i18n.DEFAULT_LANG ? picks
-      : ((pickI18n[c] && pickI18n[c].commentOptions) || []);
-    texts[c] = (list && list[i]) || o;
-  }
-  return `              <option value="${esc(o)}" ${langAttrs(texts)}>${esc(texts[lang] || o)}</option>`;
+  for (const c of i18n.CODES) texts[c] = pickLabel(o, i, c);
+  return `              <option value="${esc(o)}" ${langAttrs(texts)}>${show({ ...texts, [lang]: texts[lang] || o }, lang)}</option>`;
 }).join('\n')}
             </select>
+${lampGrid(f, lang, pickLabel)}
           </div>` : '';
     return `        <div class="field" data-kind="yesno" data-name="${esc(f.name)}" data-comment-on="${esc(opens)}">
-          <label id="lbl-${esc(f.name)}" ${labelAttrs}>${esc(labels[lang])}${star}</label>
+          <label id="lbl-${esc(f.name)}" ${labelAttrs}>${show(labels, lang)}${star}</label>
           <div class="choices" role="radiogroup" aria-labelledby="lbl-${esc(f.name)}">${choices}
           </div>
           <div class="comment" data-comment-for="${esc(f.name)}">${pickBox}
@@ -146,15 +168,20 @@ ${picks.map((o, i) => {
 
   const cls = f.required ? 'form-control' : 'form-control optional';
   const pre = prefillFor(f, ctx);
-  const meter = f.role === 'odometer' ? odometerBits(lang, ctx) : null;
+  /* The odometer is a number whatever else is known about it. The numeric
+     keyboard and the digits-only rule come from the question's role, not from
+     whether there is a previous reading to offer -- the first check on a new
+     van is exactly when the driver should not be handed a letter keyboard. */
+  const isMeter = f.role === 'odometer';
+  const meter = isMeter ? odometerBits(lang, ctx) : null;
   const attrs = [f.required ? 'required' : '', f.role === 'driver' ? 'autocomplete="name"' : '',
-    meter ? 'inputmode="numeric" autocomplete="off" data-odo="1"' : '',
+    isMeter ? 'inputmode="numeric" autocomplete="off" data-odo="1"' : '',
     meter && meter.prefix ? `data-odo-prefix="${esc(meter.prefix)}"` : '',
     meter && meter.last ? `data-odo-last="${esc(meter.last)}"` : '',
     (meter && meter.prefix) ? `value="${esc(meter.prefix)}"` : (pre ? `value="${esc(pre)}"` : '')]
     .filter(Boolean).join(' ');
   return `        <div class="field" data-kind="text" data-name="${esc(f.name)}">
-          <label for="${esc(f.name)}" ${labelAttrs}>${esc(labels[lang])}${star}</label>
+          <label for="${esc(f.name)}" ${labelAttrs}>${show(labels, lang)}${star}</label>
           <input type="text" class="${cls}" id="${esc(f.name)}" name="${esc(f.name)}" ${attrs}>
           ${meter ? meter.hint : ''}
           <div class="err"></div>
@@ -260,6 +287,34 @@ function changeBox(f, lang, ctx) {
         </div>`;
 }
 
+/**
+ * The symbols, above the list, for a question whose options are this
+ * vehicle's warning lights.
+ *
+ * A driver looking at a lit lamp is matching a PICTURE, not reading a
+ * sentence: they see a symbol on the dashboard and want the same symbol on
+ * the phone. A native <option> cannot hold one, so the symbols sit above the
+ * dropdown and the two are the same control — tapping a symbol selects it in
+ * the list, and the list marks the symbol. Red ones first, because those are
+ * the ones that mean stop.
+ */
+function lampGrid(f, lang, pickLabel) {
+  const lights = f.lights || [];
+  if (!lights.length) return '';
+  const cells = lights.map((l, i) => {
+    const texts = {};
+    for (const c of i18n.CODES) texts[c] = pickLabel(l.code, i, c);
+    return `              <button type="button" class="lamp lamp-${esc(l.colour)}" data-value="${esc(l.code)}"
+                      aria-pressed="false" title="${show(texts, lang)}">
+                <span class="lamp-ico">${icon(l.icon)}</span>
+                <span class="lamp-name" ${langAttrs(texts)}>${show(texts, lang)}</span>
+              </button>`;
+  }).join('\n');
+  return `            <div class="lamp-grid" data-for="${esc(f.name)}__pick">
+${cells}
+            </div>`;
+}
+
 /** "X is assigned to this van today" -- the line above the form. */
 function assignedBanner(lang, ctx) {
   const list = (ctx.assignment && ctx.assignment.list) || [];
@@ -328,7 +383,7 @@ function rail(groups, lang) {
   return `<nav class="rail">
 ${named.map((g, i) => {
   const texts = i18n.allFieldText({ section: g.sv, i18n: g.fields[0].i18n }, 'section');
-  return `    <a href="#sec${i + 1}"><span class="num">${i + 1}</span><span class="t" ${langAttrs(texts)}>${esc(texts[lang])}</span></a>`;
+  return `    <a href="#sec${i + 1}"><span class="num">${i + 1}</span><span class="t" ${langAttrs(texts)}>${show(texts, lang)}</span></a>`;
 }).join('\n')}
   </nav>`;
 }

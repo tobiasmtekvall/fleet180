@@ -4,6 +4,7 @@ const { page, esc, fmtDateTime } = require('./layout');
 const { KINDS, KIND_LABEL, ROLES, SOURCES, CHOICES, formatAnswer } = require('../fields');
 const i18n = require('../i18n');
 const { OWNER_LABEL, FLEET_LABEL } = require('./index');
+const telltales = require('../telltales');
 
 const LINKS = [
   { href: '/', text: 'Fordon' },
@@ -197,6 +198,15 @@ function adminVehiclesPage({ vehicles, forms, message, counts }) {
   const formOptions = [{ value: '', label: 'Standardformulär' }]
     .concat(forms.filter(f => !f.is_default).map(f => ({ value: String(f.id), label: f.title })));
 
+  /* Which van it is. This decides the list of warning lights a driver is
+     offered when they report a lamp, so it is set here rather than in the
+     form: one form, many models. */
+  const modelOptions = [{ value: '', label: 'Modell – ej satt' }].concat(
+    telltales.MODEL_KEYS.filter(k => k !== 'generic').map(k => ({
+      value: k,
+      label: `${telltales.MODELS[k].brand} ${telltales.MODELS[k].name}`.trim()
+    })));
+
   const rows = vehicles.map(v => `<tr>
       <td colspan="7" style="padding:0">
         <form class="row-form" method="post" action="/admin/vehicles/${esc(v.id)}" style="padding:9px 10px;border:0">
@@ -204,6 +214,7 @@ function adminVehiclesPage({ vehicles, forms, message, counts }) {
                  style="font-weight:700;width:110px" maxlength="16" required>
           ${select('owner', OWNER_OPTIONS, v.owner)}
           ${select('fleet', FLEET_OPTIONS, v.fleet)}
+          ${select('modelKey', modelOptions, v.model_key || '')}
           ${select('formId', formOptions, v.form_id ? String(v.form_id) : '', 'grow')}
           <label class="check"><input type="checkbox" name="active" value="1"${v.active ? ' checked' : ''}> Aktiv</label>
           <span class="muted" style="font-size:13px">${esc(counts.get(v.plate) || 0)} kontroller</span>
@@ -226,6 +237,10 @@ ${flash(message)}
      <em>Aktivt</em> – då försvinner det från listor och QR-arket, men dess gamla kontroller
      finns kvar. <em>Ta bort</em> går bara på fordon utan registrerade kontroller.</p>
 
+  <p class="lede"><strong>Modellen styr varningslamporna.</strong> När en förare svarar Ja på
+     frågan om kontrollampor får hen en lista med just den här bilens lampor och symboler.
+     Ett fordon utan modell får en gemensam lista med de lampor alla bilar har.</p>
+
   <div class="card">
     <div class="card-header">Nytt fordon</div>
     <div class="card-body">
@@ -234,6 +249,7 @@ ${flash(message)}
                style="font-weight:700;width:130px" maxlength="16" required>
         ${select('owner', OWNER_OPTIONS, '')}
         ${select('fleet', FLEET_OPTIONS, 'box')}
+        ${select('modelKey', modelOptions, '')}
         ${select('formId', formOptions, '', 'grow')}
         <button class="btn btn-primary" type="submit">Lägg till</button>
       </form>
@@ -241,7 +257,7 @@ ${flash(message)}
   </div>
 
   <div class="card">
-    <div class="card-header">Alla fordon<span class="step-tag">Reg.nr · ägare · flotta · formulär</span></div>
+    <div class="card-header">Alla fordon<span class="step-tag">Reg.nr · ägare · flotta · modell · formulär</span></div>
     <table class="table"><tbody>
 ${rows || '<tr><td class="muted" style="padding:20px">Inga fordon ännu.</td></tr>'}
     </tbody></table>
@@ -341,6 +357,11 @@ function fieldRow(form, f, isFirst, isLast) {
               </div>
               <p class="q-hint">Styr vad dagsmejlet och FLEET180-vyn lyfter fram.
                  "Fungerar X?" larmar på Nej, "Finns nya skador?" larmar på Ja.</p>
+              <label class="q-lab">Hämta välj-listan från</label>
+              ${select('commentSource', [
+                { value: '', label: 'Listan nedan' },
+                { value: 'lights', label: 'Fordonets varningslampor (per modell)' }
+              ], f.comment_source || '')}
               <label class="q-lab">Välj-lista när svaret larmar (ett per rad)</label>
               <textarea class="form-control" name="commentOptions" rows="4"
                         placeholder="Helljus&#10;Halvljus&#10;Bromsljus">${esc(picks.join('\n'))}</textarea>

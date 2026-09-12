@@ -90,17 +90,181 @@ const LAMPS_I18N = {
        'الأضواء الجانبية', 'إضاءة لوحة الأرقام', 'أخرى'],
   hi: ['हाई बीम', 'लो बीम', 'आगे के इंडिकेटर', 'पीछे के इंडिकेटर',
        'ब्रेक लाइट', 'रिवर्स लाइट', 'साइड/मार्कर लाइट',
-       'नंबर प्लेट लाइट', 'अन्य']
+       'नंबर प्लेट लाइट', 'अन्य'],
+  q: { sv: 'Vilken lampa fungerar inte?', en: 'Which lamp is not working?',
+       ar: 'أي مصباح لا يعمل؟', hi: 'कौन सी लाइट काम नहीं कर रही?' }
 };
 
 /** The i18n blob for a question, with its follow-up list translated too. */
 function trLamps(section, en, ar, hi) {
-  const blob = tr(section, en, ar, hi);
-  for (const code of Object.keys(LAMPS_I18N)) {
-    blob[code] = { ...blob[code], commentOptions: LAMPS_I18N[code] };
-  }
-  return blob;
+  return withList(tr(section, en, ar, hi), LAMPS_I18N);
 }
+
+/**
+ * Add a follow-up list's translations to a question's i18n blob.
+ *
+ * The Swedish wording IS the stored value, so it is not repeated here; the
+ * three translations are matched to it by position. A list and its
+ * translations must therefore stay the same length and the same order — the
+ * form editor shows them side by side for exactly that reason.
+ *
+ * `L.q` is the little question above the list. It is per question rather than
+ * one phrase for all of them, because "Which one is not working?" above a list
+ * of places on the bodywork is the kind of sentence a driver reads twice and
+ * then answers wrongly. Swedish is carried too: the blob has no Swedish half
+ * for labels (the label IS Swedish), but this one sentence has nowhere else
+ * to live.
+ */
+function withList(blob, L) {
+  const out = { ...blob };
+  for (const c of ['en', 'ar', 'hi']) {
+    out[c] = { ...out[c], commentOptions: L[c] };
+  }
+  if (L.q) {
+    for (const c of ['sv', 'en', 'ar', 'hi']) {
+      out[c] = { ...out[c], pickLabel: L.q[c] };
+    }
+  }
+  return out;
+}
+
+/* ---- the follow-up lists -------------------------------------------------
+ *
+ * One per question that can be answered with "what exactly". They are the
+ * everyday answers, in the order they are usually true, with "Annat" last so
+ * anything unforeseen still has a home in the comment box beside it.
+ */
+
+const WHEELS = {
+  sv: ['Vänster fram', 'Höger fram', 'Vänster bak', 'Höger bak', 'Reservhjul', 'Flera däck', 'Annat'],
+  en: ['Left front', 'Right front', 'Left rear', 'Right rear', 'Spare wheel', 'Several tyres', 'Other'],
+  ar: ['أمامي أيسر', 'أمامي أيمن', 'خلفي أيسر', 'خلفي أيمن', 'الإطار الاحتياطي', 'أكثر من إطار', 'أخرى'],
+  hi: ['बायाँ अगला', 'दायाँ अगला', 'बायाँ पिछला', 'दायाँ पिछला', 'स्टेपनी', 'एक से अधिक टायर', 'अन्य'],
+  q: { sv: 'Vilket däck?', en: 'Which tyre?',
+       ar: 'أي إطار؟', hi: 'कौन सा टायर?' }
+};
+
+const BODY = {
+  sv: ['Front / stötfångare', 'Bakdörrar', 'Höger sida', 'Vänster sida', 'Tak',
+       'Lastutrymme / skåp', 'Bakgavellyft', 'Backspegel', 'Vindruta eller annan ruta',
+       'Fälg eller däck', 'Annat'],
+  en: ['Front / bumper', 'Rear doors', 'Right side', 'Left side', 'Roof',
+       'Load area / box', 'Tail lift', 'Mirror', 'Windscreen or other glass',
+       'Wheel rim or tyre', 'Other'],
+  ar: ['الأمام / المصد', 'الأبواب الخلفية', 'الجانب الأيمن', 'الجانب الأيسر', 'السقف',
+       'صندوق الشحن', 'الرافعة الخلفية', 'المرآة', 'الزجاج الأمامي أو زجاج آخر',
+       'الجنط أو الإطار', 'أخرى'],
+  hi: ['आगे / बंपर', 'पीछे के दरवाज़े', 'दायाँ हिस्सा', 'बायाँ हिस्सा', 'छत',
+       'लोड एरिया / बॉक्स', 'टेल लिफ़्ट', 'शीशा (मिरर)', 'विंडस्क्रीन या अन्य काँच',
+       'रिम या टायर', 'अन्य'],
+  q: { sv: 'Var på bilen?', en: 'Where on the vehicle?',
+       ar: 'أين في المركبة؟', hi: 'वाहन पर कहाँ?' }
+};
+
+const TAILLIFT = {
+  sv: ['Går inte ner', 'Går inte upp', 'Läcker olja', 'Plattan är skadad',
+       'Manöverdon eller fjärrkontroll trasig', 'Låser inte i körläge', 'Larmar eller låter konstigt', 'Annat'],
+  en: ['Will not go down', 'Will not go up', 'Leaking oil', 'Platform damaged',
+       'Control or remote broken', 'Does not lock for driving', 'Alarms or sounds wrong', 'Other'],
+  ar: ['لا تنزل', 'لا ترتفع', 'تسريب زيت', 'المنصة تالفة',
+       'وحدة التحكم أو الريموت معطلة', 'لا تُقفل لوضع السير', 'تصدر إنذارًا أو صوتًا غريبًا', 'أخرى'],
+  hi: ['नीचे नहीं जाती', 'ऊपर नहीं जाती', 'तेल रिस रहा है', 'प्लेटफ़ॉर्म क्षतिग्रस्त',
+       'कंट्रोल या रिमोट ख़राब', 'चलाने के लिए लॉक नहीं होती', 'अलार्म या अजीब आवाज़', 'अन्य'],
+  q: { sv: 'Vad är felet?', en: 'What is wrong?',
+       ar: 'ما العطل؟', hi: 'क्या ख़राबी है?' }
+};
+
+const FLUIDS = {
+  sv: ['Motorolja', 'Kylarvätska / glykol', 'Spolarvätska', 'Bromsvätska', 'AdBlue',
+       'Flera vätskor', 'Hann inte kontrollera', 'Annat'],
+  en: ['Engine oil', 'Coolant', 'Washer fluid', 'Brake fluid', 'AdBlue',
+       'Several fluids', 'No time to check', 'Other'],
+  ar: ['زيت المحرك', 'سائل التبريد', 'سائل غسل الزجاج', 'سائل الفرامل', 'AdBlue',
+       'أكثر من سائل', 'لم يتوفر وقت للفحص', 'أخرى'],
+  hi: ['इंजन ऑयल', 'कूलेंट', 'वॉशर फ़्लूइड', 'ब्रेक फ़्लूइड', 'AdBlue',
+       'एक से अधिक फ़्लूइड', 'जाँचने का समय नहीं मिला', 'अन्य'],
+  q: { sv: 'Vilken vätska?', en: 'Which fluid?',
+       ar: 'أي سائل؟', hi: 'कौन सा फ़्लूइड?' }
+};
+
+const FUELLING = {
+  sv: ['Hann inte tanka', 'Tankkortet fungerade inte', 'Stationen var stängd eller tom',
+       'Nästa förare tankar', 'Annat'],
+  en: ['No time to refuel', 'The fuel card did not work', 'The station was closed or dry',
+       'The next driver will refuel', 'Other'],
+  ar: ['لم يتوفر وقت للتزود بالوقود', 'بطاقة الوقود لم تعمل', 'المحطة مغلقة أو فارغة',
+       'السائق التالي سيتزود بالوقود', 'أخرى'],
+  hi: ['ईंधन भरने का समय नहीं मिला', 'फ़्यूल कार्ड नहीं चला', 'स्टेशन बंद या ख़ाली था',
+       'अगला ड्राइवर भरेगा', 'अन्य'],
+  q: { sv: 'Varför inte?', en: 'Why not?',
+       ar: 'ما السبب؟', hi: 'कारण क्या है?' }
+};
+
+const BELTS = {
+  sv: ['Förarsidan', 'Passagerarsidan', 'Mittplatsen', 'Flera bälten', 'Annat'],
+  en: ['Driver side', 'Passenger side', 'Middle seat', 'Several belts', 'Other'],
+  ar: ['جهة السائق', 'جهة الراكب', 'المقعد الأوسط', 'أكثر من حزام', 'أخرى'],
+  hi: ['ड्राइवर साइड', 'पैसेंजर साइड', 'बीच की सीट', 'एक से अधिक बेल्ट', 'अन्य'],
+  q: { sv: 'Vilket bälte?', en: 'Which belt?',
+       ar: 'أي حزام؟', hi: 'कौन सी बेल्ट?' }
+};
+
+const CLEAN = {
+  sv: ['Skräp i hytten', 'Lösa föremål i hytten', 'Skräp i lastutrymmet',
+       'Smutsiga rutor eller speglar', 'Hann inte städa', 'Annat'],
+  en: ['Rubbish in the cab', 'Loose items in the cab', 'Rubbish in the load area',
+       'Dirty windows or mirrors', 'No time to clean', 'Other'],
+  ar: ['نفايات في المقصورة', 'أغراض غير مثبّتة في المقصورة', 'نفايات في صندوق الشحن',
+       'زجاج أو مرايا متسخة', 'لم يتوفر وقت للتنظيف', 'أخرى'],
+  hi: ['केबिन में कचरा', 'केबिन में खुली चीज़ें', 'लोड एरिया में कचरा',
+       'गंदे शीशे या मिरर', 'सफ़ाई का समय नहीं मिला', 'अन्य'],
+  q: { sv: 'Vad är kvar att göra?', en: 'What is left to do?',
+       ar: 'ما الذي تبقّى؟', hi: 'क्या करना बाक़ी है?' }
+};
+
+const WIPERS = {
+  sv: ['Torkarbladen är slitna', 'Torkarna går inte att slå på', 'Spolningen fungerar inte',
+       'Spolarvätskan är slut', 'Intervalläget fungerar inte', 'Bakrutetorkaren', 'Annat'],
+  en: ['Wiper blades worn', 'Wipers will not switch on', 'Washer does not work',
+       'Washer fluid empty', 'Intermittent setting does not work', 'Rear wiper', 'Other'],
+  ar: ['شفرات المساحات تالفة', 'المساحات لا تعمل', 'رشاش الماء لا يعمل',
+       'سائل الغسل فارغ', 'وضع التقطيع لا يعمل', 'مساحة الزجاج الخلفي', 'أخرى'],
+  hi: ['वाइपर ब्लेड घिसे', 'वाइपर चालू नहीं होते', 'वॉशर काम नहीं करता',
+       'वॉशर फ़्लूइड ख़त्म', 'इंटरवल मोड काम नहीं करता', 'पिछला वाइपर', 'अन्य'],
+  q: { sv: 'Vad är felet?', en: 'What is wrong?',
+       ar: 'ما العطل؟', hi: 'क्या ख़राबी है?' }
+};
+
+const CAMERA = {
+  sv: ['Svart bild', 'Suddig eller smutsig bild', 'Fungerar ibland', 'Skärmen är trasig',
+       'Bilen har ingen backkamera', 'Annat'],
+  en: ['Black picture', 'Blurred or dirty picture', 'Works sometimes', 'The screen is broken',
+       'This van has no reversing camera', 'Other'],
+  ar: ['صورة سوداء', 'صورة ضبابية أو متسخة', 'تعمل أحيانًا', 'الشاشة معطلة',
+       'هذه المركبة بلا كاميرا خلفية', 'أخرى'],
+  hi: ['काली स्क्रीन', 'धुंधली या गंदी तस्वीर', 'कभी-कभी चलता है', 'स्क्रीन टूटी है',
+       'इस वैन में रिवर्स कैमरा नहीं है', 'अन्य'],
+  q: { sv: 'Vad är felet?', en: 'What is wrong?',
+       ar: 'ما العطل؟', hi: 'क्या ख़राबी है?' }
+};
+
+const LEFT_ON = {
+  sv: ['Bakgavellyftens strömbrytare', 'Lastutrymmets belysning', 'Båda', 'Annat'],
+  en: ['The tail lift switch', 'The cargo lights', 'Both', 'Other'],
+  ar: ['مفتاح الرافعة الخلفية', 'إضاءة صندوق الشحن', 'كلاهما', 'أخرى'],
+  hi: ['टेल लिफ़्ट स्विच', 'कार्गो लाइटें', 'दोनों', 'अन्य'],
+  q: { sv: 'Vad är kvar påslaget?', en: 'What is still switched on?',
+       ar: 'ما الذي بقي مشغّلًا؟', hi: 'क्या अब भी चालू है?' }
+};
+
+const TAKEN = {
+  sv: ['Laddkabel', 'Mobilhållare', 'Spännband', 'Flera saker', 'Annat'],
+  en: ['Charging cable', 'Phone holder', 'Ratchet strap', 'Several things', 'Other'],
+  ar: ['كابل شحن', 'حامل هاتف', 'حزام ربط', 'أكثر من شيء', 'أخرى'],
+  hi: ['चार्जिंग केबल', 'फ़ोन होल्डर', 'रैचेट स्ट्रैप', 'एक से अधिक चीज़ें', 'अन्य'],
+  q: { sv: 'Vad tog du?', en: 'What did you take?',
+       ar: 'ماذا أخذت؟', hi: 'आपने क्या लिया?' }
+};
 
 /** Din rutt: JK-EM-1 … JK-EM-20. */
 const ROUTES = Array.from({ length: 20 }, (_, i) => `JK-EM-${i + 1}`);
@@ -148,24 +312,27 @@ const DEFAULT_FIELDS = [
      is a problem on Nej, taking equipment or causing damage on Ja. */
   { name: 'r1', kind: 'yesno', section: SR, required: true, alertOn: ['nej', 'annat'],
     label: 'Har du stängt av bakgavellyftens strömbrytare och lastutrymmets belysning (när det är aktuellt)?',
-    i18n: tr(SR,
+    commentOptions: LEFT_ON.sv,
+    i18n: withList(tr(SR,
       'Have you turned off the tail lift switch and the cargo lights (when applicable)?',
       'هل أطفأت مفتاح الرافعة الخلفية وأضواء صندوق الشحن (عند الحاجة)؟',
-      'क्या आपने टेल लिफ्ट का स्विच और कार्गो लाइटें बंद कर दी हैं (जहाँ लागू हो)?') },
+      'क्या आपने टेल लिफ्ट का स्विच और कार्गो लाइटें बंद कर दी हैं (जहाँ लागू हो)?'), LEFT_ON) },
 
   { name: 'r2', kind: 'yesno', section: SR, required: true, alertOn: ['ja', 'annat'],
     label: 'Har du tagit någon laddkabel, mobilhållare eller spännband från den här bilen?',
-    i18n: tr(SR,
+    commentOptions: TAKEN.sv,
+    i18n: withList(tr(SR,
       'Have you taken any charging cable, phone holder or ratchet strap from this vehicle?',
       'هل أخذت أي كابل شحن أو حامل هاتف أو حزام ربط من هذه المركبة؟',
-      'क्या आपने इस वाहन से कोई चार्जिंग केबल, फ़ोन होल्डर या रैचेट स्ट्रैप लिया है?') },
+      'क्या आपने इस वाहन से कोई चार्जिंग केबल, फ़ोन होल्डर या रैचेट स्ट्रैप लिया है?'), TAKEN) },
 
   { name: 'r3', kind: 'yesno', section: SR, required: true, alertOn: ['ja', 'annat'],
     label: 'Har du orsakat NÅGON skada på den här bilen i dag?',
-    i18n: tr(SR,
+    commentOptions: BODY.sv,
+    i18n: withList(tr(SR,
       'Have you caused ANY damage to this vehicle today?',
       'هل تسببت في أي ضرر لهذه المركبة اليوم؟',
-      'क्या आपने आज इस वाहन को कोई भी नुकसान पहुँचाया है?') },
+      'क्या आपने आज इस वाहन को कोई भी नुकसान पहुँचाया है?'), BODY) },
 
   { name: 'f3', kind: 'yesno', section: S2, required: true, alertOn: ['nej', 'annat'],
     commentOptions: LAMPS,
@@ -177,17 +344,19 @@ const DEFAULT_FIELDS = [
 
   { name: 'f4', kind: 'yesno', section: S2, required: true, alertOn: ['nej', 'annat'],
     label: 'Är däck i bra skick? Om nej, beskriv problemet och rapportera till närmsta ansvarig.',
-    i18n: tr(S2,
+    commentOptions: WHEELS.sv,
+    i18n: withList(tr(S2,
       'Are the tyres in good condition? If no, describe the problem and report it to your nearest supervisor.',
       'هل الإطارات بحالة جيدة؟ إذا كانت الإجابة لا، صف المشكلة وأبلغ المسؤول المباشر.',
-      'क्या टायर अच्छी हालत में हैं? यदि नहीं, तो समस्या बताएं और अपने निकटतम प्रभारी को सूचित करें।') },
+      'क्या टायर अच्छी हालत में हैं? यदि नहीं, तो समस्या बताएं और अपने निकटतम प्रभारी को सूचित करें।'), WHEELS) },
 
   { name: 'f5', kind: 'yesno', section: S2, required: true, alertOn: ['ja', 'annat'],
     label: 'Finns det några nya yttre skador på kaross? Svara ja eller nej.',
-    i18n: tr(S2,
+    commentOptions: BODY.sv,
+    i18n: withList(tr(S2,
       'Is there any new external damage to the bodywork? Answer yes or no.',
       'هل توجد أضرار خارجية جديدة في الهيكل؟ أجب بنعم أو لا.',
-      'क्या बॉडी पर कोई नया बाहरी नुकसान है? हाँ या नहीं में उत्तर दें।') },
+      'क्या बॉडी पर कोई नया बाहरी नुकसान है? हाँ या नहीं में उत्तर दें।'), BODY) },
 
   { name: 'file0', kind: 'photo', section: S2, required: false,
     label: 'Om ja, ta ett foto på skadan/skadorna och rapportera till närmsta ansvarig.',
@@ -198,24 +367,27 @@ const DEFAULT_FIELDS = [
 
   { name: 'f6', kind: 'yesno', section: S2, required: true, alertOn: ['nej', 'annat'],
     label: 'Fungerar bakgavellyft som den ska? Om nej, beskriv problemet och rapportera till närmsta ansvarig.',
-    i18n: tr(S2,
+    commentOptions: TAILLIFT.sv,
+    i18n: withList(tr(S2,
       'Does the tail lift work as it should? If no, describe the problem and report it to your nearest supervisor.',
       'هل تعمل الرافعة الخلفية كما ينبغي؟ إذا كانت الإجابة لا، صف المشكلة وأبلغ المسؤول المباشر.',
-      'क्या टेल लिफ्ट ठीक से काम कर रही है? यदि नहीं, तो समस्या बताएं और सूचित करें।') },
+      'क्या टेल लिफ्ट ठीक से काम कर रही है? यदि नहीं, तो समस्या बताएं और सूचित करें।'), TAILLIFT) },
 
   { name: 'f7', kind: 'yesno', section: S3, required: true, alertOn: ['nej', 'annat'],
     label: 'Är vätskor kontrollerade tex, olja, glykol, spolarvätska? Svara ja eller nej.',
-    i18n: tr(S3,
+    commentOptions: FLUIDS.sv,
+    i18n: withList(tr(S3,
       'Have the fluids been checked – oil, coolant, washer fluid? Answer yes or no.',
       'هل تم فحص السوائل مثل الزيت وسائل التبريد وسائل غسل الزجاج؟ أجب بنعم أو لا.',
-      'क्या तरल पदार्थ जाँचे गए हैं – तेल, कूलेंट, वॉशर द्रव? हाँ या नहीं में उत्तर दें।') },
+      'क्या तरल पदार्थ जाँचे गए हैं – तेल, कूलेंट, वॉशर द्रव? हाँ या नहीं में उत्तर दें।'), FLUIDS) },
 
   { name: 'f8', kind: 'yesno', section: S3, required: true, alertOn: ['nej', 'annat'],
     label: 'Är bilen fulltankad (HVO)? Svara ja eller nej.',
-    i18n: tr(S3,
+    commentOptions: FUELLING.sv,
+    i18n: withList(tr(S3,
       'Is the vehicle fully fuelled (HVO)? Answer yes or no.',
       'هل المركبة ممتلئة بالوقود (HVO)؟ أجب بنعم أو لا.',
-      'क्या वाहन पूरी तरह ईंधन से भरा है (HVO)? हाँ या नहीं में उत्तर दें।') },
+      'क्या वाहन पूरी तरह ईंधन से भरा है (HVO)? हाँ या नहीं में उत्तर दें।'), FUELLING) },
 
   { name: 'f9', kind: 'select', section: S3, required: true, options: ADBLUE,
     label: 'Är fordonet tankat med ADBLUE (mer än 30%)? Svara i hur många procent det finns.',
@@ -225,6 +397,7 @@ const DEFAULT_FIELDS = [
       'क्या वाहन में AdBlue भरा है (30% से अधिक)? शेष प्रतिशत बताएं।') },
 
   { name: 'f10', kind: 'yesno', section: S4, required: true, alertOn: ['ja', 'annat'],
+    commentSource: 'lights',
     label: 'Lyser det några kontroll lampor på instrumentpanelen? Svara ja eller nej.',
     i18n: tr(S4,
       'Are any warning lights lit on the dashboard? Answer yes or no.',
@@ -240,31 +413,35 @@ const DEFAULT_FIELDS = [
 
   { name: 'f11', kind: 'yesno', section: S4, required: true, alertOn: ['nej', 'annat'],
     label: 'Fungerar bältes lås som det ska? Svara ja eller nej.',
-    i18n: tr(S4,
+    commentOptions: BELTS.sv,
+    i18n: withList(tr(S4,
       'Does the seat belt buckle work as it should? Answer yes or no.',
       'هل يعمل قفل حزام الأمان كما ينبغي؟ أجب بنعم أو لا.',
-      'क्या सीट बेल्ट का बकल ठीक से काम कर रहा है? हाँ या नहीं में उत्तर दें।') },
+      'क्या सीट बेल्ट का बकल ठीक से काम कर रहा है? हाँ या नहीं में उत्तर दें।'), BELTS) },
 
   { name: 'f12', kind: 'yesno', section: S4, required: true, alertOn: ['nej', 'annat'],
     label: 'Är bilen städad? (inga lösa föremål i hytt). Svara ja eller nej.',
-    i18n: tr(S4,
+    commentOptions: CLEAN.sv,
+    i18n: withList(tr(S4,
       'Is the cab clean? (no loose objects in the cab). Answer yes or no.',
       'هل المقصورة نظيفة؟ (لا توجد أغراض سائبة في المقصورة). أجب بنعم أو لا.',
-      'क्या केबिन साफ़ है? (केबिन में कोई ढीली वस्तु नहीं)। हाँ या नहीं में उत्तर दें।') },
+      'क्या केबिन साफ़ है? (केबिन में कोई ढीली वस्तु नहीं)। हाँ या नहीं में उत्तर दें।'), CLEAN) },
 
   { name: 'f13', kind: 'yesno', section: S4, required: true, alertOn: ['nej', 'annat'],
     label: 'Fungerar vindrutetorkarna? Svara ja eller nej. Om nej, rapportera till närmast ansvarig.',
-    i18n: tr(S4,
+    commentOptions: WIPERS.sv,
+    i18n: withList(tr(S4,
       'Do the windscreen wipers work? Answer yes or no. If no, report it to your nearest supervisor.',
       'هل تعمل مسّاحات الزجاج الأمامي؟ أجب بنعم أو لا. إذا كانت الإجابة لا، أبلغ المسؤول المباشر.',
-      'क्या विंडस्क्रीन वाइपर काम कर रहे हैं? हाँ या नहीं। यदि नहीं, तो सूचित करें।') },
+      'क्या विंडस्क्रीन वाइपर काम कर रहे हैं? हाँ या नहीं। यदि नहीं, तो सूचित करें।'), WIPERS) },
 
   { name: 'f14', kind: 'yesno', section: S4, required: true, alertOn: ['nej', 'annat'],
     label: 'Fungerar backkameran om denna finns på fordonet? Svara ja eller nej.',
-    i18n: tr(S4,
+    commentOptions: CAMERA.sv,
+    i18n: withList(tr(S4,
       'Does the reversing camera work, if the vehicle has one? Answer yes or no.',
       'هل تعمل كاميرا الرجوع إن وُجدت في المركبة؟ أجب بنعم أو لا.',
-      'क्या रिवर्स कैमरा काम कर रहा है, यदि वाहन में है? हाँ या नहीं में उत्तर दें।') },
+      'क्या रिवर्स कैमरा काम कर रहा है, यदि वाहन में है? हाँ या नहीं में उत्तर दें।'), CAMERA) },
 
   { name: 'f15', kind: 'yesno', section: S4, required: false, alertOn: ['ja', 'annat'],
     label: 'Har fordonet övriga brister? Sara ja eller nej. Om ja rapportera till närmsta ansvarig.',
@@ -284,6 +461,13 @@ const DEFAULT_FIELDS = [
  * RAH84S and all six home vans are deliberately blank. The home fleet
  * comes from the licence-control picker.
  */
+/* The seven vans IBX owns are IVECO Daily, each with a Zepro tail lift —
+   proved one by one from their lift inspection certificates (Bilprovningen,
+   "Fordon: IVECO", chassis numbers ZCFC7…/ZCFCB…). The rented ones and the
+   home fleet have no model recorded yet; their model is set under
+   Admin → Fordon, and until then they get the shared warning-light list. */
+const IVECO = 'iveco-daily';
+
 const DEFAULT_VEHICLES = [
   { plate: 'ODW03R', owner: 'okq8', fleet: 'box' },
   { plate: 'RBE87T', owner: 'okq8', fleet: 'box' },
@@ -292,13 +476,13 @@ const DEFAULT_VEHICLES = [
   { plate: 'HJA34R', owner: 'okq8', fleet: 'box' },
   { plate: 'BBR00N', owner: 'okq8', fleet: 'box' },
   { plate: 'WAT90D', owner: 'okq8', fleet: 'box' },
-  { plate: 'RBE26H', owner: 'own',  fleet: 'box' },
-  { plate: 'RPH54L', owner: 'own',  fleet: 'box' },
-  { plate: 'DHN13H', owner: 'own',  fleet: 'box' },
-  { plate: 'GJR88K', owner: 'own',  fleet: 'box' },
-  { plate: 'ODJ63H', owner: 'own',  fleet: 'box' },
-  { plate: 'ELZ35L', owner: 'own',  fleet: 'box' },
-  { plate: 'SSB55B', owner: 'own',  fleet: 'box' },
+  { plate: 'RBE26H', owner: 'own',  fleet: 'box', modelKey: IVECO },
+  { plate: 'RPH54L', owner: 'own',  fleet: 'box', modelKey: IVECO },
+  { plate: 'DHN13H', owner: 'own',  fleet: 'box', modelKey: IVECO },
+  { plate: 'GJR88K', owner: 'own',  fleet: 'box', modelKey: IVECO },
+  { plate: 'ODJ63H', owner: 'own',  fleet: 'box', modelKey: IVECO },
+  { plate: 'ELZ35L', owner: 'own',  fleet: 'box', modelKey: IVECO },
+  { plate: 'SSB55B', owner: 'own',  fleet: 'box', modelKey: IVECO },
   { plate: 'TTJ00A', owner: '',     fleet: 'box' },
   { plate: 'RAH84S', owner: '',     fleet: 'box' },
   { plate: 'MER05W', owner: '',     fleet: 'home' },
@@ -319,6 +503,7 @@ const RETURN_FIELDS = DEFAULT_FIELDS.filter(f => f.section === SR);
 
 module.exports = {
   FORM_KEY, FORM_TITLE, FORM_I18N, DEFAULT_FIELDS, DEFAULT_VEHICLES, ROUTES, ADBLUE,
+  WHEELS, BODY, TAILLIFT, FLUIDS, FUELLING, BELTS, CLEAN, WIPERS, CAMERA, LEFT_ON, TAKEN,
   SECTION_RENAMES, RETURN_FIELDS, SECTION_RETURN: SR, SECTION_TEXT,
   LAMPS, LAMPS_I18N
 };

@@ -280,6 +280,26 @@ function fill(str, vars) {
   });
 }
 
+/**
+ * Fence off a Latin run inside right-to-left text.
+ *
+ * "\u0644\u0645\u0628\u0629 \u0627\u0644\u0645\u062d\u0631\u0643 (\u0639\u0637\u0644 / EOBD)" is Arabic with four Latin letters in it.
+ * Without an isolate the bidi algorithm hands the closing bracket to the
+ * Latin run, and when the line wraps the bracket goes with it -- the driver
+ * reads a stray "(" at the start of the next line. The same two invisible
+ * characters fill() already uses around a plate do the job here, applied to
+ * whatever Latin, digits or symbols sit inside a translated phrase.
+ *
+ * Left-to-right languages are returned untouched: the characters are
+ * invisible there, but there is no reason to carry them.
+ */
+function isolateLatin(text, lang) {
+  const info = meta(lang);
+  if (!info || info.dir !== 'rtl') return String(text == null ? '' : text);
+  return String(text == null ? '' : text)
+    .replace(/[A-Za-z0-9][A-Za-z0-9./+&_-]*/g, m => '\u2068' + m + '\u2069');
+}
+
 /** One UI string, falling back to Swedish if a translation is missing. */
 function t(lang, key) {
   const code = langOf(lang);
@@ -319,5 +339,5 @@ function allFieldText(field, key = 'label') {
 
 module.exports = {
   LANGS, CODES, DEFAULT_LANG, langOf, meta, UI, t, fill,
-  fieldText, formTitle, allFieldText
+  fieldText, formTitle, allFieldText, isolateLatin
 };

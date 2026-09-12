@@ -28,6 +28,7 @@ const { buildDriverStats } = require('./stats');
 const summaryLib = require('./summary');
 const assignmentLib = require('./assignment');
 const odo = require('./odometer');
+const telltales = require('./telltales');
 const mail = require('./mail');
 const { page, esc, fmtDateTime } = require('./views/layout');
 
@@ -142,6 +143,38 @@ app.get('/', adminAuth, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+/**
+ * Fill in the lists that depend on WHICH VAN this is.
+ *
+ * A question may say its follow-up list comes from the vehicle
+ * (`comment_source = 'lights'`). The dashboard telltales of an IVECO Daily are
+ * not those of a Sprinter, so the list cannot live on the shared form: it is
+ * resolved here, once, for both the page and the submit handler — they must
+ * agree about what is offerable or a driver would be refused an answer the
+ * page just gave them.
+ *
+ * What is stored is the lamp's CODE. The names for all four languages are
+ * written into the field's i18n blob (including Swedish, which normally has
+ * none) so everything downstream — the picker, the receipt, the admin view,
+ * the daily mail — reads them the same way as any other list.
+ */
+function expandForm(form, vehicle) {
+  const lights = telltales.lightsFor(vehicle && vehicle.model_key);
+  for (const f of form.fields) {
+    if (f.comment_source !== 'lights') continue;
+    f.comment_options = lights.map(l => l.code);
+    f.lights = lights;                       // the page draws the symbols
+    const blob = { ...(f.i18n || {}) };
+    for (const code of i18n.CODES) {
+      blob[code] = { ...(blob[code] || {}),
+        commentOptions: lights.map(l => l[code] || l.sv),
+        pickLabel: telltales.PICK_LABEL[code] || telltales.PICK_LABEL.sv };
+    }
+    f.i18n = blob;
+  }
+  return form;
+}
+
 app.get('/v/:plate', async (req, res, next) => {
   try {
     const vehicle = await db.getVehicle(req.params.plate);
@@ -158,6 +191,7 @@ app.get('/v/:plate', async (req, res, next) => {
       return errorPage(res, 500, 'Inget formulär',
         'Det finns inget formulär att fylla i. Skapa ett under Admin → Formulär.');
     }
+    expandForm(form, vehicle);
     const today = summaryLib.dayKey();
     const weekFrom = assignmentLib.shiftDay(today, -6);
     const [latest, sources, todayRows, history, meter] = await Promise.all([
@@ -201,6 +235,7 @@ app.post('/v/:plate', upload, async (req, res, next) => {
     }
 
     const lang = i18n.langOf(req.body.__lang);
+    expandForm(form, vehicle);
     const sources = await formSources(form);
 
     // Only questions this form defines are read; anything else is dropped.
@@ -841,9 +876,13 @@ function readVehicleBody(body) {
   const owner = OWNERS.has(body.owner) ? body.owner : '';
   const fleet = FLEETS.has(body.fleet) ? body.fleet : 'box';
   const formId = /^\d+$/.test(String(body.formId || '')) ? Number(body.formId) : null;
+  // An unknown model key is dropped rather than stored: the warning-light
+  // list falls back to the shared one, which is the safe direction.
+  const modelKey = telltales.MODEL_KEYS.includes(body.modelKey) && body.modelKey !== 'generic'
+    ? body.modelKey : '';
   return {
     plate: normalisePlate(body.plate),
-    owner, fleet, formId,
+    owner, fleet, formId, modelKey,
     note: String(body.note || '').slice(0, 500),
     active: body.active === '1'
   };
@@ -954,8 +993,11 @@ function readFieldBody(body) {
     }
   }
 
+  const commentSource = body.commentSource === 'lights' ? 'lights' : '';
+
   return {
     kind,
+    commentSource,
     label: String(body.label || '').trim().slice(0, 500),
     section: String(body.section || '').trim().slice(0, 120),
     required: body.required === '1' && kind !== 'info',

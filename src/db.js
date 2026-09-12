@@ -256,6 +256,10 @@ ALTER TABLE form_fields ADD COLUMN IF NOT EXISTS i18n     JSONB NOT NULL DEFAULT
 -- reading fifteen spellings of the same lamp. The list is per question and
 -- editable, and its translations ride in the same i18n blob as the label.
 ALTER TABLE form_fields ADD COLUMN IF NOT EXISTS comment_options JSONB NOT NULL DEFAULT '[]'::jsonb;
+-- Where that list comes from. '' = the question's own list (above); 'lights' =
+-- the dashboard telltales of the vehicle being checked, which differ per model
+-- and are therefore not something one shared form can hold.
+ALTER TABLE form_fields ADD COLUMN IF NOT EXISTS comment_source TEXT NOT NULL DEFAULT '';
 CREATE INDEX IF NOT EXISTS form_fields_order_idx ON form_fields (form_id, position);
 
 ALTER TABLE forms ADD COLUMN IF NOT EXISTS i18n JSONB NOT NULL DEFAULT '{}'::jsonb;
@@ -291,6 +295,10 @@ CREATE TABLE IF NOT EXISTS vehicles (
   sort_order  INTEGER NOT NULL DEFAULT 0,
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+-- Which van this is. It decides the warning-light list the driver is offered,
+-- so it belongs to the vehicle rather than to the form. Empty means "not set
+-- yet" and falls back to the shared list.
+ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS model_key TEXT NOT NULL DEFAULT '';
 CREATE INDEX IF NOT EXISTS vehicles_order_idx ON vehicles (fleet, sort_order, plate);
 
 CREATE TABLE IF NOT EXISTS submissions (
@@ -385,11 +393,12 @@ async function seedIfEmpty(client) {
       await client.query(
         `INSERT INTO form_fields
            (form_id, position, name, kind, label, section, required, role,
-            options, source, alert_on, i18n)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+            options, source, alert_on, i18n, comment_options, comment_source)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
         [formId, pos += 10, f.name, f.kind, f.label, f.section || '', !!f.required, f.role || '',
          JSON.stringify(f.options || []), f.source || '',
-         JSON.stringify(f.alertOn || []), JSON.stringify(f.i18n || {})]);
+         JSON.stringify(f.alertOn || []), JSON.stringify(f.i18n || {}),
+         JSON.stringify(f.commentOptions || []), f.commentSource || '']);
     }
     console.log(`[db] seeded default form with ${seed.DEFAULT_FIELDS.length} questions`);
   }
@@ -399,8 +408,9 @@ async function seedIfEmpty(client) {
     let order = 0;
     for (const car of seed.DEFAULT_VEHICLES) {
       await client.query(
-        `INSERT INTO vehicles (plate, owner, fleet, sort_order) VALUES ($1,$2,$3,$4)`,
-        [car.plate, car.owner, car.fleet, order += 10]);
+        `INSERT INTO vehicles (plate, owner, fleet, sort_order, model_key)
+         VALUES ($1,$2,$3,$4,$5)`,
+        [car.plate, car.owner, car.fleet, order += 10, car.modelKey || '']);
     }
     console.log(`[db] seeded ${seed.DEFAULT_VEHICLES.length} vehicles`);
   }
@@ -572,6 +582,87 @@ async function addLampsAndKilometres(client) {
   return { km: km.rowCount, lamps: withLamps.rowCount };
 }
 
+/**
+ * Give every question its follow-up list, point the warning-light question at
+ * the vehicle, and record which vans are IVECO Daily.
+ *
+ * Timid like the migrations above, and each part independently so one edited
+ * question does not stop the rest: a list is only filled in where the question
+ * still reads exactly as the template's AND has no list of its own, and a
+ * model is only set on a vehicle that has none. Recorded in `jobs`.
+ */
+const LISTS_UPGRADE_KEY = 'seed-2026-09-13-per-question-lists-and-models';
+
+async function addQuestionLists(client) {
+  const done = await client.query('SELECT 1 FROM jobs WHERE name = $1', [LISTS_UPGRADE_KEY]);
+  if (done.rowCount) return null;
+
+  let lists = 0, lamps = 0;
+  for (const f of seed.DEFAULT_FIELDS) {
+    if ((f.commentOptions || []).length) {
+      const r = await client.query(
+        `UPDATE form_fields
+            SET comment_options = $3::jsonb, i18n = i18n || $4::jsonb
+          WHERE name = $1 AND label = $2 AND comment_options = '[]'::jsonb`,
+        [f.name, f.label, JSON.stringify(f.commentOptions), JSON.stringify(f.i18n || {})]);
+      lists += r.rowCount;
+    }
+    if (f.commentSource) {
+      const r = await client.query(
+        `UPDATE form_fields SET comment_source = $3
+          WHERE name = $1 AND label = $2 AND comment_source = ''`,
+        [f.name, f.label, f.commentSource]);
+      lamps += r.rowCount;
+    }
+  }
+
+  /* The little question above each list ("Where on the vehicle?"). It rides
+     along in the blob above for a question that is getting its list now, but
+     the two questions that were given their lists by an earlier upgrade are
+     already past that test -- so their heading is set here, and only where
+     nobody has written one. */
+  let heads = 0;
+  for (const f of seed.DEFAULT_FIELDS) {
+    const blob = f.i18n || {};
+    const heading = {};
+    for (const c of ['sv', 'en', 'ar', 'hi']) {
+      if (blob[c] && blob[c].pickLabel) heading[c] = blob[c].pickLabel;
+    }
+    const codes = Object.keys(heading);
+    if (!codes.length) continue;
+    // One column, so the four languages are nested rather than listed.
+    let expr = 'i18n';
+    codes.forEach((c, i) => {
+      expr = `jsonb_set(${expr}, '{${c}}', ` +
+             `coalesce(${expr}->'${c}', '{}'::jsonb) || $${i + 3}::jsonb, true)`;
+    });
+    const r = await client.query(
+      `UPDATE form_fields SET i18n = ${expr}
+        WHERE name = $1 AND label = $2
+          AND NOT (coalesce(i18n->'sv', '{}'::jsonb) ? 'pickLabel')`,
+      [f.name, f.label, ...codes.map(c => JSON.stringify({ pickLabel: heading[c] }))]);
+    heads += r.rowCount;
+  }
+
+  let models = 0;
+  for (const car of seed.DEFAULT_VEHICLES) {
+    if (!car.modelKey) continue;
+    const r = await client.query(
+      `UPDATE vehicles SET model_key = $2 WHERE plate = $1 AND model_key = ''`,
+      [car.plate, car.modelKey]);
+    models += r.rowCount;
+  }
+
+  await client.query(
+    `INSERT INTO jobs (name, last_run, note) VALUES ($1, now(), $2)
+     ON CONFLICT (name) DO NOTHING`,
+    [LISTS_UPGRADE_KEY,
+     `${lists} frågor fick välj-lista, ${lamps} frågor kopplade till fordonets lampor, ` +
+     `${heads} frågor fick egen ledtext, ${models} fordon fick modell`]);
+
+  return { lists, lamps, models, heads };
+}
+
 async function init() {
   pool = await connectWithRetry();
   await pool.query(SCHEMA);
@@ -582,7 +673,12 @@ async function init() {
     const upgraded = await upgradeSeededFields(client);
     const added = await addReturnQuestions(client);
     const lamps = await addLampsAndKilometres(client);
+    const lists = await addQuestionLists(client);
     await client.query('COMMIT');
+    if (lists && (lists.lists || lists.lamps || lists.models)) {
+      console.log(`[db] välj-listor på ${lists.lists} frågor, ${lists.lamps} fråga kopplad ` +
+        `till fordonets varningslampor, modell satt på ${lists.models} fordon`);
+    }
     if (lamps && (lamps.km || lamps.lamps)) {
       console.log(`[db] mätarfrågan till kilometer i ${lamps.km} formulär, ` +
         `lampval på ${lamps.lamps} belysningsfrågor`);
@@ -608,7 +704,7 @@ async function init() {
  * Vehicles                                                            *
  * ------------------------------------------------------------------ */
 
-const VEHICLE_COLS = `id, plate, owner, fleet, note, active, form_id, sort_order`;
+const VEHICLE_COLS = `id, plate, owner, fleet, note, active, form_id, sort_order, model_key`;
 
 async function listVehicles({ includeInactive = false } = {}) {
   const where = includeInactive ? '' : 'WHERE active';
@@ -630,22 +726,23 @@ async function getVehicleById(id) {
   return r.rows[0] || null;
 }
 
-async function createVehicle({ plate, owner = '', fleet = 'box', note = '', formId = null }) {
+async function createVehicle({ plate, owner = '', fleet = 'box', note = '', formId = null,
+                               modelKey = '' }) {
   const r = await pool.query(
-    `INSERT INTO vehicles (plate, owner, fleet, note, form_id, sort_order)
-     VALUES ($1,$2,$3,$4,$5,
+    `INSERT INTO vehicles (plate, owner, fleet, note, form_id, model_key, sort_order)
+     VALUES ($1,$2,$3,$4,$5,$6,
              COALESCE((SELECT MAX(sort_order) FROM vehicles WHERE fleet = $3), 0) + 10)
      RETURNING ${VEHICLE_COLS}`,
-    [normalisePlate(plate), owner, fleet, note, formId]);
+    [normalisePlate(plate), owner, fleet, note, formId, modelKey || '']);
   return r.rows[0];
 }
 
-async function updateVehicle(id, { plate, owner, fleet, note, active, formId }) {
+async function updateVehicle(id, { plate, owner, fleet, note, active, formId, modelKey }) {
   const r = await pool.query(
     `UPDATE vehicles SET plate = $2, owner = $3, fleet = $4, note = $5,
-            active = $6, form_id = $7
+            active = $6, form_id = $7, model_key = $8
       WHERE id = $1 RETURNING ${VEHICLE_COLS}`,
-    [id, normalisePlate(plate), owner, fleet, note, active, formId]);
+    [id, normalisePlate(plate), owner, fleet, note, active, formId, modelKey || '']);
   return r.rows[0] || null;
 }
 
@@ -765,19 +862,20 @@ async function nextFieldName(formId) {
 
 async function addField(formId, {
   kind, label, section = '', required = false, role = '',
-  options = [], source = '', alertOn = [], i18n = {}, commentOptions = []
+  options = [], source = '', alertOn = [], i18n = {}, commentOptions = [],
+  commentSource = ''
 }) {
   const name = await nextFieldName(formId);
   const r = await pool.query(
     `INSERT INTO form_fields
        (form_id, position, name, kind, label, section, required, role,
-        options, source, alert_on, i18n, comment_options)
+        options, source, alert_on, i18n, comment_options, comment_source)
      VALUES ($1, COALESCE((SELECT MAX(position) FROM form_fields WHERE form_id = $1), 0) + 10,
-             $2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+             $2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
      RETURNING *`,
     [formId, name, kind, label, section, required, role,
      JSON.stringify(options), source, JSON.stringify(alertOn), JSON.stringify(i18n),
-     JSON.stringify(commentOptions || [])]);
+     JSON.stringify(commentOptions || []), commentSource || '']);
   await touchForm(formId);
   return r.rows[0];
 }
@@ -790,17 +888,17 @@ async function getField(id) {
 
 async function updateField(id, {
   kind, label, section, required, role, options, source, alertOn, i18n,
-  commentOptions
+  commentOptions, commentSource
 }) {
   const r = await pool.query(
     `UPDATE form_fields SET kind = $2, label = $3, section = $4, required = $5,
             role = $6, options = $7, source = $8, alert_on = $9, i18n = $10,
-            comment_options = $11
+            comment_options = $11, comment_source = $12
       WHERE id = $1 RETURNING form_id`,
     [id, kind, label, section, required, role,
      JSON.stringify(options || []), source || '',
      JSON.stringify(alertOn || []), JSON.stringify(i18n || {}),
-     JSON.stringify(commentOptions || [])]);
+     JSON.stringify(commentOptions || []), commentSource || '']);
   if (r.rows.length) await touchForm(r.rows[0].form_id);
 }
 
@@ -860,8 +958,11 @@ async function saveSubmission({
       alert_on: Array.isArray(f.alert_on) ? f.alert_on : [],
       options: Array.isArray(f.options) ? f.options : [],
       // The follow-up list as it stood: a lamp removed from the list next
-      // month must still read back on last month's check.
+      // month must still read back on last month's check. For a list that came
+      // from the vehicle's model these are codes, and the names for every
+      // language ride in `i18n` beside them.
       comment_options: Array.isArray(f.comment_options) ? f.comment_options : [],
+      comment_source: f.comment_source || '',
       source: f.source || '',
       i18n: f.i18n || {}
     }));
