@@ -261,3 +261,106 @@ footer{border-top:1px solid var(--border);padding:18px 24px;color:var(--muted);f
 .good-text{color:#256b38}
 .ok-text{color:#8a6314}
 .bad-text{color:#a33}
+
+/* ---- who the vehicle was given to today ---------------------------------
+ *
+ * The name is already in the driver field when the page opens; this line says
+ * where it came from, so a driver who is NOT that person understands why
+ * somebody else's name is showing and changes it. Quiet colours: it is a
+ * statement of fact, not a warning. */
+.assign-box {
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  border: 1px solid #cfe3d4;
+  border-left: 4px solid #1f7a3e;
+  border-radius: 8px;
+  background: #f2f9f4;
+}
+.assign-tag {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: #1f7a3e;
+}
+.assign-line { margin: 2px 0 0; font-size: 15px; font-weight: 600; }
+.assign-hint { margin: 2px 0 0; font-size: 12px; color: #5b6b60; }
+
+/* ---- the driver-change confirmation -------------------------------------
+ *
+ * Amber, and directly under the name that raised it. It is not one of the
+ * form's own questions: it appears because today's assignment says somebody
+ * else has this van, and it is enforced again on the server. */
+.change-box[hidden] { display: none; }
+.change-box {
+  margin: 10px 0 4px;
+  padding: 12px;
+  border: 1px solid #f0c27a;
+  border-left: 4px solid #d98a00;
+  border-radius: 8px;
+  background: #fff8ec;
+}
+.change-head {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  color: #a86b00;
+  margin-bottom: 4px;
+}
+.change-q { margin: 0 0 10px; font-size: 14px; line-height: 1.45; font-weight: 600; }
+.change-approver { margin-top: 10px; }
+.change-approver label { display: block; font-size: 13px; margin-bottom: 4px; }
+
+/* ---- drivers of this vehicle in the last week ---------------------------
+ *
+ * Top of the page, collapsible, one line per day. It answers "who has been in
+ * this car" without anyone having to ask over the radio. */
+.week-box {
+  margin: 0 0 12px;
+  border: 1px solid #d9dee4;
+  border-radius: 8px;
+  background: #fbfcfd;
+  font-size: 13px;
+}
+.week-box > summary {
+  cursor: pointer;
+  padding: 8px 12px;
+  font-weight: 600;
+  color: #2b3540;
+}
+.week-list { list-style: none; margin: 0; padding: 0 12px 10px; }
+.week-list li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  padding: 6px 0;
+  border-top: 1px solid #eceff3;
+  line-height: 1.4;
+}
+.week-list .wd { min-width: 9.5em; font-variant-numeric: tabular-nums; color: #5a6673; }
+.week-list .wd em { font-style: normal; font-weight: 700; color: #1f7a3e; }
+.week-list b {
+  font-weight: 700;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .03em;
+  color: #8a95a1;
+  margin-inline-end: 4px;
+}
+.week-list .swapped {
+  display: inline-block;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: #fff2d8;
+  color: #a86b00;
+  font-size: 11px;
+  font-weight: 700;
+}
+.week-none { margin: 0; padding: 0 12px 10px; color: #6b7580; }
+
+/* A check whose driver was swapped is not an error, but it is the one card on
+   the page somebody came to read. */
+.card-warn { border-color: #f0c27a; }
+.card-warn > .card-header { background: #fff8ec; color: #a86b00; }

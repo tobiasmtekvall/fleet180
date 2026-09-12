@@ -68,6 +68,13 @@ function buildDay({ date, submissions, vehicles, fallback = [], assignments = []
       driver: s.driver_name || '',
       route: s.route || '',
       odometer: s.odometer || '',
+      // Filed by somebody other than the driver this van was given to, and
+      // by whose leave. Carried through to the mail and to the extension's
+      // day view: a vehicle change that nobody sees is the reason the
+      // question is asked at all.
+      assignedDriver: s.assigned_driver || '',
+      driverChanged: !!s.driver_changed,
+      approver: s.change_approver || '',
       at: s.submitted_at,
       time: clockTime(s.submitted_at),
       photos: s.photo_count || 0,
@@ -77,6 +84,11 @@ function buildDay({ date, submissions, vehicles, fallback = [], assignments = []
     checks.push(check);
     for (const f of flags) issues.push({ ...f, plate: s.plate, driver: check.driver, time: check.time, id: check.id });
   }
+
+  const changes = checks.filter(c => c.driverChanged).map(c => ({
+    plate: c.plate, driver: c.driver, assignedDriver: c.assignedDriver,
+    approver: c.approver, time: c.time, id: c.id
+  }));
 
   const checkedPlates = new Set(checks.map(c => c.plate));
   const missing = vehicles.filter(v => !checkedPlates.has(v.plate)).map(v => v.plate);
@@ -116,6 +128,7 @@ function buildDay({ date, submissions, vehicles, fallback = [], assignments = []
     issues,
     missing,
     doubled,
+    changes,
     assigned,
     counts: {
       checks: checks.length,
@@ -126,7 +139,8 @@ function buildDay({ date, submissions, vehicles, fallback = [], assignments = []
       photos: checks.reduce((n, c) => n + c.photos, 0),
       assigned: assigned.length,
       assignedDone,
-      assignedMissing: assigned.length - assignedDone
+      assignedMissing: assigned.length - assignedDone,
+      changes: changes.length
     }
   };
 }
@@ -171,6 +185,21 @@ function renderHtml(day, baseUrl) {
       </tr>`).join('')
     : '';
 
+  const changeRows = (day.changes || []).map(c => `<tr>
+        <td style="padding:5px 10px;border-bottom:1px solid #eee;white-space:nowrap"><strong>${esc(c.plate)}</strong></td>
+        <td style="padding:5px 10px;border-bottom:1px solid #eee">${esc(c.assignedDriver || '—')} → <strong>${esc(c.driver || '—')}</strong></td>
+        <td style="padding:5px 10px;border-bottom:1px solid #eee">${esc(c.approver || '—')}</td>
+        <td style="padding:5px 10px;border-bottom:1px solid #eee;white-space:nowrap">${esc(c.time)}</td>
+      </tr>`).join('');
+
+  const changeBlock = (day.changes || []).length ? `
+  <h2 style="font-size:16px;margin:22px 0 8px">Bilbyten
+    <span style="font-weight:400;color:#6c757d;font-size:13px">
+      – ${esc((day.changes || []).length)} kontroll(er) gjordes av någon annan än den tilldelade föraren</span></h2>
+  <table style="width:100%;border-collapse:collapse;font-size:14px;background:#fff;border:1px solid #e6e6e6">
+    ${changeRows}
+  </table>` : '';
+
   const assignedBlock = (day.assigned || []).length ? `
   <h2 style="font-size:16px;margin:22px 0 8px">Dagens tilldelning
     <span style="font-weight:400;color:#6c757d;font-size:13px">
@@ -195,6 +224,7 @@ function renderHtml(day, baseUrl) {
   </p>
 
   ${assignedBlock}
+  ${changeBlock}
 
   <h2 style="font-size:16px;margin:22px 0 8px">Att åtgärda</h2>
   <table style="width:100%;border-collapse:collapse;font-size:14px;background:#fff;border:1px solid #e6e6e6">
@@ -228,6 +258,14 @@ function renderText(day) {
     }
     lines.push('');
   }
+  if ((day.changes || []).length) {
+    lines.push('BILBYTEN (annan förare än den tilldelade):');
+    for (const c of day.changes) {
+      lines.push(`  ${c.plate}  ${c.assignedDriver || '—'} -> ${c.driver || '—'}  ` +
+        `godkänt av ${c.approver || '—'}  ${c.time}`);
+    }
+    lines.push('');
+  }
   lines.push('ATT ÅTGÄRDA:');
   if (day.issues.length) {
     for (const i of day.issues) lines.push(`  ${i.plate}  ${i.question} -> ${i.answer}  (${i.driver} ${i.time})`);
@@ -246,6 +284,7 @@ function renderText(day) {
 function subject(day) {
   const parts = [`Fleet 180 ${day.date}: ${day.counts.checks} kontroller` +
     (day.counts.assigned ? ` (${day.counts.assignedDone}/${day.counts.assigned} tilldelade)` : '')];
+  if (day.counts.changes) parts.push(`${day.counts.changes} bilbyte${day.counts.changes === 1 ? '' : 'n'}`);
   if (day.counts.issues) parts.push(`${day.counts.issues} att åtgärda`);
   if (day.counts.missing) parts.push(`${day.counts.missing} utan kontroll`);
   return parts.join(', ');

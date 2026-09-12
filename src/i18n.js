@@ -58,6 +58,26 @@ const UI = {
     filledIn: 'Ifylld kontroll',
     newCheck: 'Ny kontroll för',
     allVehicles: 'Alla fordon',
+    assignedToday: 'Tilldelad i dag',
+    assignedLine: '{driver} är tilldelad {plate} i dag.',
+    assignedLineRoute: '{driver} är tilldelad {plate} i dag, rutt {route}.',
+    assignedPrefilled: 'Namnet är ifyllt åt dig. Ändra det bara om någon annan kör bilen.',
+    assignedNone: 'Ingen förare är tilldelad den här bilen i dag.',
+    assignedSeveral: 'Flera förare är tilldelade den här bilen i dag. Se till att ditt eget namn står i förarfältet.',
+    changeTitle: 'Byte av förare',
+    changeQuestion: '{assigned} var tilldelad {plate} i dag. Har du ersatt föraren, och har du OK från OC eller Fleet Manager att byta bil?',
+    changeQuestionRoute: '{assigned} var tilldelad {plate} i dag på rutt {route}. Har du ersatt föraren på rutten, och har du OK från OC eller Fleet Manager att byta bil?',
+    changeApprover: 'Namn på den OC eller Fleet Manager som godkänt bytet',
+    changeApproverPlaceholder: 'För- och efternamn',
+    changeNeedAnswer: 'Svara Ja eller Nej på frågan om förarbytet.',
+    changeNeedApprover: 'Skriv namnet på den som godkänt bytet.',
+    changeBlocked: 'Kontakta OC eller Fleet Manager innan du kör bilen. Kontrollen går inte att skicka in förrän bytet är godkänt.',
+    weekTitle: 'Förare på bilen, senaste 7 dagarna',
+    weekNone: 'Ingen förare registrerad på bilen de senaste 7 dagarna.',
+    weekAssigned: 'Tilldelad',
+    weekChecked: 'Kontroll',
+    weekSwapped: 'bytt',
+    weekToday: 'i dag',
     languageLabel: 'Språk'
   },
   en: {
@@ -89,6 +109,26 @@ const UI = {
     filledIn: 'Completed check',
     newCheck: 'New check for',
     allVehicles: 'All vehicles',
+    assignedToday: 'Assigned today',
+    assignedLine: '{driver} is assigned to {plate} today.',
+    assignedLineRoute: '{driver} is assigned to {plate} today, route {route}.',
+    assignedPrefilled: 'Your name is filled in. Change it only if someone else is driving.',
+    assignedNone: 'No driver is assigned to this vehicle today.',
+    assignedSeveral: 'Several drivers are assigned to this vehicle today. Make sure your own name is in the driver field.',
+    changeTitle: 'Driver change',
+    changeQuestion: '{assigned} was assigned {plate} today. Were you swapped in for that driver, and do you have an OK from the OC or Fleet Manager to use this vehicle?',
+    changeQuestionRoute: '{assigned} was assigned {plate} today on route {route}. Were you swapped in on that route, and do you have an OK from the OC or Fleet Manager to use this vehicle?',
+    changeApprover: 'Who approved it? (OC or Fleet Manager)',
+    changeApproverPlaceholder: 'First and last name',
+    changeNeedAnswer: 'Answer Yes or No to the driver change question.',
+    changeNeedApprover: 'Write the name of the person who approved the change.',
+    changeBlocked: 'Contact the OC or Fleet Manager before driving the vehicle. The check cannot be submitted until the change is approved.',
+    weekTitle: 'Drivers of this vehicle, last 7 days',
+    weekNone: 'No driver recorded for this vehicle in the last 7 days.',
+    weekAssigned: 'Assigned',
+    weekChecked: 'Checked by',
+    weekSwapped: 'swapped',
+    weekToday: 'today',
     languageLabel: 'Language'
   },
   ar: {
@@ -120,6 +160,26 @@ const UI = {
     filledIn: 'الفحص المكتمل',
     newCheck: 'فحص جديد للمركبة',
     allVehicles: 'كل المركبات',
+    assignedToday: 'تخصيص اليوم',
+    assignedLine: 'المركبة {plate} مخصّصة اليوم لـ {driver}',
+    assignedLineRoute: 'المركبة {plate} مخصّصة اليوم لـ {driver}، المسار {route}',
+    assignedPrefilled: 'تم ملء الاسم تلقائيًا. غيّره فقط إذا كان يقود المركبة شخص آخر.',
+    assignedNone: 'لا يوجد سائق مخصّص لهذه المركبة اليوم.',
+    assignedSeveral: 'أكثر من سائق مخصّص لهذه المركبة اليوم. تأكّد من أن اسمك أنت هو المكتوب في خانة السائق.',
+    changeTitle: 'تغيير السائق',
+    changeQuestion: 'المركبة {plate} كانت مخصّصة اليوم لـ {assigned}. هل حللت محل هذا السائق، وهل لديك موافقة من منسّق العمليات (OC) أو مدير الأسطول (Fleet Manager) على استخدام هذه المركبة؟',
+    changeQuestionRoute: 'المركبة {plate} كانت مخصّصة اليوم لـ {assigned} على المسار {route}. هل حللت محل هذا السائق على هذا المسار، وهل لديك موافقة من منسّق العمليات (OC) أو مدير الأسطول (Fleet Manager) على استخدام هذه المركبة؟',
+    changeApprover: 'اسم منسّق العمليات أو مدير الأسطول (Fleet Manager) الذي وافق',
+    changeApproverPlaceholder: 'الاسم الأول واسم العائلة',
+    changeNeedAnswer: 'أجب بنعم أو لا عن سؤال تغيير السائق.',
+    changeNeedApprover: 'اكتب اسم الشخص الذي وافق على التغيير.',
+    changeBlocked: 'تواصل مع منسّق العمليات أو مدير الأسطول قبل قيادة المركبة. لا يمكن إرسال الفحص قبل الموافقة على التغيير.',
+    weekTitle: 'سائقو هذه المركبة خلال آخر 7 أيام',
+    weekNone: 'لا يوجد سائق مسجّل لهذه المركبة خلال آخر 7 أيام.',
+    weekAssigned: 'التخصيص',
+    weekChecked: 'الفحص',
+    weekSwapped: 'تغيير السائق',
+    weekToday: 'اليوم',
     languageLabel: 'اللغة'
   },
   hi: {
@@ -151,9 +211,50 @@ const UI = {
     filledIn: 'पूर्ण जाँच',
     newCheck: 'के लिए नई जाँच',
     allVehicles: 'सभी वाहन',
+    assignedToday: 'आज असाइन किया गया',
+    assignedLine: 'आज वाहन {plate} {driver} को असाइन किया गया है।',
+    assignedLineRoute: 'आज वाहन {plate} {driver} को असाइन किया गया है, रूट {route}।',
+    assignedPrefilled: 'नाम आपके लिए भर दिया गया है। इसे तभी बदलें जब कोई और वाहन चला रहा हो।',
+    assignedNone: 'आज इस वाहन के लिए कोई ड्राइवर असाइन नहीं है।',
+    assignedSeveral: 'आज इस वाहन के लिए एक से अधिक ड्राइवर असाइन हैं। ध्यान दें कि ड्राइवर फ़ील्ड में आपका अपना नाम हो।',
+    changeTitle: 'ड्राइवर बदलाव',
+    changeQuestion: 'आज वाहन {plate} {assigned} को असाइन था। क्या आपको इस ड्राइवर की जगह भेजा गया है, और क्या आपके पास यह वाहन चलाने के लिए OC या फ़्लीट मैनेजर की अनुमति है?',
+    changeQuestionRoute: 'आज रूट {route} पर वाहन {plate} {assigned} को असाइन था। क्या आपको उस रूट पर इस ड्राइवर की जगह भेजा गया है, और क्या आपके पास यह वाहन चलाने के लिए OC या फ़्लीट मैनेजर की अनुमति है?',
+    changeApprover: 'अनुमति देने वाले OC या फ़्लीट मैनेजर का नाम',
+    changeApproverPlaceholder: 'पूरा नाम',
+    changeNeedAnswer: 'ड्राइवर बदलने के प्रश्न का उत्तर हाँ या नहीं में दें।',
+    changeNeedApprover: 'अनुमति देने वाले व्यक्ति का नाम लिखें।',
+    changeBlocked: 'वाहन चलाने से पहले OC या फ़्लीट मैनेजर से संपर्क करें। अनुमति मिलने तक जाँच भेजी नहीं जा सकती।',
+    weekTitle: 'पिछले 7 दिनों में इस वाहन के ड्राइवर',
+    weekNone: 'पिछले 7 दिनों में इस वाहन के लिए कोई ड्राइवर दर्ज नहीं है।',
+    weekAssigned: 'असाइन',
+    weekChecked: 'जाँच की',
+    weekSwapped: 'बदला गया',
+    weekToday: 'आज',
     languageLabel: 'भाषा'
   }
 };
+
+/**
+ * A UI string with {placeholders} replaced.
+ *
+ * The names, plates and routes in these sentences come from the assignment,
+ * so the sentence has to be built per language and written into the page for
+ * all four at once -- the flags swap text without reloading, and a sentence
+ * that came back from the server in one language only would freeze in it.
+ */
+function fill(str, vars) {
+  return String(str).replace(/\{(\w+)\}/g, (m, k) => {
+    if (!vars || vars[k] === undefined || vars[k] === null) return m;
+    // Every value substituted here is Latin script -- a name, a registration,
+    // a route id -- and most of them land inside an Arabic sentence. Without
+    // an isolate the bidi algorithm lets a following full stop or comma jump
+    // to the wrong end of the plate ("‎.ODW03R"), which is how a driver ends
+    // up reading a registration that is not the one on the van. The two
+    // characters are invisible in the three left-to-right languages.
+    return '\u2068' + String(vars[k]) + '\u2069';
+  });
+}
 
 /** One UI string, falling back to Swedish if a translation is missing. */
 function t(lang, key) {
@@ -193,6 +294,6 @@ function allFieldText(field, key = 'label') {
 }
 
 module.exports = {
-  LANGS, CODES, DEFAULT_LANG, langOf, meta, UI, t,
+  LANGS, CODES, DEFAULT_LANG, langOf, meta, UI, t, fill,
   fieldText, formTitle, allFieldText
 };

@@ -132,13 +132,30 @@ function adminDetailPage({ s, fallbackFields }) {
     return `<tr><td>${esc(q.label)}</td><td>${esc(formatAnswer(q, answers[q.name]))}</td></tr>`;
   }).join('\n');
 
+  /* Who the van was given to that day, and -- when the check was signed by
+     somebody else -- who allowed the change. Read off the check itself, not
+     looked up: the assignment it was measured against may have been replaced
+     by a later run of the assigner. */
+  const assignedBlock = (s.assigned_driver || s.driver_changed) ? `
+  <div class="card${s.driver_changed ? ' card-warn' : ''}">
+    <div class="card-header">Tilldelning${s.driver_changed ? '<span class="step-tag">Föraren byttes</span>' : ''}</div>
+    <div class="card-body"><table class="kv">
+      <tr><td>Tilldelad förare</td><td>${esc(s.assigned_driver || '—')}</td></tr>
+      <tr><td>Tilldelad rutt</td><td>${esc(s.assigned_route || '—')}</td></tr>
+      ${s.driver_changed ? `<tr><td>Kontrollen gjord av</td><td>${esc(s.driver_name || '—')}</td></tr>
+      <tr><td>Godkänt av (OC / Fleet Manager)</td><td>${esc(s.change_approver || '—')}</td></tr>` : ''}
+    </table></div>
+  </div>
+` : '';
+
   const html = `  <div class="page-head">
     <h1>Kontroll #${esc(s.id)}</h1>
     <div class="plate">${esc(s.plate)}</div>
   </div>
   <p class="lede">${esc(fmtDateTime(s.submitted_at))} · förare ${esc(s.driver_name || '—')} ·
-     rutt ${esc(s.route || '—')} · miltal ${esc(s.odometer || '—')}</p>
-
+     rutt ${esc(s.route || '—')} · miltal ${esc(s.odometer || '—')}${
+       s.driver_changed ? ' · <strong>bilbyte godkänt av ' + esc(s.change_approver || '—') + '</strong>' : ''}</p>
+${assignedBlock}
   <div class="card">
     <div class="card-header">Svar<span class="step-tag">${esc(s.form_title || s.form_key)}</span></div>
     <div class="card-body"><table class="kv">

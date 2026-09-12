@@ -308,6 +308,14 @@ ALTER TABLE submissions ADD COLUMN IF NOT EXISTS lang       TEXT NOT NULL DEFAUL
 -- Unguessable handle for the receipt. A driver scanning a QR code may read
 -- their own receipt and nobody else's, so the id alone is not enough.
 ALTER TABLE submissions ADD COLUMN IF NOT EXISTS public_key TEXT;
+-- What the assigner had decided for this vehicle on the day the check was
+-- filed, kept ON the check rather than looked up later: assignments are
+-- replaced whenever the assigner re-runs, so a lookup a week from now could
+-- not tell you who was expected to be in this van when it was signed for.
+ALTER TABLE submissions ADD COLUMN IF NOT EXISTS assigned_driver TEXT;
+ALTER TABLE submissions ADD COLUMN IF NOT EXISTS assigned_route  TEXT;
+ALTER TABLE submissions ADD COLUMN IF NOT EXISTS driver_changed  BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE submissions ADD COLUMN IF NOT EXISTS change_approver TEXT;
 CREATE INDEX IF NOT EXISTS submissions_plate_time_idx ON submissions (plate, submitted_at DESC);
 CREATE INDEX IF NOT EXISTS submissions_time_idx ON submissions (submitted_at DESC);
 
@@ -325,8 +333,18 @@ CREATE TABLE IF NOT EXISTS assignments (
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
   UNIQUE (date, plate, driver)
 );
+-- The fleet belongs in the key. A push replaces one (day, fleet) at a time, so
+-- without it a plate that appears in both fleets on one day loses the second
+-- row to ON CONFLICT DO NOTHING and the surviving row carries the wrong fleet
+-- -- which the other tab's next push would then delete.
+ALTER TABLE assignments DROP CONSTRAINT IF EXISTS assignments_date_plate_driver_key;
+ALTER TABLE assignments ADD CONSTRAINT assignments_day_plate_driver_fleet_key
+  UNIQUE (date, plate, driver, fleet);
 CREATE INDEX IF NOT EXISTS assignments_date_idx ON assignments (date DESC);
 CREATE INDEX IF NOT EXISTS assignments_driver_idx ON assignments (driver);
+-- The form asks "who has this van today" on every scan, and "who had it the
+-- last seven days" beside it. Both read by plate.
+CREATE INDEX IF NOT EXISTS assignments_plate_date_idx ON assignments (plate, date DESC);
 
 CREATE TABLE IF NOT EXISTS photos (
   id             BIGSERIAL PRIMARY KEY,
@@ -760,7 +778,8 @@ async function moveField(id, direction) {
  * ------------------------------------------------------------------ */
 
 async function saveSubmission({
-  plate, owner, form, answers, roles, photos, userAgent, clientIp, lang
+  plate, owner, form, answers, roles, photos, userAgent, clientIp, lang,
+  assignedDriver = null, assignedRoute = null, driverChanged = false, changeApprover = null
 }) {
   const client = await pool.connect();
   try {
@@ -780,15 +799,17 @@ async function saveSubmission({
     const res = await client.query(
       `INSERT INTO submissions
          (plate, owner, form_key, form_id, form_title, driver_name, route, odometer,
-          answers, questions, photo_count, user_agent, client_ip, lang, public_key)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+          answers, questions, photo_count, user_agent, client_ip, lang, public_key,
+          assigned_driver, assigned_route, driver_changed, change_approver)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
        RETURNING id, submitted_at, public_key`,
       [
         plate, owner || '', form.key, form.id, form.title,
         roles.driver || null, roles.route || null, roles.odometer || null,
         JSON.stringify(answers), JSON.stringify(questions),
         photos.length, userAgent || null, clientIp || null, lang || 'sv',
-        crypto.randomBytes(9).toString('base64url')
+        crypto.randomBytes(9).toString('base64url'),
+        assignedDriver || null, assignedRoute || null, !!driverChanged, changeApprover || null
       ]
     );
     const id = res.rows[0].id;
@@ -936,7 +957,8 @@ async function jobState(name) {
 async function submissionsBetween(fromDate, toDate) {
   const r = await pool.query(
     `SELECT id, plate, owner, form_id, form_key, form_title, submitted_at, lang,
-            driver_name, route, odometer, answers, questions, photo_count
+            driver_name, route, odometer, answers, questions, photo_count,
+            assigned_driver, driver_changed, change_approver
        FROM submissions
       WHERE submitted_at >= ($1::date AT TIME ZONE 'Europe/Stockholm')
         AND submitted_at <  (($2::date + 1) AT TIME ZONE 'Europe/Stockholm')
@@ -972,22 +994,37 @@ async function photoIdsFor(submissionIds) {
 async function replaceAssignments(rows) {
   const dates = [...new Set(rows.map(r => r.date))];
   if (!dates.length) return { days: 0, rows: 0 };
+  // Scoped by day AND fleet. The nightly script pushes both fleets together,
+  // but the assigner's two tabs push one fleet each as they are edited, and a
+  // whole-day delete would then let the box tab wipe the home fleet's rows for
+  // that day -- the day's home drivers would silently lose their assignment,
+  // which is exactly the record this table exists to keep.
+  const scopes = [...new Set(rows.map(r => `${r.date}\u0000${r.fleet || 'box'}`))]
+    .map(s => s.split('\u0000'));
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    await client.query('DELETE FROM assignments WHERE date = ANY($1::date[])', [dates]);
+    let removed = 0;
+    for (const [date, fleet] of scopes) {
+      const gone = await client.query(
+        'DELETE FROM assignments WHERE date = $1::date AND fleet = $2', [date, fleet]);
+      removed += gone.rowCount;
+    }
     let n = 0;
     for (const r of rows) {
       const res = await client.query(
         `INSERT INTO assignments (date, plate, driver, route, type, fleet, source_at)
          VALUES ($1,$2,$3,$4,$5,$6,$7)
-         ON CONFLICT (date, plate, driver) DO NOTHING`,
+         ON CONFLICT (date, plate, driver, fleet) DO NOTHING`,
         [r.date, r.plate, r.driver, r.route || '', r.type || '', r.fleet || 'box',
          r.sourceAt || null]);
       n += res.rowCount;
     }
     await client.query('COMMIT');
-    return { days: dates.length, rows: n, dates: dates.sort() };
+    // `removed` is reported back so a push that quietly shrinks a day -- a
+    // filtered CSV re-run over a full one -- shows up where somebody sees it.
+    return { days: dates.length, rows: n, removed, dates: dates.sort(),
+             fleets: [...new Set(scopes.map(s => s[1]))] };
   } catch (err) {
     await client.query('ROLLBACK').catch(() => {});
     throw err;
@@ -1002,6 +1039,39 @@ async function assignmentsBetween(from, to) {
        FROM assignments WHERE date >= $1::date AND date <= $2::date
       ORDER BY date, route, plate`, [from, to]);
   return r.rows;
+}
+
+/** Today's assignment(s) for one vehicle -- what the scanned form pre-fills. */
+async function assignmentsForPlate(plate, date) {
+  const r = await pool.query(
+    `SELECT to_char(date, 'YYYY-MM-DD') AS date, plate, driver, route, type, fleet
+       FROM assignments WHERE plate = $1 AND date = $2::date
+      ORDER BY route, driver`, [plate, date]);
+  return r.rows;
+}
+
+/**
+ * One vehicle's last days: who was given it, and who signed for it.
+ *
+ * The checks are fetched a day wide on each side and bucketed by Swedish
+ * calendar day by the caller -- `submitted_at` is a timestamptz and the
+ * database's own timezone is not the one the crew works in.
+ */
+async function plateHistory(plate, from, to) {
+  const [asg, subs] = await Promise.all([
+    pool.query(
+      `SELECT to_char(date, 'YYYY-MM-DD') AS date, driver, route, type, fleet
+         FROM assignments WHERE plate = $1 AND date >= $2::date AND date <= $3::date
+        ORDER BY date DESC, route`, [plate, from, to]),
+    pool.query(
+      `SELECT id, submitted_at, driver_name, route, driver_changed, change_approver, assigned_driver
+         FROM submissions
+        WHERE plate = $1
+          AND submitted_at >= (($2::date - 1) AT TIME ZONE 'Europe/Stockholm')
+          AND submitted_at <  (($3::date + 2) AT TIME ZONE 'Europe/Stockholm')
+        ORDER BY submitted_at DESC`, [plate, from, to])
+  ]);
+  return { assignments: asg.rows, checks: subs.rows };
 }
 
 async function assignmentRange() {
@@ -1032,6 +1102,7 @@ module.exports = {
   updateForm, deleteForm, addField, getField, updateField, deleteField, moveField,
   saveSubmission, listSubmissions, getSubmission, getPhoto, latestPerVehicle,
   listDrivers, replaceDrivers, claimJob, jobState, submissionsBetween, photoIdsFor,
-  replaceAssignments, assignmentsBetween, assignmentRange, deleteSubmission,
+  replaceAssignments, assignmentsBetween, assignmentRange,
+  assignmentsForPlate, plateHistory, deleteSubmission,
   get pool() { return pool; }
 };

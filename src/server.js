@@ -26,6 +26,7 @@ const { qrPage } = require('./views/qr');
 const { statsPage } = require('./views/stats');
 const { buildDriverStats } = require('./stats');
 const summaryLib = require('./summary');
+const assignmentLib = require('./assignment');
 const mail = require('./mail');
 const { page, esc, fmtDateTime } = require('./views/layout');
 
@@ -156,12 +157,23 @@ app.get('/v/:plate', async (req, res, next) => {
       return errorPage(res, 500, 'Inget formulär',
         'Det finns inget formulär att fylla i. Skapa ett under Admin → Formulär.');
     }
-    const [latest, sources] = await Promise.all([db.latestPerVehicle(), formSources(form)]);
+    const today = summaryLib.dayKey();
+    const weekFrom = assignmentLib.shiftDay(today, -6);
+    const [latest, sources, todayRows, history] = await Promise.all([
+      db.latestPerVehicle(), formSources(form),
+      db.assignmentsForPlate(vehicle.plate, today),
+      db.plateHistory(vehicle.plate, weekFrom, today)
+    ]);
     const l = latest.get(vehicle.plate);
     res.send(formPage({
       vehicle, form, sources,
       lang: i18n.langOf(req.query.lang),
-      lastCheck: l ? `${fmtDateTime(l.submitted_at)}${l.driver_name ? ' – ' + l.driver_name : ''}` : null
+      lastCheck: l ? `${fmtDateTime(l.submitted_at)}${l.driver_name ? ' – ' + l.driver_name : ''}` : null,
+      // Who has this van today (pre-filled), and who has had it this week.
+      assignment: assignmentLib.todaysAssignment(todayRows),
+      week: assignmentLib.buildWeek({
+        assignments: history.assignments, checks: history.checks, today
+      })
     }));
   } catch (err) { next(err); }
 });
@@ -194,7 +206,11 @@ app.post('/v/:plate', upload, async (req, res, next) => {
       const problem = answerProblem(f, value, allowed);
       if (problem) problems.push(`${i18n.fieldText(f, lang)} – ${i18n.t(lang, problem)}`);
       answers[f.name] = value;
-      if (f.role) roles[f.role] = f.kind === 'yesno' ? formatAnswer(f, value) : value;
+      // First field with a role wins, so the page and the server agree about
+      // which answer is "the driver" when a form has two of them by mistake.
+      if (f.role && roles[f.role] === undefined) {
+        roles[f.role] = f.kind === 'yesno' ? formatAnswer(f, value) : value;
+      }
     }
     if (problems.length) {
       const msg = problems.length === 1 ? problems[0]
@@ -202,6 +218,46 @@ app.post('/v/:plate', upload, async (req, res, next) => {
       if (wantsJson(req)) return res.status(400).json({ ok: false, error: msg });
       return errorPage(res, 400, 'Ofullständig kontroll', msg);
     }
+
+    /* Somebody other than the assigned driver may file the check -- vans are
+       swapped in the yard every week -- but not silently. The same rule the
+       page applies is applied again here, because the page is the driver's
+       own phone: a stale tab opened before today's assignment arrived, or a
+       posted request, must not be able to slip past it. */
+    const today = summaryLib.dayKey();
+    const assignment = assignmentLib.todaysAssignment(
+      await db.assignmentsForPlate(vehicle.plate, today));
+    const chosenDriver = String(roles.driver || '').trim();
+    const changed = assignmentLib.isDriverChange(assignment, chosenDriver);
+    const confirmed = String(req.body.__driver_change || '').trim().toLowerCase();
+    const approver = String(req.body.__change_approver || '').trim().slice(0, 200);
+    if (changed) {
+      let why = '';
+      if (confirmed !== 'ja' && confirmed !== 'nej') why = 'changeNeedAnswer';
+      else if (confirmed === 'nej') why = 'changeBlocked';
+      else if (approver.length < 2) why = 'changeNeedApprover';
+      if (why) {
+        const msg = i18n.t(lang, why);
+        if (wantsJson(req)) {
+          return res.status(400).json({
+            ok: false, error: msg, needsChangeConfirm: true, blocked: why === 'changeBlocked',
+            // The page may have been opened before this assignment existed, or
+            // against an earlier one. Send what it should be asking about so it
+            // can put the question on screen instead of repeating an error the
+            // driver has no way to answer.
+            assigned: {
+              driver: assignment.list.map(a => a.driver).join(', '),
+              drivers: assignment.list.map(a => a.driver),
+              route: assignment.one ? (assignment.one.route || '') : '',
+              plate: vehicle.plate
+            }
+          });
+        }
+        return errorPage(res, 400, 'Bytet är inte godkänt', msg);
+      }
+    }
+    const expected = assignment.one ? assignment.one
+      : (assignment.list.find(a => assignmentLib.sameName(a.driver, chosenDriver)) || assignment.list[0] || null);
 
     const photoFields = new Map(form.fields.filter(f => f.kind === 'photo').map(f => [f.name, f]));
     const photos = [];
@@ -217,7 +273,14 @@ app.post('/v/:plate', upload, async (req, res, next) => {
     const saved = await db.saveSubmission({
       plate: vehicle.plate, owner: vehicle.owner, form, answers, roles, photos,
       userAgent: (req.get('user-agent') || '').slice(0, 400),
-      clientIp: req.ip, lang
+      clientIp: req.ip, lang,
+      // Kept on the check itself: assignments are replaced every time the
+      // assigner re-runs, so this is the only lasting record of who was
+      // expected in this van when it was signed for.
+      assignedDriver: expected ? expected.driver : null,
+      assignedRoute: expected ? (expected.route || null) : null,
+      driverChanged: changed,
+      changeApprover: changed ? approver : null
     });
     const redirect = `/kvitto/${saved.id}?k=${encodeURIComponent(saved.key)}` +
       (lang === i18n.DEFAULT_LANG ? '' : '&lang=' + lang);

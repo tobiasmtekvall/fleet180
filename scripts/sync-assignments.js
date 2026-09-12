@@ -109,8 +109,19 @@ function buildAssignments(store, from) {
       // 3PL drivers bring their own vehicle: no plate, nothing to check.
       if (!plate || !driver) { skippedNoVehicle++; continue; }
 
+      /* One key per (fleet, day, route): the LAST run wins.
+         The key used to carry the driver and the plate as well, which meant a
+         day the assigner was re-run kept both answers -- the same route and
+         often the same van listed under two drivers. Since the app started
+         filling the driver's name into the scanned form, that is not a
+         double-count any more but a vehicle with two drivers, which switches
+         the fill-in and the driver-change question off for that van and lets
+         either driver file a check with no questions asked. A re-run
+         supersedes its own earlier answer; that is the whole contract of
+         this push. */
+      const key = `${run.fleet}|${date}|${String((r.row && r.row.route) || '')}`;
       if (!byDay.has(date)) byDay.set(date, new Map());
-      byDay.get(date).set(`${r.row.route || ''}|${plate}|${driver}`, {
+      byDay.get(date).set(key, {
         date, plate, driver,
         route: String((r.row && r.row.route) || ''),
         type: String((r.parsed && r.parsed.type) || ''),

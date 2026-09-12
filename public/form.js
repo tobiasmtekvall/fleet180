@@ -102,6 +102,106 @@
     if (input) input.addEventListener('input', function () { clearError(field); });
   });
 
+  /* ---- byte av förare -------------------------------------------------
+     The vehicle was given to somebody today. If the name in the driver field
+     is not that person, the check cannot go in until the driver says they
+     have replaced the driver on the route AND names the OC or Fleet Manager
+     who allowed the vehicle change. The same rule runs on the server -- this
+     half is only so the driver sees it while they are still standing at the
+     van, not after pressing send. */
+  var changeBox = document.getElementById('changeBox');
+  var driverInput = null;
+  if (changeBox) {
+    /* The question belongs to one field -- the driver's name -- and says so,
+       rather than being found by position: a form editor can move the
+       question, and "the box after that div" would then watch the wrong one. */
+    var driverField = form.querySelector('.field[data-name="' + changeBox.dataset.for + '"]');
+    driverInput = driverField &&
+      (driverField.querySelector('select') || driverField.querySelector('input[type="text"]'));
+  }
+
+  function assignedNames() {
+    return (changeBox.dataset.assigned || '').split('|')
+      .map(function (n) { return norm(n); }).filter(Boolean);
+  }
+
+  /* The assignment can arrive after the page did -- the assigner is run while
+     drivers are already in the yard. When the server refuses a submission
+     because of that, it says who the vehicle was given to; the question is
+     then written into the page in all four languages (the same text the
+     server would have rendered) and shown, so the driver answers it and sends
+     again instead of meeting an error they cannot act on. */
+  function raiseChange(assigned) {
+    if (!changeBox || !assigned) return;
+    changeBox.dataset.assigned = (assigned.drivers || [assigned.driver || '']).join('|');
+    var q = document.getElementById('changeQ');
+    var key = assigned.route ? 'changeQuestionRoute' : 'changeQuestion';
+    var vars = { assigned: assigned.driver || '', plate: assigned.plate || '', route: assigned.route || '' };
+    for (var i = 0; i < LANGS.length; i++) {
+      var code = LANGS[i].code;
+      var tmpl = (UI[code] && UI[code][key]) || (UI.sv && UI.sv[key]) || '';
+      q.setAttribute('data-t-' + code, fillText(tmpl, vars));
+    }
+    q.textContent = fillText((UI[lang] && UI[lang][key]) || '', vars);
+    changeBox.hidden = false;
+    changeBox.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+
+  /* Same substitution the server does, isolates included: a Latin name or
+     plate inside an Arabic sentence keeps its punctuation on the right side. */
+  function fillText(str, vars) {
+    return String(str).replace(/\{(\w+)\}/g, function (m, k) {
+      return (vars[k] === undefined || vars[k] === null) ? m : '\u2068' + vars[k] + '\u2069';
+    });
+  }
+  function norm(s) { return String(s || '').trim().replace(/\s+/g, ' ').toLowerCase(); }
+
+  function driverDiffers() {
+    if (!changeBox || !driverInput) return false;
+    var names = assignedNames();
+    if (!names.length) return false;         // nothing assigned (yet): nothing to confirm
+    var chosen = norm(driverInput.value);
+    if (!chosen) return false;               // not filled in yet: its own rule applies
+    return names.indexOf(chosen) === -1;
+  }
+
+  function syncChange() {
+    if (!changeBox) return;
+    var show = driverDiffers();
+    changeBox.hidden = !show;
+    if (!show) {
+      clearError(changeBox);
+      each(changeBox.querySelectorAll('input[type="radio"]'), function (r) { r.checked = false; });
+      changeBox.querySelector('#__change_approver').value = '';
+    }
+  }
+
+  if (changeBox && driverInput) {
+    driverInput.addEventListener('change', function () { syncChange(); });
+    driverInput.addEventListener('input', function () { syncChange(); });
+    each(changeBox.querySelectorAll('input[type="radio"]'), function (r) {
+      r.addEventListener('change', function () { clearError(changeBox); });
+    });
+    changeBox.querySelector('#__change_approver')
+      .addEventListener('input', function () { clearError(changeBox); });
+    syncChange();
+  }
+
+  /* null when the confirmation is satisfied (or not needed), otherwise the
+     message to show. Kept apart from validate() so the same answer can be
+     checked before send and reported on the box itself. */
+  function changeProblem() {
+    if (!changeBox || changeBox.hidden) return null;
+    var picked = changeBox.querySelector('input[name="__driver_change"]:checked');
+    if (!picked) return t('changeNeedAnswer');
+    if (picked.value === 'nej') return t('changeBlocked');
+    // Two characters, the same floor the server applies: an initial is not a
+    // name, and a client that accepted one would send the driver into a
+    // refusal that points at no field.
+    if (changeBox.querySelector('#__change_approver').value.trim().length < 2) return t('changeNeedApprover');
+    return null;
+  }
+
   /* ---- kamera / filväljare ---- */
   each(document.querySelectorAll('.camera-btn'), function (btn) {
     var input = document.getElementById(btn.dataset.target);
@@ -226,6 +326,11 @@
         }
       }
     });
+    var changeMsg = changeProblem();
+    if (changeMsg) {
+      setError(changeBox, changeMsg);
+      if (!firstBad) firstBad = changeBox;
+    }
     if (firstBad) {
       firstBad.scrollIntoView({ behavior: 'smooth', block: 'center' });
       var focusable = firstBad.querySelector('input');
@@ -260,6 +365,7 @@
       fd.append(inp.name, inp.value.trim());
     });
     each(form.querySelectorAll('input[type="radio"]:checked'), function (inp) {
+      if (inp.name === '__driver_change' && changeBox && changeBox.hidden) return;
       fd.append(inp.name, inp.value);
     });
     each(form.querySelectorAll('select'), function (sel) {
@@ -281,6 +387,14 @@
       })
       .then(function (data) {
         if (data && data.ok && data.redirect) { window.location.href = data.redirect; return; }
+        if (data && data.needsChangeConfirm) {
+          // Not a failure to report and forget: put the question on screen.
+          raiseChange(data.assigned);
+          setError(changeBox, data.error || t('changeNeedAnswer'));
+          submitBtn.disabled = false;
+          submitBtn.textContent = t('submit');
+          return;
+        }
         throw new Error((data && data.error) || 'Okänt fel');
       })
       .catch(function (err) {
@@ -305,6 +419,7 @@
     each(document.querySelectorAll('.thumbs'), function (t) { t.innerHTML = ''; });
     each(form.querySelectorAll('.field'), clearError);
     each(form.querySelectorAll('[data-kind="yesno"]'), function (f) { syncComment(f.dataset.name); });
+    syncChange();
     hideNotice();
     window.scrollTo({ top: 0, behavior: 'smooth' });
   });
