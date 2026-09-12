@@ -50,6 +50,19 @@ function commentChoices(field) {
   return set;
 }
 
+/**
+ * The follow-up list for a question, if it has one.
+ *
+ * A yesno question may carry a list of things that could be wrong ("which
+ * lamp?"). The driver picks one and may still type a detail beside it; the
+ * VALUE stored is always the Swedish one from this list, whatever language
+ * they read it in.
+ */
+function commentOptionsFor(field) {
+  const list = (field && (field.comment_options || field.commentOptions)) || [];
+  return Array.isArray(list) ? list.filter(Boolean).map(String) : [];
+}
+
 const ROLES = [
   { value: '',         label: '—' },
   { value: 'driver',   label: 'Förarens namn' },
@@ -65,11 +78,20 @@ function readAnswer(field, body) {
   if (field.kind === 'yesno') {
     const choice = String(body[field.name] ?? '').trim().toLowerCase();
     const comment = String(body[field.name + '__comment'] ?? '').trim().slice(0, 2000);
-    if (!choice && !comment) return null;
-    return {
+    const opens = commentChoices(field).has(choice);
+    // The picked item is kept as its own value rather than glued into the
+    // comment: the workshop can then count "how many brake lights this month"
+    // without parsing free text, and the comment stays what the driver wrote.
+    const options = commentOptionsFor(field);
+    const raw = String(body[field.name + '__pick'] ?? '').trim();
+    const pick = opens && options.includes(raw) ? raw : '';
+    if (!choice && !comment && !pick) return null;
+    const value = {
       choice: CHOICE_LABEL[choice] ? choice : '',
-      comment: commentChoices(field).has(choice) ? comment : ''
+      comment: opens ? comment : ''
     };
+    if (pick) value.pick = pick;
+    return value;
   }
   return null; // photo and info carry no posted value
 }
@@ -93,6 +115,11 @@ function answerProblem(field, value, allowed) {
     const choice = value && value.choice;
     if (!choice) return field.required ? 'chooseYesNo' : null;
     if (!CHOICE_LABEL[choice]) return 'invalid';
+    // A question that offers a list wants one picked when the answer flags:
+    // "something is wrong" without saying what is the answer that costs the
+    // workshop a phone call.
+    if (commentOptionsFor(field).length && commentChoices(field).has(choice) &&
+        !String((value && value.pick) || '').trim()) return 'chooseError';
     if (choice === 'annat' && !String(value.comment || '').trim()) return 'commentRequired';
     return null;
   }
@@ -114,13 +141,13 @@ function formatAnswer(field, value) {
   if (typeof value === 'string') return value.trim() || '—';
 
   if (typeof value === 'object') {
-    if (!value.choice) {
-      const comment = String(value.comment || '').trim();
-      return comment || '—';
-    }
+    // "Nej: Halvljus – höger fram": the picked item first, then whatever the
+    // driver added. Old answers have no pick and read exactly as before.
+    const detail = [String(value.pick || '').trim(), String(value.comment || '').trim()]
+      .filter(Boolean).join(' – ');
+    if (!value.choice) return detail || '—';
     const label = CHOICE_LABEL[value.choice] || value.choice;
-    const comment = String(value.comment || '').trim();
-    return comment ? `${label}: ${comment}` : label;
+    return detail ? `${label}: ${detail}` : label;
   }
 
   return String(value);
@@ -164,5 +191,6 @@ function optionsFor(field, sources) {
 
 module.exports = {
   KINDS, KIND_VALUES, KIND_LABEL, SOURCES, CHOICES, CHOICE_LABEL, COMMENT_CHOICES, commentChoices,
-  ROLES, readAnswer, answerProblem, formatAnswer, isAnswerable, isAlerting, optionsFor
+  ROLES, readAnswer, answerProblem, formatAnswer, isAnswerable, isAlerting, optionsFor,
+  commentOptionsFor
 };

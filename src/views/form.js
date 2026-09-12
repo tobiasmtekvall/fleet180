@@ -1,9 +1,11 @@
 'use strict';
 
 const { page, esc } = require('./layout');
-const { CHOICES, optionsFor, commentChoices } = require('../fields');
+const { CHOICES, optionsFor, commentChoices, commentOptionsFor } = require('../fields');
 const i18n = require('../i18n');
 const { sameName } = require('../assignment');
+const { flagSvg } = require('./flags');
+const odo = require('../odometer');
 
 /* Consecutive questions that name the same section share one card, which
    is how the original four-part page is reproduced without the section
@@ -106,11 +108,33 @@ function renderField(f, lang, sources, ctx = {}) {
     // The choices that open the comment box travel with the field, because
     // they are per question -- see commentChoices().
     const opens = [...commentChoices(f)].join(' ');
+    /* "Which lamp?" -- a list offered with the comment box when the answer
+       flags. Every language's wording rides on each <option> so the flags
+       switch the list in place like everything else, while the value posted
+       stays the Swedish one. */
+    const picks = commentOptionsFor(f);
+    const pickI18n = (f.i18n || {});
+    const pickBox = picks.length ? `
+          <div class="comment-pick">
+            <label for="${esc(f.name)}__pick" ${uiAttrs('pickLabel')}>${esc(i18n.t(lang, 'pickLabel'))}<span class="star">*</span></label>
+            <select class="form-control" id="${esc(f.name)}__pick" name="${esc(f.name)}__pick">
+              <option value="" ${uiAttrs('choose')}>${esc(i18n.t(lang, 'choose'))}</option>
+${picks.map((o, i) => {
+  const texts = {};
+  for (const c of i18n.CODES) {
+    const list = c === i18n.DEFAULT_LANG ? picks
+      : ((pickI18n[c] && pickI18n[c].commentOptions) || []);
+    texts[c] = (list && list[i]) || o;
+  }
+  return `              <option value="${esc(o)}" ${langAttrs(texts)}>${esc(texts[lang] || o)}</option>`;
+}).join('\n')}
+            </select>
+          </div>` : '';
     return `        <div class="field" data-kind="yesno" data-name="${esc(f.name)}" data-comment-on="${esc(opens)}">
           <label id="lbl-${esc(f.name)}" ${labelAttrs}>${esc(labels[lang])}${star}</label>
           <div class="choices" role="radiogroup" aria-labelledby="lbl-${esc(f.name)}">${choices}
           </div>
-          <div class="comment" data-comment-for="${esc(f.name)}">
+          <div class="comment" data-comment-for="${esc(f.name)}">${pickBox}
             <label for="${esc(f.name)}__comment" ${uiAttrs('comment')}>${esc(i18n.t(lang, 'comment'))}</label>
             <input type="text" class="form-control optional" id="${esc(f.name)}__comment"
                    name="${esc(f.name)}__comment" ${uiAttrs('commentPlaceholder')}
@@ -122,14 +146,42 @@ function renderField(f, lang, sources, ctx = {}) {
 
   const cls = f.required ? 'form-control' : 'form-control optional';
   const pre = prefillFor(f, ctx);
+  const meter = f.role === 'odometer' ? odometerBits(lang, ctx) : null;
   const attrs = [f.required ? 'required' : '', f.role === 'driver' ? 'autocomplete="name"' : '',
-    pre ? `value="${esc(pre)}"` : '']
+    meter ? 'inputmode="numeric" autocomplete="off" data-odo="1"' : '',
+    meter && meter.prefix ? `data-odo-prefix="${esc(meter.prefix)}"` : '',
+    meter && meter.last ? `data-odo-last="${esc(meter.last)}"` : '',
+    (meter && meter.prefix) ? `value="${esc(meter.prefix)}"` : (pre ? `value="${esc(pre)}"` : '')]
     .filter(Boolean).join(' ');
   return `        <div class="field" data-kind="text" data-name="${esc(f.name)}">
           <label for="${esc(f.name)}" ${labelAttrs}>${esc(labels[lang])}${star}</label>
           <input type="text" class="${cls}" id="${esc(f.name)}" name="${esc(f.name)}" ${attrs}>
+          ${meter ? meter.hint : ''}
           <div class="err"></div>
         </div>${changeBox(f, lang, ctx)}`;
+}
+
+/**
+ * What the odometer question knows about this vehicle.
+ *
+ * The field opens holding everything but the last three digits of the previous
+ * reading, so the driver types three rather than six -- and two rather than
+ * one when the reading is about to pass the next thousand (see odometer.js).
+ * The previous reading is printed underneath in full, because a prefix nobody
+ * can check is a prefix nobody should trust.
+ */
+function odometerBits(lang, ctx) {
+  const prev = ctx && ctx.odometer;
+  if (!prev || !prev.odometer) return null;
+  const { prefix, blanks, last } = odo.prefill(prev.odometer);
+  if (!prefix) return null;
+  const when = String(prev.date || '').slice(0, 10);
+  const vars = { value: odo.group(last), date: when };
+  const hint = `<p class="odo-hint">
+            <span ${filledAttrs('odometerLast', vars)}>${esc(filledText(lang, 'odometerLast', vars))}</span>
+            <span ${uiAttrs('odometerFill')}>${esc(i18n.t(lang, 'odometerFill'))}</span>
+          </p>`;
+  return { prefix, blanks, last, hint };
 }
 
 /**
@@ -281,19 +333,29 @@ ${named.map((g, i) => {
   </nav>`;
 }
 
-/** The flag row. Tiny by design -- it sits above the form, not in it. */
+/**
+ * The flag row. Tiny by design -- it sits above the form, not in it.
+ *
+ * Drawn flags rather than emoji (see views/flags.js), each with the language's
+ * own name beside it: a driver looking for Arabic finds العربية faster than
+ * they find a green rectangle.
+ */
 function flags(lang) {
   return `<div class="flags no-print" role="group" aria-label="${esc(i18n.t(lang, 'languageLabel'))}">
 ${i18n.LANGS.map(l =>
   `    <button type="button" class="flag${l.code === lang ? ' on' : ''}" data-lang="${l.code}"
-            title="${esc(l.label)}" aria-label="${esc(l.label)}">${l.flag}</button>`).join('\n')}
+            title="${esc(l.label)}" aria-label="${esc(l.label)}" lang="${l.code}">
+      <span class="flag-img">${flagSvg(l.code)}</span>
+      <span class="flag-name">${esc(l.label)}</span>
+    </button>`).join('\n')}
   </div>`;
 }
 
 function formPage({ vehicle, form, lastCheck, preview = false, lang = 'sv', sources = {},
-                    assignment = null, week = null }) {
+                    assignment = null, week = null, odometer = null }) {
   const code = i18n.langOf(lang);
-  const ctx = { assignment, week, plate: vehicle.plate, preview, driverBoxDrawn: false };
+  const ctx = { assignment, week, odometer: preview ? null : odometer,
+                plate: vehicle.plate, preview, driverBoxDrawn: false };
   const groups = groupBySection(form.fields);
   const titles = {};
   for (const c of i18n.CODES) titles[c] = i18n.formTitle(form, c);

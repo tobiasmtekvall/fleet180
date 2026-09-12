@@ -86,8 +86,19 @@
     var show = checked && opensComment(name, checked.value);
     box.classList.toggle('open', !!show);
     var required = checked && checked.value === 'annat';
-    box.querySelector('input').classList.toggle('form-control', true);
-    box.querySelector('label').textContent = required ? t('commentRequired') : t('comment');
+    var text = box.querySelector('input[type="text"]');
+    var label = box.querySelector('.comment > label') || box.querySelector('label');
+    if (text) text.classList.toggle('form-control', true);
+    // The comment box may hold a list ("which lamp?") above the free text; the
+    // label being renamed is the free text's, not the list's.
+    var own = box.querySelector('label[for="' + name + '__comment"]');
+    (own || label).textContent = required ? t('commentRequired') : t('comment');
+    // Closing the answer clears the picked item, or a lamp chosen and then
+    // taken back by answering Ja would still be posted.
+    if (!show) {
+      var pick = document.getElementById(name + '__pick');
+      if (pick) pick.value = '';
+    }
   }
   each(form.querySelectorAll('[data-kind="yesno"]'), function (field) {
     var name = field.dataset.name;
@@ -273,6 +284,39 @@
     img.src = url;
   }
 
+  /* ---- mätarställning -----------------------------------------------
+     The field opens holding all but the last few digits of the previous
+     reading (the server put them there). Here it only stays a number, and
+     the two mistakes that a driver can see for themselves are named on the
+     spot: sending the prefix untouched, and a reading below the last one. */
+  var odoInput = form.querySelector('input[data-odo="1"]');
+  if (odoInput) {
+    odoInput.addEventListener('input', function () {
+      var digits = odoInput.value.replace(/\D+/g, '');
+      if (digits !== odoInput.value) odoInput.value = digits;
+    });
+    // Typing continues where the prefix ends rather than in front of it.
+    odoInput.addEventListener('focus', function () {
+      var end = odoInput.value.length;
+      try { odoInput.setSelectionRange(end, end); } catch (e) { /* not supported */ }
+    });
+  }
+
+  function group(d) { return String(d).replace(/\B(?=(\d{3})+(?!\d))/g, '\u00a0'); }
+
+  function odometerProblem() {
+    if (!odoInput) return null;
+    var typed = odoInput.value.replace(/\D+/g, '');
+    var prefix = odoInput.dataset.odoPrefix || '';
+    var last = odoInput.dataset.odoLast || '';
+    if (!typed) return odoInput.hasAttribute('required') ? t('required') : null;
+    if (prefix && typed === prefix) return t('odometerUnchanged');
+    if (last && typed.length >= last.length && Number(typed) < Number(last)) {
+      return t('odometerLow').replace('{value}', group(last));
+    }
+    return null;
+  }
+
   /* ---- validering ---- */
   function setError(field, msg) {
     field.classList.add('field-invalid');
@@ -316,16 +360,28 @@
             setError(field, t('chooseYesNo'));
             if (!firstBad) firstBad = field;
           }
-        } else if (checked.value === 'annat') {
-          var box = commentBox(name);
-          var text = box ? box.querySelector('input').value.trim() : '';
-          if (!text) {
-            setError(field, t('commentNeeded'));
+        } else {
+          var pick = document.getElementById(name + '__pick');
+          if (pick && opensComment(name, checked.value) && !pick.value) {
+            setError(field, t('chooseError'));
             if (!firstBad) firstBad = field;
+          } else if (checked.value === 'annat') {
+            var box = commentBox(name);
+            var textInput = box ? box.querySelector('input[type="text"]') : null;
+            if (!textInput || !textInput.value.trim()) {
+              setError(field, t('commentNeeded'));
+              if (!firstBad) firstBad = field;
+            }
           }
         }
       }
     });
+    var odoMsg = odometerProblem();
+    if (odoMsg) {
+      var odoField = odoInput.closest('.field');
+      setError(odoField, odoMsg);
+      if (!firstBad) firstBad = odoField;
+    }
     var changeMsg = changeProblem();
     if (changeMsg) {
       setError(changeBox, changeMsg);
@@ -369,6 +425,9 @@
       fd.append(inp.name, inp.value);
     });
     each(form.querySelectorAll('select'), function (sel) {
+      // A list inside a closed comment box belongs to an answer that was
+      // taken back; syncComment has already emptied it, and an empty value
+      // is what the server drops.
       fd.append(sel.name, sel.value);
     });
     fd.append('__lang', lang);

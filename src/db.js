@@ -250,6 +250,12 @@ ALTER TABLE form_fields ADD COLUMN IF NOT EXISTS options  JSONB NOT NULL DEFAULT
 ALTER TABLE form_fields ADD COLUMN IF NOT EXISTS source   TEXT  NOT NULL DEFAULT '';
 ALTER TABLE form_fields ADD COLUMN IF NOT EXISTS alert_on JSONB NOT NULL DEFAULT '[]'::jsonb;
 ALTER TABLE form_fields ADD COLUMN IF NOT EXISTS i18n     JSONB NOT NULL DEFAULT '{}'::jsonb;
+-- What the follow-up asks when an answer flags. "Does the exterior lighting
+-- work?" answered Nej should not leave a driver typing "halvljuset fram
+-- höger" into a free-text box at 05:30 -- and should not leave the workshop
+-- reading fifteen spellings of the same lamp. The list is per question and
+-- editable, and its translations ride in the same i18n blob as the label.
+ALTER TABLE form_fields ADD COLUMN IF NOT EXISTS comment_options JSONB NOT NULL DEFAULT '[]'::jsonb;
 CREATE INDEX IF NOT EXISTS form_fields_order_idx ON form_fields (form_id, position);
 
 ALTER TABLE forms ADD COLUMN IF NOT EXISTS i18n JSONB NOT NULL DEFAULT '{}'::jsonb;
@@ -338,8 +344,12 @@ CREATE TABLE IF NOT EXISTS assignments (
 -- row to ON CONFLICT DO NOTHING and the surviving row carries the wrong fleet
 -- -- which the other tab's next push would then delete.
 ALTER TABLE assignments DROP CONSTRAINT IF EXISTS assignments_date_plate_driver_key;
-ALTER TABLE assignments ADD CONSTRAINT assignments_day_plate_driver_fleet_key
-  UNIQUE (date, plate, driver, fleet);
+-- A unique INDEX rather than ADD CONSTRAINT, because this file runs on every
+-- boot and ADD CONSTRAINT has no IF NOT EXISTS: the second start would die on
+-- "already exists" and take the app down with it. ON CONFLICT is happy with a
+-- unique index.
+CREATE UNIQUE INDEX IF NOT EXISTS assignments_day_plate_driver_fleet_key
+  ON assignments (date, plate, driver, fleet);
 CREATE INDEX IF NOT EXISTS assignments_date_idx ON assignments (date DESC);
 CREATE INDEX IF NOT EXISTS assignments_driver_idx ON assignments (driver);
 -- The form asks "who has this van today" on every scan, and "who had it the
@@ -515,6 +525,53 @@ async function addReturnQuestions(client) {
   return { inserted, renamed, forms: forms.rowCount };
 }
 
+/**
+ * Two changes to the standard form that a database seeded earlier will never
+ * see on its own: the odometer question asks for kilometres, and the exterior
+ * lighting question offers a list of lamps instead of an empty comment box.
+ *
+ * Timid in the same way as the two migrations above, and for the same reason:
+ * a form somebody has edited is theirs. The odometer label is only replaced
+ * where it still reads exactly as the old template's, and the lamp list is
+ * only filled in where there is none. Recorded in `jobs`, so a list deleted
+ * on purpose does not grow back at the next restart.
+ */
+const LAMPS_UPGRADE_KEY = 'seed-2026-09-13-lamps-and-odometer-km';
+const OLD_ODOMETER_LABEL = 'Ange fordonets miltal:';
+
+async function addLampsAndKilometres(client) {
+  const done = await client.query('SELECT 1 FROM jobs WHERE name = $1', [LAMPS_UPGRADE_KEY]);
+  if (done.rowCount) return null;
+
+  const meter = seed.DEFAULT_FIELDS.find(f => f.role === 'odometer');
+  const lamps = seed.DEFAULT_FIELDS.find(f => (f.commentOptions || []).length);
+
+  // Kilometres. Only a question still carrying the old wording, and its
+  // translations are replaced with it -- a label in km over a translation
+  // that still says "mil" would be worse than leaving both alone.
+  const km = await client.query(
+    `UPDATE form_fields SET label = $2, i18n = $3::jsonb
+      WHERE name = $1 AND label = $4`,
+    [meter.name, meter.label, JSON.stringify(meter.i18n || {}), OLD_ODOMETER_LABEL]);
+
+  // The lamp list, where the lighting question is still the template's and
+  // has no list of its own.
+  const withLamps = await client.query(
+    `UPDATE form_fields
+        SET comment_options = $3::jsonb,
+            i18n = i18n || $4::jsonb
+      WHERE name = $1 AND label = $2 AND comment_options = '[]'::jsonb`,
+    [lamps.name, lamps.label, JSON.stringify(lamps.commentOptions || []),
+     JSON.stringify(lamps.i18n || {})]);
+
+  await client.query(
+    `INSERT INTO jobs (name, last_run, note) VALUES ($1, now(), $2)
+     ON CONFLICT (name) DO NOTHING`,
+    [LAMPS_UPGRADE_KEY, `${km.rowCount} mätarfrågor till km, ${withLamps.rowCount} med lampval`]);
+
+  return { km: km.rowCount, lamps: withLamps.rowCount };
+}
+
 async function init() {
   pool = await connectWithRetry();
   await pool.query(SCHEMA);
@@ -524,7 +581,12 @@ async function init() {
     await seedIfEmpty(client);
     const upgraded = await upgradeSeededFields(client);
     const added = await addReturnQuestions(client);
+    const lamps = await addLampsAndKilometres(client);
     await client.query('COMMIT');
+    if (lamps && (lamps.km || lamps.lamps)) {
+      console.log(`[db] mätarfrågan till kilometer i ${lamps.km} formulär, ` +
+        `lampval på ${lamps.lamps} belysningsfrågor`);
+    }
     if (added && (added.inserted || added.renamed)) {
       console.log(`[db] lade till ${added.inserted} frågor och numrerade om ${added.renamed} ` +
         `avsnittsrader i ${added.forms} formulär`);
@@ -703,18 +765,19 @@ async function nextFieldName(formId) {
 
 async function addField(formId, {
   kind, label, section = '', required = false, role = '',
-  options = [], source = '', alertOn = [], i18n = {}
+  options = [], source = '', alertOn = [], i18n = {}, commentOptions = []
 }) {
   const name = await nextFieldName(formId);
   const r = await pool.query(
     `INSERT INTO form_fields
        (form_id, position, name, kind, label, section, required, role,
-        options, source, alert_on, i18n)
+        options, source, alert_on, i18n, comment_options)
      VALUES ($1, COALESCE((SELECT MAX(position) FROM form_fields WHERE form_id = $1), 0) + 10,
-             $2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+             $2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
      RETURNING *`,
     [formId, name, kind, label, section, required, role,
-     JSON.stringify(options), source, JSON.stringify(alertOn), JSON.stringify(i18n)]);
+     JSON.stringify(options), source, JSON.stringify(alertOn), JSON.stringify(i18n),
+     JSON.stringify(commentOptions || [])]);
   await touchForm(formId);
   return r.rows[0];
 }
@@ -726,15 +789,18 @@ async function getField(id) {
 }
 
 async function updateField(id, {
-  kind, label, section, required, role, options, source, alertOn, i18n
+  kind, label, section, required, role, options, source, alertOn, i18n,
+  commentOptions
 }) {
   const r = await pool.query(
     `UPDATE form_fields SET kind = $2, label = $3, section = $4, required = $5,
-            role = $6, options = $7, source = $8, alert_on = $9, i18n = $10
+            role = $6, options = $7, source = $8, alert_on = $9, i18n = $10,
+            comment_options = $11
       WHERE id = $1 RETURNING form_id`,
     [id, kind, label, section, required, role,
      JSON.stringify(options || []), source || '',
-     JSON.stringify(alertOn || []), JSON.stringify(i18n || {})]);
+     JSON.stringify(alertOn || []), JSON.stringify(i18n || {}),
+     JSON.stringify(commentOptions || [])]);
   if (r.rows.length) await touchForm(r.rows[0].form_id);
 }
 
@@ -793,6 +859,9 @@ async function saveSubmission({
       section: f.section, required: f.required, role: f.role,
       alert_on: Array.isArray(f.alert_on) ? f.alert_on : [],
       options: Array.isArray(f.options) ? f.options : [],
+      // The follow-up list as it stood: a lamp removed from the list next
+      // month must still read back on last month's check.
+      comment_options: Array.isArray(f.comment_options) ? f.comment_options : [],
       source: f.source || '',
       i18n: f.i18n || {}
     }));
@@ -1041,6 +1110,23 @@ async function assignmentsBetween(from, to) {
   return r.rows;
 }
 
+/**
+ * The last odometer reading filed for one vehicle.
+ *
+ * Only rows that actually carry a number: a check where the field was left
+ * empty (it has not always been required) must not hide the reading from the
+ * day before. The value is returned exactly as it was typed -- what it means
+ * is decided by whoever reads it, and old rows were entered in Swedish mil.
+ */
+async function lastOdometer(plate) {
+  const r = await pool.query(
+    `SELECT odometer, submitted_at, driver_name
+       FROM submissions
+      WHERE plate = $1 AND odometer IS NOT NULL AND odometer <> ''
+      ORDER BY submitted_at DESC LIMIT 1`, [plate]);
+  return r.rows[0] || null;
+}
+
 /** Today's assignment(s) for one vehicle -- what the scanned form pre-fills. */
 async function assignmentsForPlate(plate, date) {
   const r = await pool.query(
@@ -1103,6 +1189,6 @@ module.exports = {
   saveSubmission, listSubmissions, getSubmission, getPhoto, latestPerVehicle,
   listDrivers, replaceDrivers, claimJob, jobState, submissionsBetween, photoIdsFor,
   replaceAssignments, assignmentsBetween, assignmentRange,
-  assignmentsForPlate, plateHistory, deleteSubmission,
+  assignmentsForPlate, plateHistory, lastOdometer, deleteSubmission,
   get pool() { return pool; }
 };

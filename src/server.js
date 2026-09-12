@@ -27,6 +27,7 @@ const { statsPage } = require('./views/stats');
 const { buildDriverStats } = require('./stats');
 const summaryLib = require('./summary');
 const assignmentLib = require('./assignment');
+const odo = require('./odometer');
 const mail = require('./mail');
 const { page, esc, fmtDateTime } = require('./views/layout');
 
@@ -159,10 +160,11 @@ app.get('/v/:plate', async (req, res, next) => {
     }
     const today = summaryLib.dayKey();
     const weekFrom = assignmentLib.shiftDay(today, -6);
-    const [latest, sources, todayRows, history] = await Promise.all([
+    const [latest, sources, todayRows, history, meter] = await Promise.all([
       db.latestPerVehicle(), formSources(form),
       db.assignmentsForPlate(vehicle.plate, today),
-      db.plateHistory(vehicle.plate, weekFrom, today)
+      db.plateHistory(vehicle.plate, weekFrom, today),
+      db.lastOdometer(vehicle.plate)
     ]);
     const l = latest.get(vehicle.plate);
     res.send(formPage({
@@ -173,7 +175,13 @@ app.get('/v/:plate', async (req, res, next) => {
       assignment: assignmentLib.todaysAssignment(todayRows),
       week: assignmentLib.buildWeek({
         assignments: history.assignments, checks: history.checks, today
-      })
+      }),
+      // The previous reading, so the field can open with all but its last
+      // few digits already in place. The date is turned into a Swedish
+      // calendar day here: `submitted_at` is a timestamptz, and a driver
+      // reading "Sat Sep 12" where every other date on the page is
+      // 2026-09-12 has to stop and work out whether it is the same day.
+      odometer: meter ? { odometer: meter.odometer, date: summaryLib.dayKey(meter.submitted_at) } : null
     }));
   } catch (err) { next(err); }
 });
@@ -258,6 +266,31 @@ app.post('/v/:plate', upload, async (req, res, next) => {
     }
     const expected = assignment.one ? assignment.one
       : (assignment.list.find(a => assignmentLib.sameName(a.driver, chosenDriver)) || assignment.list[0] || null);
+
+    /* The odometer is checked here only against being obviously unfilled:
+       digits, and not merely the prefix the form put there. It is deliberately
+       NOT checked against the previous reading — a meter that was read wrong
+       last week, or replaced, must never be the reason a safety check cannot
+       be filed. The page says so before it comes to this, where the driver can
+       still see what they typed. */
+    const meterField = form.fields.find(f => f.role === 'odometer' && isAnswerable(f));
+    if (meterField) {
+      const typed = odo.digitsOf(answers[meterField.name]);
+      const prev = await db.lastOdometer(vehicle.plate);
+      const pre = prev ? odo.prefill(prev.odometer) : { prefix: '' };
+      const raw = String(answers[meterField.name] || '').trim();
+      let why = '';
+      if (raw && !/^[\d\s.,]+$/.test(raw)) why = 'odometerDigits';
+      else if (pre.prefix && typed === pre.prefix) why = 'odometerUnchanged';
+      if (why) {
+        const msg = `${i18n.fieldText(meterField, lang)} – ${i18n.t(lang, why)}`;
+        if (wantsJson(req)) return res.status(400).json({ ok: false, error: msg });
+        return errorPage(res, 400, 'Ofullständig kontroll', msg);
+      }
+      // Stored as digits, so "207 953 km" and "207953" are one reading and the
+      // next driver's prefix is built from something predictable.
+      if (typed) { answers[meterField.name] = typed; roles.odometer = typed; }
+    }
 
     const photoFields = new Map(form.fields.filter(f => f.kind === 'photo').map(f => [f.name, f]));
     const photos = [];
@@ -901,12 +934,24 @@ function readFieldBody(body) {
 
   const alertOn = CHOICE_VALUES.filter(c => body['alert_' + c] === '1');
 
+  // The follow-up list ("which lamp?"), one per line, and its translations.
+  // The Swedish line is the value that gets stored; a translation row is
+  // matched to it by position, so a list edited in one language and not the
+  // others still shows Swedish rather than nothing.
+  const commentOptions = String(body.commentOptions || '')
+    .split('\n').map(o => o.trim()).filter(Boolean).slice(0, 100);
+
   const i18nBlob = {};
   for (const code of i18n.CODES) {
     if (code === i18n.DEFAULT_LANG) continue;
     const label = String(body['label_' + code] || '').trim().slice(0, 500);
     const section = String(body['section_' + code] || '').trim().slice(0, 120);
-    if (label || section) i18nBlob[code] = { label, section };
+    const picks = String(body['picks_' + code] || '')
+      .split('\n').map(o => o.trim()).filter(Boolean).slice(0, 100);
+    if (label || section || picks.length) {
+      i18nBlob[code] = { label, section };
+      if (picks.length) i18nBlob[code].commentOptions = picks;
+    }
   }
 
   return {
@@ -918,6 +963,7 @@ function readFieldBody(body) {
     options,
     source: body.source === 'drivers' ? 'drivers' : '',
     alertOn,
+    commentOptions,
     i18n: i18nBlob
   };
 }

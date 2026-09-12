@@ -315,6 +315,7 @@ const ROLE_OPTIONS = ROLES.map(r => ({ value: r.value, label: r.label }));
 function fieldRow(form, f, isFirst, isLast) {
   const opts = Array.isArray(f.options) ? f.options : [];
   const alert = Array.isArray(f.alert_on) ? f.alert_on : [];
+  const picks = Array.isArray(f.comment_options) ? f.comment_options : [];
   const blob = f.i18n || {};
 
   /* The extras -- dropdown options, alert polarity, the three translations
@@ -340,6 +341,12 @@ function fieldRow(form, f, isFirst, isLast) {
               </div>
               <p class="q-hint">Styr vad dagsmejlet och FLEET180-vyn lyfter fram.
                  "Fungerar X?" larmar på Nej, "Finns nya skador?" larmar på Ja.</p>
+              <label class="q-lab">Välj-lista när svaret larmar (ett per rad)</label>
+              <textarea class="form-control" name="commentOptions" rows="4"
+                        placeholder="Helljus&#10;Halvljus&#10;Bromsljus">${esc(picks.join('\n'))}</textarea>
+              <p class="q-hint">Föraren väljer ett av alternativen och kan skriva
+                 detaljer bredvid. Det som sparas är den svenska texten, oavsett
+                 vilket språk föraren läser på.</p>
             </div>
             <div class="q-col q-col-wide">
               ${i18n.CODES.filter(c => c !== 'sv').map(c => {
@@ -348,7 +355,10 @@ function fieldRow(form, f, isFirst, isLast) {
               <input class="form-control" type="text" name="label_${c}" value="${esc((blob[c] && blob[c].label) || '')}"
                      placeholder="(tomt = svenska visas)">
               <label class="q-lab">${m.flag} avsnitt</label>
-              <input class="form-control" type="text" name="section_${c}" value="${esc((blob[c] && blob[c].section) || '')}">`;
+              <input class="form-control" type="text" name="section_${c}" value="${esc((blob[c] && blob[c].section) || '')}">
+              ${picks.length ? `<label class="q-lab">${m.flag} välj-listan (samma ordning)</label>
+              <textarea class="form-control" name="picks_${c}" rows="3"
+                        placeholder="(tomt = svenska visas)">${esc(((blob[c] && blob[c].commentOptions) || []).join('\n'))}</textarea>` : ''}`;
               }).join('')}
             </div>
           </div>

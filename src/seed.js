@@ -61,6 +61,47 @@ function tr(section, en, ar, hi) {
   };
 }
 
+/**
+ * Which lamp is not working -- offered when the exterior-lighting question is
+ * answered Nej.
+ *
+ * The value that is stored is the Swedish one whatever language the driver
+ * read it in, so a month of checks has one spelling per lamp and the workshop
+ * can count them. "Annat" is last and leaves the free-text box to say what.
+ */
+const LAMPS = [
+  'Helljus',
+  'Halvljus',
+  'Blinkers fram',
+  'Blinkers bak',
+  'Bromsljus',
+  'Backljus',
+  'Positions-/sidomarkeringsljus',
+  'Skyltbelysning',
+  'Annat'
+];
+
+const LAMPS_I18N = {
+  en: ['Main beam', 'Dipped beam', 'Front indicators', 'Rear indicators',
+       'Brake lights', 'Reversing lights', 'Side/marker lights',
+       'Number plate light', 'Other'],
+  ar: ['الضوء العالي', 'الضوء المنخفض', 'إشارات الانعطاف الأمامية',
+       'إشارات الانعطاف الخلفية', 'أضواء الفرامل', 'أضواء الرجوع للخلف',
+       'الأضواء الجانبية', 'إضاءة لوحة الأرقام', 'أخرى'],
+  hi: ['हाई बीम', 'लो बीम', 'आगे के इंडिकेटर', 'पीछे के इंडिकेटर',
+       'ब्रेक लाइट', 'रिवर्स लाइट', 'साइड/मार्कर लाइट',
+       'नंबर प्लेट लाइट', 'अन्य']
+};
+
+/** The i18n blob for a question, with its follow-up list translated too. */
+function trLamps(section, en, ar, hi) {
+  const blob = tr(section, en, ar, hi);
+  for (const code of Object.keys(LAMPS_I18N)) {
+    blob[code] = { ...blob[code], commentOptions: LAMPS_I18N[code] };
+  }
+  return blob;
+}
+
 /** Din rutt: JK-EM-1 … JK-EM-20. */
 const ROUTES = Array.from({ length: 20 }, (_, i) => `JK-EM-${i + 1}`);
 
@@ -95,10 +136,10 @@ const DEFAULT_FIELDS = [
     i18n: tr(S1, 'Your route:', 'مسارك:', 'आपका रूट:') },
 
   { name: 'f2', kind: 'text', section: S1, required: true, role: 'odometer',
-    label: 'Ange fordonets miltal:',
-    i18n: tr(S1, "Enter the vehicle's odometer (mil):",
-             'أدخل عدّاد المسافة للمركبة (ميل سويدي):',
-             'वाहन का ओडोमीटर दर्ज करें (स्वीडिश मील):') },
+    label: 'Ange mätarställning i km:',
+    i18n: tr(S1, "Enter the odometer reading (km):",
+             'أدخل قراءة عدّاد المسافة (كم):',
+             'ओडोमीटर रीडिंग दर्ज करें (किमी):') },
 
   /* Asked when the driver hands the vehicle back, which is why they sit
      directly after the name and route rather than at the end: a driver who
@@ -127,8 +168,9 @@ const DEFAULT_FIELDS = [
       'क्या आपने आज इस वाहन को कोई भी नुकसान पहुँचाया है?') },
 
   { name: 'f3', kind: 'yesno', section: S2, required: true, alertOn: ['nej', 'annat'],
+    commentOptions: LAMPS,
     label: 'Fungerar utvändig belysning som tex hel/halvjus, blinkers, bromsljus, sidopositions ljus? Om nej, beskriv vilken lampa som inte fungerar',
-    i18n: tr(S2,
+    i18n: trLamps(S2,
       'Does the exterior lighting work – main/dipped beam, indicators, brake lights, side marker lights? If no, describe which lamp is not working',
       'هل تعمل الإضاءة الخارجية مثل الضوء العالي/المنخفض وإشارات الانعطاف وأضواء الفرامل والأضواء الجانبية؟ إذا كانت الإجابة لا، صف المصباح الذي لا يعمل',
       'क्या बाहरी लाइटें काम कर रही हैं – हाई/लो बीम, इंडिकेटर, ब्रेक लाइट, साइड लाइट? यदि नहीं, तो बताएं कौन सी लाइट काम नहीं कर रही') },
@@ -277,5 +319,6 @@ const RETURN_FIELDS = DEFAULT_FIELDS.filter(f => f.section === SR);
 
 module.exports = {
   FORM_KEY, FORM_TITLE, FORM_I18N, DEFAULT_FIELDS, DEFAULT_VEHICLES, ROUTES, ADBLUE,
-  SECTION_RENAMES, RETURN_FIELDS, SECTION_RETURN: SR, SECTION_TEXT
+  SECTION_RENAMES, RETURN_FIELDS, SECTION_RETURN: SR, SECTION_TEXT,
+  LAMPS, LAMPS_I18N
 };

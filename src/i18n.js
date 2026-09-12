@@ -78,6 +78,12 @@ const UI = {
     weekChecked: 'Kontroll',
     weekSwapped: 'bytt',
     weekToday: 'i dag',
+    pickLabel: 'Vilken fungerar inte?',
+    odometerLast: 'Förra avläsningen: {value} km ({date}).',
+    odometerFill: 'Fyll i de sista siffrorna.',
+    odometerDigits: 'Skriv bara siffror.',
+    odometerUnchanged: 'Fyll i resten av mätarställningen.',
+    odometerLow: 'Lägre än förra avläsningen ({value} km). Kontrollera siffrorna.',
     languageLabel: 'Språk'
   },
   en: {
@@ -129,6 +135,12 @@ const UI = {
     weekChecked: 'Checked by',
     weekSwapped: 'swapped',
     weekToday: 'today',
+    pickLabel: 'Which one is not working?',
+    odometerLast: 'Previous reading: {value} km ({date}).',
+    odometerFill: 'Fill in the last digits.',
+    odometerDigits: 'Digits only.',
+    odometerUnchanged: 'Fill in the rest of the reading.',
+    odometerLow: 'Lower than the previous reading ({value} km). Check the digits.',
     languageLabel: 'Language'
   },
   ar: {
@@ -180,6 +192,12 @@ const UI = {
     weekChecked: 'الفحص',
     weekSwapped: 'تغيير السائق',
     weekToday: 'اليوم',
+    pickLabel: 'أيّها لا يعمل؟',
+    odometerLast: 'القراءة السابقة: {value} كم ({date}).',
+    odometerFill: 'أكمل الأرقام الأخيرة.',
+    odometerDigits: 'أرقام فقط.',
+    odometerUnchanged: 'أكمل بقية قراءة العدّاد.',
+    odometerLow: 'أقل من القراءة السابقة ({value} كم). تحقّق من الأرقام.',
     languageLabel: 'اللغة'
   },
   hi: {
@@ -231,6 +249,12 @@ const UI = {
     weekChecked: 'जाँच की',
     weekSwapped: 'बदला गया',
     weekToday: 'आज',
+    pickLabel: 'कौन सी काम नहीं कर रही?',
+    odometerLast: 'पिछली रीडिंग: {value} किमी ({date})।',
+    odometerFill: 'आख़िरी अंक भरें।',
+    odometerDigits: 'केवल अंक लिखें।',
+    odometerUnchanged: 'रीडिंग के बाक़ी अंक भरें।',
+    odometerLow: 'पिछली रीडिंग ({value} किमी) से कम है। अंक जाँचें।',
     languageLabel: 'भाषा'
   }
 };

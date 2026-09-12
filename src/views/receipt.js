@@ -32,13 +32,28 @@ function answerRows(submission, fallbackFields, lang = 'sv') {
       if (q.kind === 'yesno' && value && typeof value === 'object' && value.choice) {
         const key = value.choice === 'ja' ? 'yes' : value.choice === 'nej' ? 'no' : 'other';
         const comment = String(value.comment || '').trim();
-        text = comment ? `${i18n.t(lang, key)}: ${comment}` : i18n.t(lang, key);
+        // The picked item is stored in Swedish whatever language it was read
+        // in, so a receipt in another language shows that language's wording
+        // for it -- from the question's own snapshot, not today's form.
+        const detail = [pickText(q, value.pick, lang), comment].filter(Boolean).join(' – ');
+        text = detail ? `${i18n.t(lang, key)}: ${detail}` : i18n.t(lang, key);
       } else {
         text = formatAnswer(q, value);
       }
     }
     return `<tr><td>${esc(label)}</td><td>${esc(text)}</td></tr>`;
   }).join('\n');
+}
+
+/** One picked follow-up option, in the language the receipt is being read in. */
+function pickText(question, pick, lang) {
+  const value = String(pick || '').trim();
+  if (!value) return '';
+  const list = question.comment_options || question.commentOptions || [];
+  const i = list.indexOf(value);
+  if (i < 0 || lang === i18n.DEFAULT_LANG) return value;
+  const translated = ((question.i18n || {})[lang] || {}).commentOptions || [];
+  return (translated[i] || '').trim() || value;
 }
 
 function receiptPage({ submission, fallbackFields, lang = 'sv' }) {
