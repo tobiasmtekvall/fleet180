@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#e6746e">
+  <meta name="description" content="Colour and panel settings for Checklist Calendar.">
+  <title>Calendar settings</title>
+  <link rel="icon" href="/icons/eagle.png" type="image/png">
+  <link rel="stylesheet" href="/styles.css">
+  <script src="/theme.js"></script>
+</head>
+<body>
+  <nav class="topnav">
+    <div class="topnav-inner">
+      <div class="topnav-left">
+        <a class="brand" href="/">
+          <img src="/icons/eagle.png" alt="">
+          <span>Checklist Calendar</span>
+        </a>
+      </div>
+      <div class="topnav-right">
+        <a class="btn ghost" href="/">Calendar</a>
+      </div>
+    </div>
+  </nav>
+
+  <main class="settings-main">
+    <section class="card">
+      <h2><span class="accent"></span>Themes</h2>
+      <p class="hero-sub">
+        Same colours and panel settings as Route Suite. When the local server is
+        running, changes here stay in sync with Settings → Themes in the extension.
+      </p>
+      <h3 class="theme-heading">Site colours</h3>
+      <div id="themeColors" class="theme-grid"></div>
+      <div class="setting-row">
+        <label for="panelAlpha">Panel transparency</label>
+        <input type="range" id="panelAlpha" min="0" max="80" step="1">
+        <span id="panelAlphaVal"></span>
+      </div>
+      <div class="setting-row">
+        <label for="panelBorder">Panel border</label>
+        <input type="range" id="panelBorder" min="0" max="8" step="1">
+        <span id="panelBorderVal"></span>
+      </div>
+      <div class="backup-tools">
+        <button class="btn ghost" id="themeReset" type="button">Reset to defaults</button>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script src="/settings.js"></script>
+</body>
+</html>

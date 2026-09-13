@@ -4,6 +4,7 @@ const crypto = require('crypto');
 const { Pool } = require('pg');
 const seed = require('./seed');
 const { normalisePlate } = require('./plate');
+const { SCHEMA: calendarSchema } = require('./calendar/store');
 
 /* ------------------------------------------------------------------ *
  * Finding the database                                                *
@@ -375,6 +376,11 @@ CREATE TABLE IF NOT EXISTS photos (
   byte_size      INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS photos_submission_idx ON photos (submission_id);
+
+-- The Checklist Calendar's own tables. Kept in its module so the two things
+-- stay separable; appended here so they are created by the same idempotent
+-- pass as everything else. See src/calendar/store.js.
+${calendarSchema}
 `;
 
 /* ------------------------------------------------------------------ *

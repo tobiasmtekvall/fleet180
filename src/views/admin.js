@@ -18,7 +18,11 @@ const TABS = [
   { href: '/admin/forms', text: 'Formulär', key: 'forms' },
   { href: '/admin/drivers', text: 'Förare', key: 'drivers' },
   { href: '/admin/stats', text: 'Statistik', key: 'stats' },
-  { href: '/admin/daily-summary', text: 'Dagsmejl', key: 'mail' }
+  { href: '/admin/daily-summary', text: 'Dagsmejl', key: 'mail' },
+  // Not an /admin page -- it is the Checklist Calendar, mounted whole at
+  // /kalender behind the same login. It sits in this row because that is
+  // where he will look for it.
+  { href: '/kalender', text: 'Kalender', key: 'calendar' }
 ];
 
 function nav(active) {

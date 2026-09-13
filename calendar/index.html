@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#e6746e">
+  <meta name="description" content="Calendar-based daily, weekly and monthly operational checklists.">
+  <title>Checklist Calendar</title>
+  <link rel="icon" href="/icons/eagle.png" type="image/png">
+  <link rel="stylesheet" href="/styles.css">
+  <link rel="stylesheet" href="/fleet.css">
+  <script src="/theme.js"></script>
+</head>
+<body>
+  <nav class="topnav">
+    <div class="topnav-inner">
+      <div class="topnav-left">
+        <a class="brand" href="/">
+          <img src="/icons/eagle.png" alt="">
+          <span>Checklist Calendar</span>
+        </a>
+      </div>
+      <div class="topnav-right">
+        <span id="storageStatus" class="storage-status" aria-live="polite">Connecting…</span>
+        <a class="btn ghost" href="/settings.html">Settings</a>
+      </div>
+    </div>
+  </nav>
+
+  <main>
+    <section class="card calendar-panel" aria-label="Checklist calendar">
+      <h1 class="hero">CHECKLIST CALENDAR</h1>
+      <p class="hero-sub">Daily, weekly and monthly substitute checklists</p>
+
+      <div class="calendar-toolbar">
+        <div class="toolbar-group navigation-group">
+          <button id="previousButton" class="icon-button" type="button" aria-label="Previous period">←</button>
+          <button id="todayButton" class="button button-quiet" type="button">Today</button>
+          <button id="nextButton" class="icon-button" type="button" aria-label="Next period">→</button>
+        </div>
+
+        <div class="date-controls">
+          <label>
+            <span>Month</span>
+            <select id="monthSelect"></select>
+          </label>
+          <label>
+            <span>Year</span>
+            <input id="yearInput" type="number" min="1900" max="2300" step="1">
+          </label>
+        </div>
+
+        <div class="toolbar-group right-tools">
+          <button id="monthlyChecklistButton" class="month-checklist-button" type="button"></button>
+          <div class="segmented" role="group" aria-label="Calendar view">
+            <button id="monthViewButton" class="active" type="button">Month</button>
+            <button id="yearViewButton" type="button">Year</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="toolbar-group backup-tools">
+        <button id="exportButton" class="button button-quiet" type="button">Export backup</button>
+        <label class="button button-quiet file-button">
+          Import backup
+          <input id="importInput" type="file" accept="application/json,.json">
+        </label>
+      </div>
+
+      <div id="monthView" class="calendar-view"></div>
+      <div id="yearView" class="calendar-view" hidden></div>
+    </section>
+
+    <section class="card legend-panel" aria-label="Instructions">
+      <div><strong>DAY</strong><span>Click a date to create or use its checklist.</span></div>
+      <div><strong>WEEK</strong><span>Use the numbered slot at the left of each calendar row.</span></div>
+      <div><strong>MONTH</strong><span>Use the monthly slot above the calendar or in the year view.</span></div>
+    </section>
+  </main>
+
+  <dialog id="checklistDialog" class="checklist-dialog">
+    <div class="dialog-shell">
+      <header class="dialog-toolbar">
+        <div>
+          <p id="dialogPeriod" class="dialog-period"></p>
+          <p id="dialogModeLabel" class="dialog-mode-label"></p>
+        </div>
+        <div id="useActions" class="dialog-actions">
+          <button id="editButton" class="button button-quiet" type="button">Edit</button>
+          <button id="downloadButton" class="button button-quiet" type="button">Download PDF</button>
+          <button id="printButton" class="button button-quiet" type="button">Print</button>
+          <button id="closeButton" class="icon-button" type="button" aria-label="Close">×</button>
+        </div>
+        <div id="editActions" class="dialog-actions" hidden>
+          <button id="deleteButton" class="button button-danger" type="button">Delete</button>
+          <button id="cancelEditButton" class="button button-quiet" type="button">Cancel</button>
+          <button id="saveButton" class="button button-primary" type="button">Save checklist</button>
+          <button id="closeEditButton" class="icon-button" type="button" aria-label="Close">×</button>
+        </div>
+      </header>
+
+      <div id="checklistUseView" class="dialog-content"></div>
+      <form id="checklistEditor" class="dialog-content editor" hidden></form>
+    </div>
+  </dialog>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

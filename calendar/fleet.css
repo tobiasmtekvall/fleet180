@@ -1,0 +1,439 @@
+/* Weekly vehicle maintenance matrix.
+ *
+ * Loaded by index.html alongside styles.css. Everything here is namespaced under
+ * .fleet-* so it cannot reach into the checklist dialog, whose own
+ * `.dialog-actions { display:flex }` already beats the `hidden` attribute — a
+ * pre-existing bug this file deliberately does not inherit: the matrix hides
+ * panels with an explicit .is-hidden class instead of relying on [hidden].
+ */
+
+.fleet-dialog {
+  width: min(1800px, calc(100vw - 20px));
+  max-width: none;
+  height: min(96vh, 1180px);
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+.fleet-dialog::backdrop { background: rgba(0, 0, 0, .5); }
+
+.fleet-shell {
+  height: 100%;
+  display: grid;
+  grid-template-rows: auto auto 1fr;
+  background: var(--card-fill, var(--card));
+  border: var(--panel-border) solid var(--line);
+  min-height: 0;
+}
+
+.is-hidden { display: none !important; }
+
+/* ---------- toolbar ---------- */
+.fleet-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding: 11px 16px;
+  border-bottom: var(--panel-border) solid var(--line);
+  background: var(--card-fill, var(--card));
+}
+.fleet-period { margin: 0; font-weight: 700; font-size: 15px; }
+.fleet-sub { margin: 3px 0 0; color: var(--muted); font-size: 12px; }
+.fleet-actions { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+
+.fleet-tallies { display: flex; gap: 6px; flex-wrap: wrap; }
+.tally-pill {
+  font-size: 11.5px;
+  font-weight: 700;
+  padding: 3px 9px;
+  border: 1px solid var(--line);
+  white-space: nowrap;
+}
+.tally-pill.state-ok { color: var(--ok); background: var(--ok-bg); border-color: #bfe0c8; }
+.tally-pill.state-minor { color: var(--warn); background: var(--warn-bg); border-color: #f0dbb0; }
+.tally-pill.state-urgent { color: var(--danger); background: var(--danger-bg); border-color: #f2c4bf; }
+.tally-pill.state-pending { color: #7a6316; background: #fbf3d0; border-color: #e6d894; }
+.tally-pill.neutral { color: var(--muted); }
+
+/* ---------- controls strip ---------- */
+.fleet-controls {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding: 9px 16px;
+  border-bottom: var(--panel-border) solid var(--line);
+  background: var(--brand-softer);
+}
+.fleet-legend { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+.legend-chip {
+  font-size: 11px;
+  padding: 2px 8px 2px 6px;
+  border: 1px solid var(--line);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.legend-chip::before {
+  content: "";
+  width: 11px; height: 11px;
+  border: 1px solid rgba(0, 0, 0, .28);
+  display: inline-block;
+}
+.legend-chip.state-pending::before { background: #f4e3a1; }
+.legend-chip.state-ok::before { background: #6fbf8a; }
+.legend-chip.state-minor::before { background: #f0a63d; }
+.legend-chip.state-urgent::before { background: #d95448; }
+.legend-hint { font-size: 11px; color: var(--muted); }
+
+.fleet-groupbar { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
+.groupbar-label {
+  font-size: 10.5px; text-transform: uppercase; letter-spacing: .08em;
+  color: var(--muted); font-weight: 700; margin-right: 2px;
+}
+.group-chip {
+  font-size: 11.5px;
+  padding: 3px 9px;
+  border: 1px solid var(--line);
+  background: var(--card-fill, var(--card));
+  cursor: pointer;
+  white-space: nowrap;
+}
+.group-chip b { font-weight: 700; color: var(--muted); margin-left: 3px; }
+.group-chip:hover { border-color: var(--brand); }
+.group-chip.open { background: var(--brand); color: #fff; border-color: var(--brand); }
+.group-chip.open b { color: rgba(255, 255, 255, .8); }
+.group-chip.bulk { font-weight: 700; }
+
+.fleet-save { margin-left: auto; font-size: 11.5px; color: var(--muted); white-space: nowrap; }
+
+/* ---------- the matrix ---------- */
+.fleet-body { overflow: auto; min-height: 0; background: var(--card-fill, var(--card)); }
+.fleet-table-wrap { min-width: max-content; }
+
+.fleet-table {
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 12px;
+  background: var(--card-fill, var(--card));
+}
+.fleet-table th, .fleet-table td {
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  padding: 0;
+  background: var(--card-fill, var(--card));
+}
+
+/* Sticky left block: plate, spare parts, comment. Everything else scrolls. */
+.fleet-table .sticky { position: sticky; z-index: 3; }
+.fleet-table .sticky-1 { left: 0; width: 138px; min-width: 138px; }
+.fleet-table .sticky-2 { left: 138px; width: 212px; min-width: 212px; }
+.fleet-table .sticky-3 { left: 350px; width: 216px; min-width: 216px;
+  box-shadow: 3px 0 0 -1px var(--line); }
+
+.fleet-table thead th { position: sticky; z-index: 4; }
+.fleet-table thead .group-row th { top: 0; height: 30px; }
+.fleet-table thead .checkpoint-row th { top: 30px; }
+.fleet-table thead th.corner { z-index: 6; top: 0; }
+
+.fleet-table thead th.corner,
+.fleet-table thead .group-head,
+.fleet-table thead .cp-head,
+.fleet-table thead .summary-head {
+  /* opaque: a sticky header must not let the rows beneath it show through */
+  background: linear-gradient(var(--grid-head), var(--grid-head)), var(--card-fill, var(--card));
+}
+
+.group-head {
+  cursor: pointer;
+  font-size: 11px;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: var(--muted);
+  border-left: 2px solid var(--line);
+  padding: 0 8px;
+  overflow: hidden;
+}
+.group-head:hover { color: var(--ink); background: var(--brand-soft); }
+.fleet-table thead .group-head.open { color: #fff; background: var(--brand); border-left-color: var(--brand-dark); }
+.group-head-inner {
+  display: inline-flex; align-items: center; gap: 7px;
+  white-space: nowrap; max-width: 100%; overflow: hidden;
+}
+.group-caret { font-weight: 700; opacity: .75; }
+
+.cp-head {
+  height: 196px;   /* only ever rendered inside an expanded group */
+  width: 26px;
+  min-width: 26px;
+  max-width: 26px;
+  vertical-align: bottom;
+  background: var(--grid-head);
+  padding: 0;
+}
+.cp-head .cp-label {
+  display: block;
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-height: 188px;
+  font-size: 11px;
+  font-weight: 500;
+  text-align: left;
+  padding: 5px 0 6px 5px;
+  color: var(--ink);
+}
+.cp-head.form .cp-label { font-weight: 700; }
+.cp-head.form::after {
+  content: "";
+  position: absolute;
+  left: 2px; bottom: 2px;
+  width: 4px; height: 4px;
+  background: var(--brand);
+}
+.cp-head, .summary-head { position: relative; }
+
+.summary-head {
+  width: 96px; min-width: 96px; max-width: 96px;
+  cursor: pointer;
+  vertical-align: bottom;
+  height: auto;   /* a collapsed matrix has no vertical labels to make room for */
+}
+/* …but once any group is open, every header shares the tall row. */
+.fleet-table.has-expanded .summary-head { height: 196px; }
+.summary-head .cp-label {
+  writing-mode: horizontal-tb;
+  transform: none;
+  max-height: none;
+  text-align: center;
+  padding: 8px 6px;
+  font-weight: 700;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  color: var(--muted);
+}
+.summary-head:hover .cp-label { color: var(--brand-dark); }
+
+.corner {
+  background: var(--grid-head);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--muted);
+  text-align: left;
+  padding: 8px 10px;
+  vertical-align: bottom;
+}
+
+/* ---------- fleet divider rows ---------- */
+.fleet-divider td { background: var(--brand-soft); border-bottom: 1px solid var(--line); }
+.fleet-divider-cell { padding: 7px 10px !important; z-index: 3; }
+.fleet-divider-cell strong { display: block; font-size: 12px; }
+.fleet-divider-cell span { display: block; font-size: 10.5px; color: var(--muted); font-weight: 400; }
+.fleet-divider-fill { background: var(--brand-soft) !important; }
+
+/* ---------- vehicle / parts / comment cells ---------- */
+.vehicle-cell {
+  text-align: left;
+  padding: 8px 10px !important;
+  vertical-align: top;
+  font-weight: 400;
+}
+.vehicle-cell .plate {
+  display: block;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: .04em;
+}
+.owner-chip {
+  display: inline-block;
+  margin-top: 3px;
+  font-size: 10px;
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: .05em;
+}
+.owner-chip.owner-own { color: var(--ok); border-color: #bfe0c8; background: var(--ok-bg); }
+.owner-chip.owner-unset { border-style: dashed; }
+
+.row-tally { display: flex; gap: 3px; margin-top: 6px; }
+.rt {
+  font-size: 10px; font-weight: 700; padding: 0 5px;
+  border: 1px solid var(--line); min-width: 22px; text-align: center;
+}
+.rt.ok { color: var(--ok); background: var(--ok-bg); }
+.rt.minor { color: var(--warn); background: var(--warn-bg); }
+.rt.urgent { color: var(--danger); background: var(--danger-bg); }
+.rt.pending { color: #7a6316; background: #fbf3d0; }
+
+.row-ok {
+  margin-top: 6px;
+  font-size: 10.5px;
+  padding: 2px 7px;
+  border: 1px solid var(--line);
+  background: var(--card-fill, var(--card));
+  cursor: pointer;
+  width: 100%;
+}
+.row-ok:hover { border-color: var(--ok); color: var(--ok); }
+
+.parts-cell { padding: 6px 8px !important; vertical-align: top; }
+.part-chips { display: flex; flex-wrap: wrap; gap: 3px; margin-bottom: 5px; }
+.parts-empty { font-size: 11px; color: var(--muted); font-style: italic; }
+.part-chip {
+  display: inline-flex; align-items: center; gap: 3px;
+  font-size: 10.5px; padding: 1px 3px 1px 6px;
+  border: 1px solid var(--line); background: var(--brand-softer);
+}
+.part-chip button {
+  border: 0; background: none; cursor: pointer; padding: 0 2px;
+  font-size: 12px; line-height: 1; color: var(--muted);
+}
+.part-chip button:hover { color: var(--danger); }
+.part-select { width: 100%; font-size: 11px; padding: 3px 4px; border: 1px solid var(--line); background: var(--card-fill, var(--card)); }
+
+.comment-cell { padding: 6px 8px !important; vertical-align: top; }
+.comment-cell textarea {
+  width: 100%;
+  border: 1px solid var(--line);
+  background: var(--card-fill, var(--card));
+  padding: 5px 6px;
+  font-size: 11.5px;
+  resize: vertical;
+  min-height: 52px;
+}
+
+/* ---------- the boxes ---------- */
+.cell-td { padding: 2px !important; text-align: center; vertical-align: middle; }
+.cell {
+  width: 20px; height: 20px;
+  border: 1px solid rgba(0, 0, 0, .26);
+  cursor: pointer;
+  display: inline-block;
+  padding: 0;
+  transition: transform .08s ease;
+}
+.cell:hover { transform: scale(1.22); z-index: 2; position: relative; }
+.cell.state-pending { background: #f4e3a1; }
+.cell.state-ok { background: #6fbf8a; }
+.cell.state-minor { background: #f0a63d; }
+.cell.state-urgent { background: #d95448; }
+
+.summary-td { padding: 3px 6px !important; }
+.cell.summary {
+  width: 100%; height: 26px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 700; color: rgba(0, 0, 0, .68);
+}
+.cell.summary:hover { transform: none; filter: brightness(1.06); }
+.summary-figure { pointer-events: none; }
+
+/* ---------- report ---------- */
+.fleet-report {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 24px 28px 60px;
+}
+.fleet-report .rep-head { border-bottom: 2px solid var(--ink); padding-bottom: 12px; margin-bottom: 18px; }
+.fleet-report h1 { font-size: 21px; margin: 0 0 4px; }
+.fleet-report .rep-week { margin: 0; font-weight: 700; }
+.fleet-report .rep-generated { margin: 4px 0 0; color: var(--muted); font-size: 12px; }
+.fleet-report h2 {
+  font-size: 13px; margin: 26px 0 10px; padding-bottom: 5px;
+  border-bottom: 1px solid var(--line); letter-spacing: .06em; text-transform: uppercase;
+}
+.rep-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(102px, 1fr)); gap: 8px; }
+.rep-tile { border: 1px solid var(--line); padding: 9px 10px; }
+.rep-tile b { display: block; font-size: 19px; line-height: 1.15; }
+.rep-tile span { font-size: 10.5px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+.rep-tile.ok b { color: var(--ok); }
+.rep-tile.minor b { color: var(--warn); }
+.rep-tile.urgent b { color: var(--danger); }
+.rep-tile.pending b { color: #8a6d1f; }
+.rep-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.rep-table th {
+  text-align: left; border-bottom: 1px solid var(--ink); padding: 6px 8px;
+  font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted);
+}
+.rep-table td { border-bottom: 1px solid var(--line); padding: 6px 8px; vertical-align: top; }
+.rep-table .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; white-space: nowrap; }
+.rep-table .muted { color: var(--muted); }
+.sev-chip {
+  display: inline-block; padding: 1px 7px; border: 1px solid currentColor;
+  font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em;
+}
+.sev-chip.state-urgent { color: var(--danger); }
+.sev-chip.state-minor { color: var(--warn); }
+.sev-chip.state-pending { color: #8a6d1f; }
+.rep-none { color: var(--muted); font-style: italic; margin: 0; }
+.rep-parts { list-style: none; margin: 0; padding: 0; }
+.rep-parts li { padding: 5px 0; border-bottom: 1px solid var(--line); }
+.part-chip.static { border: 1px solid var(--line); padding: 1px 7px; margin: 2px 4px 2px 0; background: none; }
+.rep-comments { margin: 0; }
+.rep-comments dt { font-weight: 700; margin-top: 8px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.rep-comments dd { margin: 2px 0 0; padding-left: 12px; border-left: 2px solid var(--line); }
+.rep-log td:first-child { width: 160px; }
+
+/* ---------- week-row entry button ---------- */
+.week-fleet-button {
+  margin-top: 7px;
+  width: 100%;
+  font-size: 11px;
+  padding: 3px 6px;
+  border: 1px solid var(--line);
+  background: var(--card-fill, var(--card));
+  cursor: pointer;
+  text-align: left;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 5px;
+}
+.week-fleet-button:hover { border-color: var(--brand); color: var(--brand-dark); }
+.week-fleet-button .fleet-badge {
+  font-weight: 700; font-size: 10px; padding: 0 5px; border: 1px solid transparent;
+}
+.week-fleet-button .fleet-badge.state-ok { color: var(--ok); background: var(--ok-bg); border-color: #bfe0c8; }
+.week-fleet-button .fleet-badge.state-minor { color: var(--warn); background: var(--warn-bg); border-color: #f0dbb0; }
+.week-fleet-button .fleet-badge.state-urgent { color: var(--danger); background: var(--danger-bg); border-color: #f2c4bf; }
+.week-fleet-button .fleet-badge.state-pending { color: #7a6316; background: #fbf3d0; border-color: #e6d894; }
+
+@media (max-width: 900px) {
+  .fleet-table .sticky-2, .fleet-table .sticky-3 { position: static; }
+  .fleet-toolbar { align-items: flex-start; }
+}
+
+@media print {
+  .fleet-toolbar, .fleet-controls { display: none !important; }
+  .fleet-dialog { position: static; height: auto; width: auto; }
+  .fleet-body { overflow: visible; }
+}
+
+/* .week-slot used to BE the button; it is now the box holding two of them, so
+ * the checklist half needs the button reset styles.css never had to give it. */
+.week-open {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: stretch;
+  border: 0;
+  background: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  min-width: 0;
+}
+
+.sev-chip.state-ok { color: var(--ok); }

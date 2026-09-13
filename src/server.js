@@ -28,6 +28,11 @@ const { buildDriverStats } = require('./stats');
 const summaryLib = require('./summary');
 const assignmentLib = require('./assignment');
 const odo = require('./odometer');
+const calendarAssets = require('./calendar/assets');
+const { calendarRouter } = require('./calendar/routes');
+const calendarSync = require('./calendar/sync');
+const { makeStore } = require('./calendar/store');
+const calendarCarry = require('./calendar/carry');
 const telltales = require('./telltales');
 const mail = require('./mail');
 const { page, esc, fmtDateTime } = require('./views/layout');
@@ -38,6 +43,24 @@ const PORT = process.env.PORT || 3000;
 // Railway terminates TLS in front of the app.
 app.set('trust proxy', 1);
 app.disable('x-powered-by');
+
+/* The Checklist Calendar, mounted whole at /kalender.
+ *
+ * Deliberately ABOVE express.static: the calendar's own pages live in
+ * `calendar/`, not `public/`, but mounting the guard first means no later
+ * middleware can ever reach round it and serve a day's notes to somebody who
+ * has not logged in. */
+let calendarStore = null;
+let calendarApi = null;
+const swedishToday = () => summaryLib.dayKey();
+app.use('/kalender', (req, res, next) => adminAuth(req, res, next));
+app.use('/kalender/api', (req, res, next) => {
+  if (!calendarApi) {
+    return res.status(503).json({ error: 'Kalendern är inte klar ännu.' });
+  }
+  return calendarApi(req, res, next);
+});
+app.use('/kalender', calendarAssets.serve);
 
 app.use(express.static(path.join(__dirname, '..', 'public'), { maxAge: '1h' }));
 app.use(express.urlencoded({ extended: false, limit: '1mb' }));
@@ -514,6 +537,28 @@ app.post('/api/assignments', apiAuth, async (req, res, next) => {
       `(${result.dates[0]} – ${result.dates[result.dates.length - 1]})`);
     res.json({ ok: true, ...result });
   } catch (err) { next(err); }
+});
+
+/* The calendar exchange. Guarded by API_TOKEN rather than the admin password
+   because it is a machine calling, not a person: his calendar server holds a
+   token, not a browser session. The body can be large -- a week of the vehicle
+   matrix is thousands of cells -- so it gets its own limit. */
+app.post('/api/calendar/sync', apiAuth, express.json({ limit: '12mb' }), async (req, res, next) => {
+  try {
+    if (!calendarStore) {
+      return res.status(503).json({ ok: false, error: 'Kalendern är inte klar ännu.' });
+    }
+    const result = await calendarSync.exchange(calendarStore, req.body || {});
+    const got = result.applied;
+    if (got.checklists || got.fleet || got.deletedChecklists || got.deletedFleet) {
+      console.log(`[kalender] tog emot ${got.checklists} checklistor, ${got.fleet} veckor, ` +
+        `${got.deletedChecklists + got.deletedFleet} raderingar`);
+    }
+    res.json(result);
+  } catch (err) {
+    if (err && err.status) return res.status(err.status).json({ ok: false, error: err.message });
+    next(err);
+  }
 });
 
 app.get('/api/assignments', apiAuth, async (req, res, next) => {
@@ -1152,6 +1197,18 @@ app.use((err, req, res, next) => {                       // eslint-disable-line 
 
 db.init()
   .then(async () => {
+    calendarStore = makeStore(db.pool);
+    calendarApi = calendarRouter({ store: calendarStore, today: swedishToday });
+    /* One pass at boot, exactly as his own server does, so a copy woken on
+       Monday morning has already rolled Friday's open items over before
+       anybody opens it. A failure here must not stop the app: the calendar is
+       a guest in this process, the safety checks are the tenant. */
+    calendarCarry.run(calendarStore, swedishToday(), 'startup')
+      .then(r => {
+        if (r && r.moved) console.log(`[kalender] flyttade ${r.moved} punkter till närmaste arbetsdag`);
+      })
+      .catch(err => console.error('[kalender] carry-forward misslyckades', err.message));
+
     const [vehicles, drivers] = await Promise.all([db.listVehicles(), db.listDrivers()]);
     app.listen(PORT, () => {
       console.log(`[web] listening on :${PORT} · ${vehicles.length} fordon · ${drivers.length} förare`);
