@@ -210,16 +210,20 @@ const BELTS = {
 };
 
 const CLEAN = {
-  sv: ['Skräp i hytten', 'Lösa föremål i hytten', 'Skräp i lastutrymmet',
+  sv: ['Matrester', 'Omslagspapper och förpackningar', 'Tomma burkar och flaskor',
+       'Annat skräp i hytten', 'Lösa föremål i hytten', 'Skräp i lastutrymmet',
        'Smutsiga rutor eller speglar', 'Hann inte städa', 'Annat'],
-  en: ['Rubbish in the cab', 'Loose items in the cab', 'Rubbish in the load area',
+  en: ['Food leftovers', 'Wrappers and packaging', 'Empty cans and bottles',
+       'Other rubbish in the cab', 'Loose items in the cab', 'Rubbish in the load area',
        'Dirty windows or mirrors', 'No time to clean', 'Other'],
-  ar: ['نفايات في المقصورة', 'أغراض غير مثبّتة في المقصورة', 'نفايات في صندوق الشحن',
+  ar: ['بقايا طعام', 'أغلفة وعبوات', 'علب وزجاجات فارغة',
+       'نفايات أخرى في المقصورة', 'أغراض غير مثبّتة في المقصورة', 'نفايات في صندوق الشحن',
        'زجاج أو مرايا متسخة', 'لم يتوفر وقت للتنظيف', 'أخرى'],
-  hi: ['केबिन में कचरा', 'केबिन में खुली चीज़ें', 'लोड एरिया में कचरा',
+  hi: ['खाने के बचे हुए टुकड़े', 'रैपर और पैकिंग', 'खाली कैन और बोतलें',
+       'केबिन में अन्य कचरा', 'केबिन में खुली चीज़ें', 'लोड एरिया में कचरा',
        'गंदे शीशे या मिरर', 'सफ़ाई का समय नहीं मिला', 'अन्य'],
-  q: { sv: 'Vad är kvar att göra?', en: 'What is left to do?',
-       ar: 'ما الذي تبقّى؟', hi: 'क्या करना बाक़ी है?' }
+  q: { sv: 'Vad behöver städas?', en: 'What needs cleaning?',
+       ar: 'ما الذي يحتاج إلى تنظيف؟', hi: 'क्या साफ़ करना है?' }
 };
 
 const WIPERS = {

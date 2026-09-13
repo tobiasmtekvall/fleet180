@@ -52,8 +52,10 @@ CREATE INDEX IF NOT EXISTS calendar_fleet_synced_idx ON calendar_fleet_weeks (sy
 CREATE TABLE IF NOT EXISTS calendar_meta (
   name        TEXT PRIMARY KEY,
   payload     JSONB       NOT NULL DEFAULT '{}'::jsonb,
-  updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  synced_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+ALTER TABLE calendar_meta ADD COLUMN IF NOT EXISTS synced_at TIMESTAMPTZ NOT NULL DEFAULT now();
 `;
 
 /** The record's own updatedAt, or now if it has none we can trust. */
@@ -190,10 +192,12 @@ function makeStore(pool) {
   async function setMeta(name, payload, { ifNewer = false, at = null } = {}) {
     const when = (at ? new Date(at) : new Date()).toISOString();
     const r = await q(
-      `INSERT INTO calendar_meta (name, payload, updated_at)
-            VALUES ($1, $2::jsonb, $3)
+      `INSERT INTO calendar_meta (name, payload, updated_at, synced_at)
+            VALUES ($1, $2::jsonb, $3, now())
        ON CONFLICT (name) DO UPDATE
-              SET payload = EXCLUDED.payload, updated_at = EXCLUDED.updated_at
+              SET payload = EXCLUDED.payload,
+                  updated_at = EXCLUDED.updated_at,
+                  synced_at = now()
             WHERE $4::boolean IS FALSE OR EXCLUDED.updated_at > calendar_meta.updated_at
         RETURNING name`,
       [name, JSON.stringify(payload), when, ifNewer]);
@@ -218,8 +222,15 @@ function makeStore(pool) {
           WHERE synced_at > $1 ORDER BY synced_at`, [from.toISOString()]),
       q(`SELECT week_key, payload, updated_at, deleted_at FROM calendar_fleet_weeks
           WHERE synced_at > $1 ORDER BY synced_at`, [from.toISOString()]),
+      /* `synced_at`, like the two tables above -- NOT `updated_at`.
+         `updated_at` is the other machine's clock, and the cursor is this
+         one's. Keyed on the wrong one, a theme saved on a laptop whose clock
+         runs two minutes fast is newer than every cursor this server will
+         hand out for the next two minutes, so it is sent back on every
+         exchange, forever. That is exactly what happened the first time this
+         ran against the real machine. */
       q(`SELECT payload, updated_at FROM calendar_meta
-          WHERE name = 'theme' AND updated_at > $1`, [from.toISOString()])
+          WHERE name = 'theme' AND synced_at > $1`, [from.toISOString()])
     ]);
     return {
       checklists: checks.rows.filter(r => !r.deleted_at).map(r => r.payload),
