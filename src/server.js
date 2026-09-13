@@ -233,13 +233,26 @@ let boardCache = null;          // { at, key, board }
 
 function dropBoardCache() { boardCache = null; }
 
+/**
+ * How far back the board looks.
+ *
+ * A rolling month rather than "everything there is". Two reasons, and the
+ * second was found by deploying without it: a driver should be able to have a
+ * bad week and climb out of it, and a board keyed to the whole assignment
+ * history reads "everybody 0 %" every night from midnight until the first
+ * check of the day comes in -- which is exactly when the drivers are looking
+ * at it. A month of history behind today's zeros makes the number mean
+ * "how you have been doing", which is the only thing a standings board is for.
+ */
+const BOARD_WINDOW_DAYS = 30;
+
 async function buildBoard() {
   const epoch = await db.getStatsEpoch();
-  const range = await db.assignmentRange();
   const today = summaryLib.dayKey();
-  const from = epoch && (!range.first || epoch > range.first) ? epoch : (range.first || today);
+  const window = assignmentLib.shiftDay(today, -(BOARD_WINDOW_DAYS - 1));
+  // The reset line always wins when it is later: a reset means start today.
+  const from = epoch && epoch > window ? epoch : window;
   const to = today;
-  if (!range.first && !epoch) return { from, minAssignments: statsLib.MIN_ASSIGNMENTS, rows: [] };
 
   const [assignments, submissions, fallback] = await Promise.all([
     db.assignmentsBetween(from, to),
