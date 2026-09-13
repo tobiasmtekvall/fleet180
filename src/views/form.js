@@ -7,6 +7,8 @@ const { sameName } = require('../assignment');
 const { flagSvg } = require('./flags');
 const odo = require('../odometer');
 const { icon } = require('../telltales');
+const { icon: badgeIcon, badgeText } = require('../badges');
+const { driverKey } = require('../stats');
 
 /* Consecutive questions that name the same section share one card, which
    is how the original four-part page is reproduced without the section
@@ -85,14 +87,18 @@ function renderField(f, lang, sources, ctx = {}) {
     // own values, and a near-miss would be refused at submit with a message
     // about a list the driver never touched.
     const pre = prefillFor(f, ctx);
+    /* The driver's own options carry the standings key, so picking your name
+       can light up your row without the page listing who is who. */
+    const keyed = f.role === 'driver';
     const options = [`<option value="" ${uiAttrs('choose')}>${esc(i18n.t(lang, 'choose'))}</option>`]
       .concat(opts.map(o =>
-        `<option value="${esc(o)}"${pre && sameName(o, pre) ? ' selected' : ''}>${esc(o)}</option>`))
+        `<option value="${esc(o)}"${keyed ? ` data-key="${esc(driverKey(o))}"` : ''}${
+          pre && sameName(o, pre) ? ' selected' : ''}>${esc(o)}</option>`))
       .join('\n            ');
     const emptyNote = opts.length ? '' :
       `<div class="err show">Listan är tom – ${f.source === 'drivers'
         ? 'inga förare har synkats ännu.' : 'lägg till alternativ i formulärredigeraren.'}</div>`;
-    return `        <div class="field" data-kind="select" data-name="${esc(f.name)}">
+    return `        <div class="field" data-kind="select" data-name="${esc(f.name)}" data-role="${esc(f.role || '')}">
           <label for="${esc(f.name)}" ${labelAttrs}>${show(labels, lang)}${star}</label>
           <select class="${cls}" id="${esc(f.name)}" name="${esc(f.name)}"${f.required ? ' required' : ''}>
             ${options}
@@ -384,6 +390,59 @@ ${body}
   </details>`;
 }
 
+/**
+ * The standings, top right.
+ *
+ * Initials, not names. The dropdown a few lines down lists every driver in the
+ * fleet by name, so the roster is not a secret -- what the initials keep off
+ * the page is the *pairing* of a name with a percentage, for the person who
+ * scans the QR on a parked van out of curiosity. It is a curtain, not a lock:
+ * this page has no login, and anyone who reads the HTML can pair a row with a
+ * name through the same key the page itself uses. If it ever needs to be
+ * genuinely private, the board has to move behind a login or the form needs a
+ * driver PIN. Said here so nobody mistakes the curtain for a lock.
+ *
+ * `key` is an opaque per-driver token, the same one the driver dropdown puts
+ * on each <option>: picking your own name lights up your own row, without the
+ * page having to carry a table of names against scores.
+ */
+function boardPanel(lang, board) {
+  if (!board) return '';
+  const rows = (board.rows || []).map((r, i) => {
+    const marks = (r.badges || []).map(key => {
+      const texts = {};
+      for (const c of i18n.CODES) texts[c] = badgeText(key, c).name;
+      const tip = badgeText(key, lang);
+      return `<span class="mark mark-${esc(key)}" title="${esc(tip.name + ' – ' + tip.short)}"
+              aria-label="${esc(tip.name)}" ${langAttrs(texts, 'mark')}>${badgeIcon(key, 16)}</span>`;
+    }).join('');
+    return `      <li class="brow" data-key="${esc(r.key)}"${r.ranked ? '' : ' data-unranked="1"'}>
+        <span class="bpos">${r.ranked ? i + 1 : '–'}</span>
+        <span class="bwho">${esc(r.initials)}</span>
+        <span class="bpct">${r.completion === null ? '–' : Math.round(r.completion * 100) + ' %'}</span>
+        <span class="bmarks">${marks}</span>
+      </li>`;
+  }).join('\n');
+
+  const since = {};
+  for (const c of i18n.CODES) since[c] = i18n.fill(i18n.t(c, 'boardSince'), { date: board.from });
+  const few = {};
+  for (const c of i18n.CODES) few[c] = i18n.fill(i18n.t(c, 'boardFew'), { n: board.minAssignments });
+
+  const body = rows
+    ? `    <ol class="board-list">\n${rows}\n    </ol>`
+    : `    <p class="board-none" ${uiAttrs('boardEmpty')}>${esc(i18n.t(lang, 'boardEmpty'))}</p>`;
+
+  return `<aside class="board no-print" aria-label="${esc(i18n.t(lang, 'boardTitle'))}">
+    <div class="board-head">
+      <span class="board-title" ${uiAttrs('boardTitle')}>${esc(i18n.t(lang, 'boardTitle'))}</span>
+      <span class="board-since" ${langAttrs(since)}>${show(since, lang)}</span>
+    </div>
+${body}
+    <p class="board-foot" ${langAttrs(few)}>${show(few, lang)}</p>
+  </aside>`;
+}
+
 function actions(lang) {
   return `
         <div class="actions">
@@ -423,7 +482,8 @@ ${i18n.LANGS.map(l =>
 }
 
 function formPage({ vehicle, form, lastCheck, preview = false, lang = 'sv', sources = {},
-                    assignment = null, week = null, odometer = null }) {
+                    assignment = null, week = null, odometer = null, board = null,
+                    openedAt = null }) {
   const code = i18n.langOf(lang);
   const ctx = { assignment, week, odometer: preview ? null : odometer,
                 plate: vehicle.plate, preview, driverBoxDrawn: false };
@@ -460,8 +520,11 @@ ${i === groups.length - 1 ? actions(code) : ''}
         <a href="/admin/forms">Admin → Formulär</a>.</div>`;
 
   const body = `  <div class="page-head">
-    <h1 ${langAttrs(titles)}>${esc(titles[code])}</h1>
-    <div class="plate" id="plate">${esc(vehicle.plate)}</div>
+    <div class="page-head-main">
+      <h1 ${langAttrs(titles)}>${esc(titles[code])}</h1>
+      <div class="plate" id="plate">${esc(vehicle.plate)}</div>
+    </div>
+    ${preview ? '' : boardPanel(code, board)}
   </div>
   ${preview ? '' : weekPanel(code, ctx)}
   ${flags(code)}
@@ -475,6 +538,11 @@ ${rail(groups, code)}
 
   <form id="${preview ? 'previewForm' : 'checkForm'}" method="post" action="/v/${esc(vehicle.plate)}" enctype="multipart/form-data" novalidate>
     <input type="hidden" name="__lang" id="langField" value="${esc(code)}">
+${preview || !openedAt ? '' :
+  `    <!-- When this page was built. The server subtracts it from the clock at
+       submit to see how long the check took; the driver is never shown a
+       counter, because a form that visibly times you is a form people rush. -->
+    <input type="hidden" name="__opened" value="${esc(String(openedAt))}">`}
 ${cards}
   </form>`;
 

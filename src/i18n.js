@@ -84,6 +84,11 @@ const UI = {
     odometerDigits: 'Skriv bara siffror.',
     odometerUnchanged: 'Fyll i resten av mätarställningen.',
     odometerLow: 'Lägre än förra avläsningen ({value} km). Kontrollera siffrorna.',
+    boardTitle: 'Ställning',
+    boardSince: 'Räknas från {date}',
+    boardFew: 'Färre än {n} tilldelningar – ingen placering',
+    boardEmpty: 'Ingen statistik ännu.',
+    boardYou: 'Du',
     languageLabel: 'Språk'
   },
   en: {
@@ -141,6 +146,11 @@ const UI = {
     odometerDigits: 'Digits only.',
     odometerUnchanged: 'Fill in the rest of the reading.',
     odometerLow: 'Lower than the previous reading ({value} km). Check the digits.',
+    boardTitle: 'Standings',
+    boardSince: 'Counted from {date}',
+    boardFew: 'Fewer than {n} assignments – not ranked',
+    boardEmpty: 'No statistics yet.',
+    boardYou: 'You',
     languageLabel: 'Language'
   },
   ar: {
@@ -198,6 +208,11 @@ const UI = {
     odometerDigits: 'أرقام فقط.',
     odometerUnchanged: 'أكمل بقية قراءة العدّاد.',
     odometerLow: 'أقل من القراءة السابقة ({value} كم). تحقّق من الأرقام.',
+    boardTitle: 'الترتيب',
+    boardSince: 'يُحتسب اعتبارًا من {date}',
+    boardFew: 'أقل من {n} تكليفات – خارج الترتيب',
+    boardEmpty: 'لا توجد إحصاءات بعد.',
+    boardYou: 'أنت',
     languageLabel: 'اللغة'
   },
   hi: {
@@ -255,6 +270,11 @@ const UI = {
     odometerDigits: 'केवल अंक लिखें।',
     odometerUnchanged: 'रीडिंग के बाक़ी अंक भरें।',
     odometerLow: 'पिछली रीडिंग ({value} किमी) से कम है। अंक जाँचें।',
+    boardTitle: 'स्टैंडिंग',
+    boardSince: '{date} से गिना जा रहा है',
+    boardFew: '{n} से कम असाइनमेंट – रैंक नहीं',
+    boardEmpty: 'अभी कोई आँकड़े नहीं।',
+    boardYou: 'आप',
     languageLabel: 'भाषा'
   }
 };

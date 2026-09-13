@@ -23,8 +23,10 @@ const {
   nav: adminNav
 } = require('./views/admin');
 const { qrPage } = require('./views/qr');
-const { statsPage } = require('./views/stats');
-const { buildDriverStats } = require('./stats');
+const { statsPage, statsResetPage } = require('./views/stats');
+const statsLib = require('./stats');
+const { buildDriverStats } = statsLib;
+const { badgeText } = require('./badges');
 const summaryLib = require('./summary');
 const assignmentLib = require('./assignment');
 const odo = require('./odometer');
@@ -198,6 +200,81 @@ function expandForm(form, vehicle) {
   return form;
 }
 
+/**
+ * How long the form was open, from the timestamp it was built with.
+ *
+ * MAX_FILL is the line past which the number stops being about the check: a
+ * page opened at the depot in the morning and submitted in the afternoon says
+ * nothing about how carefully it was filled in, and counting it would reward
+ * exactly the wrong habit. Under one second is a machine, not a person.
+ */
+const MAX_FILL = 3 * 60 * 60;          // seconds
+
+function fillTime(raw) {
+  const opened = Number(String(raw || '').trim());
+  if (!Number.isFinite(opened) || opened <= 0) return { openedAt: null, seconds: null };
+  const openedAt = new Date(opened);
+  const seconds = (Date.now() - opened) / 1000;
+  if (!(seconds >= 1 && seconds <= MAX_FILL)) return { openedAt, seconds: null };
+  return { openedAt, seconds };
+}
+
+/* ---------------------- the standings board ------------------------
+ *
+ * Every scanned QR code renders this, so it must not cost a fleet-wide
+ * recomputation each time: fifteen drivers arriving at 05:40 would otherwise
+ * run the same query fifteen times inside a minute. It is cached in the
+ * process for BOARD_TTL and thrown away whenever a check is filed or the reset
+ * line moves, so the number a driver sees is at worst a few minutes old and
+ * never wrong about their own submission.
+ */
+const BOARD_TTL = 5 * 60 * 1000;
+let boardCache = null;          // { at, key, board }
+
+function dropBoardCache() { boardCache = null; }
+
+async function buildBoard() {
+  const epoch = await db.getStatsEpoch();
+  const range = await db.assignmentRange();
+  const today = summaryLib.dayKey();
+  const from = epoch && (!range.first || epoch > range.first) ? epoch : (range.first || today);
+  const to = today;
+  if (!range.first && !epoch) return { from, minAssignments: statsLib.MIN_ASSIGNMENTS, rows: [] };
+
+  const [assignments, submissions, fallback] = await Promise.all([
+    db.assignmentsBetween(from, to),
+    db.submissionsBetween(from, to),
+    fallbackFields()
+  ]);
+  const withDay = submissions.map(s => ({ ...s, day: summaryLib.dayKey(s.submitted_at) }));
+  const stats = buildDriverStats({ assignments, submissions: withDay, fallback });
+
+  return {
+    from,
+    minAssignments: stats.minAssignments,
+    // Only what the page may show: initials, the percentage, the marks, and a
+    // token to recognise yourself by. No names, no scores, no counts.
+    rows: stats.rows.map(r => ({
+      key: statsLib.driverKey(r.name),
+      initials: statsLib.initialsOf(r.name),
+      completion: r.completion,
+      ranked: r.ranked,
+      badges: r.badges || []
+    }))
+  };
+}
+
+async function boardNow() {
+  const now = Date.now();
+  const key = summaryLib.dayKey();
+  if (boardCache && boardCache.key === key && now - boardCache.at < BOARD_TTL) {
+    return boardCache.board;
+  }
+  const board = await buildBoard();
+  boardCache = { at: now, key, board };
+  return board;
+}
+
 app.get('/v/:plate', async (req, res, next) => {
   try {
     const vehicle = await db.getVehicle(req.params.plate);
@@ -217,15 +294,20 @@ app.get('/v/:plate', async (req, res, next) => {
     expandForm(form, vehicle);
     const today = summaryLib.dayKey();
     const weekFrom = assignmentLib.shiftDay(today, -6);
-    const [latest, sources, todayRows, history, meter] = await Promise.all([
+    const [latest, sources, todayRows, history, meter, board] = await Promise.all([
       db.latestPerVehicle(), formSources(form),
       db.assignmentsForPlate(vehicle.plate, today),
       db.plateHistory(vehicle.plate, weekFrom, today),
-      db.lastOdometer(vehicle.plate)
+      db.lastOdometer(vehicle.plate),
+      boardNow()
     ]);
     const l = latest.get(vehicle.plate);
     res.send(formPage({
-      vehicle, form, sources,
+      vehicle, form, sources, board,
+      // The clock starts when the page is built, not when the driver first
+      // touches something: walking round the van before answering is the
+      // behaviour worth rewarding, and it happens before the first tap.
+      openedAt: Date.now(),
       lang: i18n.langOf(req.query.lang),
       lastCheck: l ? `${fmtDateTime(l.submitted_at)}${l.driver_name ? ' – ' + l.driver_name : ''}` : null,
       // Who has this van today (pre-filled), and who has had it this week.
@@ -361,10 +443,24 @@ app.post('/v/:plate', upload, async (req, res, next) => {
       });
     }
 
+    /* How long the check took. Computed here from the timestamp the page was
+       built with, never from a number the page reports: the point of the
+       measure is that a check filled in faster than anyone could walk round a
+       van was not done, and a client-side stopwatch measures whatever the
+       client says it does.
+
+       Anything that cannot mean what it says is stored as nothing rather than
+       as a small or a large number -- a page opened yesterday and submitted
+       today, a clock that moved, a POST that never went through the form.
+       Null is a truthful answer; zero is a claim about the driver. */
+    const timing = fillTime(req.body.__opened);
+
     const saved = await db.saveSubmission({
       plate: vehicle.plate, owner: vehicle.owner, form, answers, roles, photos,
       userAgent: (req.get('user-agent') || '').slice(0, 400),
       clientIp: req.ip, lang,
+      openedAt: timing.openedAt,
+      fillSeconds: timing.seconds,
       // Kept on the check itself: assignments are replaced every time the
       // assigner re-runs, so this is the only lasting record of who was
       // expected in this van when it was signed for.
@@ -373,6 +469,8 @@ app.post('/v/:plate', upload, async (req, res, next) => {
       driverChanged: changed,
       changeApprover: changed ? approver : null
     });
+    // A new check changes the standings the next driver will see.
+    dropBoardCache();
     const redirect = `/kvitto/${saved.id}?k=${encodeURIComponent(saved.key)}` +
       (lang === i18n.DEFAULT_LANG ? '' : '&lang=' + lang);
     if (wantsJson(req)) return res.json({ ok: true, id: saved.id, redirect });
@@ -874,9 +972,16 @@ app.post('/admin/daily-summary/send', async (req, res, next) => {
  */
 async function statsFor(req) {
   const day = s => (/^\d{4}-\d{2}-\d{2}$/.test(String(s || '')) ? String(s) : '');
-  const range = await db.assignmentRange();
+  const [range, epoch] = await Promise.all([db.assignmentRange(), db.getStatsEpoch()]);
   const to = day(req.query.to) || range.last || summaryLib.dayKey();
-  const from = day(req.query.from) || range.first || to;
+  let from = day(req.query.from) || range.first || to;
+
+  /* The reset line wins over anything earlier, including a date typed into the
+     form above the table. It is not a filter the reader can undo -- that is
+     the whole point of a reset -- so a "from" before it is quietly pulled
+     forward and the page says which line is in force. */
+  let clamped = false;
+  if (epoch && from < epoch) { from = epoch; clamped = true; }
 
   const [assignments, submissions, fallback] = await Promise.all([
     db.assignmentsBetween(from, to),
@@ -884,13 +989,61 @@ async function statsFor(req) {
     fallbackFields()
   ]);
   const withDay = submissions.map(s => ({ ...s, day: summaryLib.dayKey(s.submitted_at) }));
-  return { from, to, range, stats: buildDriverStats({ assignments, submissions: withDay, fallback }) };
+  return {
+    from, to, range, epoch, clamped,
+    stats: buildDriverStats({ assignments, submissions: withDay, fallback })
+  };
 }
 
 app.get('/admin/stats', async (req, res, next) => {
   try {
-    const { from, to, range, stats } = await statsFor(req);
-    res.send(statsPage({ stats, from, to, range, message: flashOf(req), nav: adminNav('stats') }));
+    const { from, to, range, stats, epoch, clamped } = await statsFor(req);
+    res.send(statsPage({ stats, from, to, range, epoch, clamped,
+      message: flashOf(req), nav: adminNav('stats') }));
+  } catch (err) { next(err); }
+});
+
+/* ------------------------ the reset line ---------------------------
+ *
+ * "Reset the statistics" is a date, not a delete. Everything the board and
+ * this page count starts at the line; the checks themselves, their photos and
+ * the odometer history stay exactly where they are, so a van's record survives
+ * a reset, the daily mail still works, and a line set by mistake can be moved
+ * or removed again. Nothing in Fleet 180 destroys a filed safety check except
+ * deleting that one check by hand, which has its own confirmation page.
+ */
+app.get('/admin/stats/reset', async (req, res, next) => {
+  try {
+    const epoch = await db.getStatsEpoch();
+    const from = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.date || ''))
+      ? String(req.query.date) : summaryLib.dayKey();
+    const counts = await db.countsBefore(from);
+    res.send(statsResetPage({ epoch, date: from, counts, nav: adminNav('stats') }));
+  } catch (err) { next(err); }
+});
+
+app.post('/admin/stats/reset', async (req, res, next) => {
+  try {
+    const date = String(req.body.date || '').trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return back(res, '/admin/stats', 'Ange ett datum att räkna från (ÅÅÅÅ-MM-DD).');
+    }
+    if (String(req.body.confirm || '').trim().toLowerCase() !== 'nollställ') {
+      return back(res, `/admin/stats/reset?date=${encodeURIComponent(date)}`,
+        'Skriv ordet NOLLSTÄLL för att bekräfta.');
+    }
+    await db.setStatsEpoch(date);
+    dropBoardCache();
+    back(res, '/admin/stats',
+      `Statistiken räknas nu från ${date}. Kontrollerna själva är kvar – inget är borttaget.`);
+  } catch (err) { next(err); }
+});
+
+app.post('/admin/stats/reset/clear', async (req, res, next) => {
+  try {
+    await db.setStatsEpoch(null);
+    dropBoardCache();
+    back(res, '/admin/stats', 'Nollställningen borttagen – all historik räknas igen.');
   } catch (err) { next(err); }
 });
 
@@ -898,13 +1051,16 @@ app.get('/admin/stats.csv', async (req, res, next) => {
   try {
     const { from, to, stats } = await statsFor(req);
     const header = ['Förare', 'Tilldelade', 'Gjorda', 'Missade', 'Extra', 'Genomförande',
-      'Omsorg', 'Kommentarsandel', 'Medianord', 'Rapporterade brister', 'Foton', 'Poäng', 'Not'];
+      'Omsorg', 'Kommentarsandel', 'Medianord', 'Mediantid (s)', 'Mätta kontroller',
+      'Märken', 'Rapporterade brister', 'Foton', 'Poäng', 'Not'];
     const num = x => (x === null || x === undefined ? '' : String(Math.round(x * 1000) / 10).replace('.', ','));
     const lines = [header.map(csvCell).join(';')];
     for (const r of stats.rows) {
       lines.push([r.name, r.expected, r.done, r.missed, r.extra, num(r.completion),
-        num(r.care), num(r.commentRate), r.medianWords ?? '', r.flags, r.photos,
-        num(r.score), r.note].map(csvCell).join(';'));
+        num(r.care), num(r.commentRate), r.medianWords ?? '',
+        r.medianFill === null ? '' : Math.round(r.medianFill), r.fillCount,
+        (r.badges || []).map(k => badgeText(k, 'sv').name).join(', '),
+        r.flags, r.photos, num(r.score), r.note].map(csvCell).join(';'));
     }
     res.type('text/csv; charset=utf-8')
       .set('Content-Disposition', `attachment; filename="forarstatistik-${from}_${to}.csv"`)

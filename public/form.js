@@ -44,6 +44,16 @@
       } else el.textContent = text;
     });
 
+    /* The standings marks are drawings, not text: swapping their textContent
+       would wipe the SVG, so their language lives in data-mark-<code> and
+       lands on the tooltip instead. */
+    each(document.querySelectorAll('[data-mark-' + code + ']'), function (el) {
+      var name = el.getAttribute('data-mark-' + code);
+      if (name === null) return;
+      el.setAttribute('aria-label', name);
+      el.setAttribute('title', name);
+    });
+
     document.documentElement.lang = meta.htmlLang;
     document.documentElement.dir = meta.dir;
     each(document.querySelectorAll('.flag'), function (b) {
@@ -56,6 +66,33 @@
   each(document.querySelectorAll('.flag'), function (btn) {
     btn.addEventListener('click', function () { applyLang(btn.dataset.lang); });
   });
+
+  /* ---- the standings: find yourself in it -------------------------------
+     The board shows initials. Picking your own name lights up your own row
+     and scrolls it into view -- matched on the token the server put on both
+     the <option> and the row, so the page never has to carry a list of who
+     is who. If the board is not on the page, none of this runs. */
+  (function () {
+    var board = document.querySelector('.board');
+    var field = document.querySelector('.field[data-role="driver"] select');
+    if (!board || !field) return;
+    function mark() {
+      var opt = field.options[field.selectedIndex];
+      var key = opt && opt.getAttribute('data-key');
+      var mine = null;
+      each(board.querySelectorAll('.brow'), function (row) {
+        var is = !!key && row.getAttribute('data-key') === key;
+        row.classList.toggle('me', is);
+        if (is) mine = row;
+      });
+      // Twenty drivers scroll; yours is no use to you three screens down.
+      if (mine && mine.scrollIntoView) {
+        mine.scrollIntoView({ block: 'nearest' });
+      }
+    }
+    field.addEventListener('change', mark);
+    mark();
+  })();
 
   function each(list, fn) { Array.prototype.forEach.call(list, fn); }
   function showNotice(msg) {

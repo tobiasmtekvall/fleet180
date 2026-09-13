@@ -22,7 +22,9 @@
  *  - extra checks (filed with no assignment) never count against anyone.
  */
 
+const crypto = require('crypto');
 const { isAnswerable, isAlerting, COMMENT_CHOICES } = require('./fields');
+const { badgesFor } = require('./badges');
 
 /** Below this many owed checks, a percentage says more about luck than habit. */
 const MIN_ASSIGNMENTS = 5;
@@ -30,11 +32,47 @@ const MIN_ASSIGNMENTS = 5;
 /** Words in a comment beyond which more words stop meaning more care. */
 const DETAIL_SATURATION = 8;
 
+/**
+ * Timed checks needed across the whole fleet before there is a "usual" pace
+ * to compare anyone against. Below this the clock mark is awarded to nobody --
+ * the first driver to file after the timer was switched on would otherwise be
+ * both the fleet median and the only one above it.
+ */
+const MIN_TIMED_CHECKS = 10;
+
 const WEIGHT_COMPLETION = 0.7;
 const WEIGHT_CARE = 0.3;
 
 function normName(s) {
   return String(s || '').trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
+/**
+ * A short opaque token for one driver, used to match the name a driver picks
+ * on the form to their row on the standings board without printing the two
+ * next to each other.
+ *
+ * The salt is new every time the app starts, so the token means nothing
+ * outside one page load and there is nothing to look up later. It is a
+ * curtain, not a lock -- see the note on boardPanel in views/form.js.
+ */
+const KEY_SALT = crypto.randomBytes(16);
+function driverKey(name) {
+  return crypto.createHmac('sha256', KEY_SALT)
+    .update(normName(name)).digest('base64url').slice(0, 12);
+}
+
+/**
+ * "Anna Ekvall" -> "A.E." -- what the board shows instead of a name.
+ *
+ * Two letters at most: three initials on a 200-pixel row wraps, and the point
+ * is to be recognisable to yourself, not identifiable to a stranger.
+ */
+function initialsOf(name) {
+  const parts = String(name || '').trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return '–';
+  const letters = parts.slice(0, 2).map(p => [...p][0].toUpperCase());
+  return letters.join('.') + '.';
 }
 
 function words(s) {
@@ -87,12 +125,29 @@ function careOf(submission, fallback) {
   // A photo when damage or a warning light was reported is the other half of
   // "did you tell us what you saw".
   const photos = submission.photo_count || 0;
-  if (flagged > 0) {
+  const photoChance = flagged > 0 ? 1 : 0;
+  const photoTaken = flagged > 0 && photos > 0 ? 1 : 0;
+  if (photoChance) {
     chances++;
-    if (photos > 0) taken++;
+    taken += photoTaken;
   }
 
-  return { chances, taken, commentLengths, flagged, photos };
+  return { chances, taken, commentLengths, flagged, photos, photoChance, photoTaken };
+}
+
+/**
+ * How long this check took to fill in, in seconds, or null.
+ *
+ * Null is the common and correct answer: checks filed before the form started
+ * timing itself have no number, and neither do the ones where the number
+ * cannot mean anything. Treating those as zero would put every driver who
+ * ever left the page open at the bottom of a measure they never took part in.
+ */
+function fillOf(submission) {
+  const s = submission && submission.fill_seconds;
+  if (s === null || s === undefined) return null;
+  const n = Number(s);
+  return Number.isFinite(n) && n > 0 ? n : null;
 }
 
 function ratio(a, b) { return b > 0 ? a / b : null; }
@@ -117,6 +172,7 @@ function buildDriverStats({ assignments, submissions, fallback = [], drivers = [
         assignedDays: new Set(), checkedDays: new Set(),
         plates: new Set(),
         chances: 0, taken: 0, commentLengths: [], flags: 0, photos: 0,
+        photoChances: 0, photoTaken: 0, fills: [],
         lastCheck: null, firstAssigned: null, lastAssigned: null
       });
     }
@@ -157,7 +213,19 @@ function buildDriverStats({ assignments, submissions, fallback = [], drivers = [
     r.commentLengths.push(...care.commentLengths);
     r.flags += care.flagged;
     r.photos += care.photos;
+    r.photoChances += care.photoChance;
+    r.photoTaken += care.photoTaken;
+
+    const fill = fillOf(s);
+    if (fill !== null) r.fills.push(fill);
   }
+
+  /* The fleet's own pace, from every check that could be timed. The clock mark
+     is measured against this rather than against a number somebody picked:
+     what counts as unhurried depends on the form, the weather and the van. */
+  const allFills = [];
+  for (const r of rows.values()) allFills.push(...r.fills);
+  const fleetMedianFill = allFills.length >= MIN_TIMED_CHECKS ? median(allFills) : null;
 
   // Drivers on the roster who neither were assigned nor filed anything are
   // left out entirely: nothing is known about them, and a zero would be a
@@ -178,7 +246,7 @@ function buildDriverStats({ assignments, submissions, fallback = [], drivers = [
       : care === null ? completion
       : WEIGHT_COMPLETION * completion + WEIGHT_CARE * care;
 
-    out.push({
+    const built = {
       name: r.name,
       expected: r.expected,
       done: r.done,
@@ -191,6 +259,10 @@ function buildDriverStats({ assignments, submissions, fallback = [], drivers = [
       medianWords: r.commentLengths.length ? median(r.commentLengths) : null,
       flags: r.flags,
       photos: r.photos,
+      photoChances: r.photoChances,
+      photoTaken: r.photoTaken,
+      fillCount: r.fills.length,
+      medianFill: r.fills.length ? median(r.fills) : null,
       checks: r.checkedDays.size,
       vehicles: [...r.plates].sort(),
       lastCheck: r.lastCheck,
@@ -203,7 +275,9 @@ function buildDriverStats({ assignments, submissions, fallback = [], drivers = [
         : !ranked ? `bara ${r.expected} ${r.expected === 1 ? 'tilldelning' : 'tilldelningar'} – för lite underlag`
         : care === null ? 'inget att rapportera, omsorg går inte att mäta'
         : ''
-    });
+    };
+    built.badges = badgesFor(built, fleetMedianFill);
+    out.push(built);
   }
 
   out.sort((a, b) => {
@@ -222,8 +296,18 @@ function buildDriverStats({ assignments, submissions, fallback = [], drivers = [
     flags: out.reduce((n, r) => n + r.flags, 0)
   };
   totals.completion = ratio(totals.done, totals.expected);
+  totals.timedChecks = allFills.length;
+  totals.medianFill = fleetMedianFill;
 
-  return { rows: out, totals, minAssignments: MIN_ASSIGNMENTS };
+  return {
+    rows: out, totals,
+    minAssignments: MIN_ASSIGNMENTS,
+    medianFill: fleetMedianFill,
+    minTimedChecks: MIN_TIMED_CHECKS
+  };
 }
 
-module.exports = { buildDriverStats, careOf, normName, MIN_ASSIGNMENTS };
+module.exports = {
+  buildDriverStats, careOf, fillOf, normName, driverKey, initialsOf,
+  MIN_ASSIGNMENTS, MIN_TIMED_CHECKS
+};

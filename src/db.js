@@ -283,6 +283,18 @@ CREATE TABLE IF NOT EXISTS drivers (
 );
 CREATE INDEX IF NOT EXISTS drivers_name_idx ON drivers (name);
 
+-- Small named values the admin sets and the app reads back: at the moment only
+-- the statistics reset line (stats_epoch). A table rather than an env var
+-- because it is changed from the admin pages, and rather than a column on
+-- something else because it belongs to no row.
+-- (No backticks anywhere in SCHEMA: it is a JS template literal, and one
+-- backtick in a SQL comment ends the string thirty lines early.)
+CREATE TABLE IF NOT EXISTS settings (
+  key        TEXT PRIMARY KEY,
+  value      TEXT        NOT NULL DEFAULT '',
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 -- One row per background job, so a restart cannot send the daily mail twice.
 CREATE TABLE IF NOT EXISTS jobs (
   name      TEXT PRIMARY KEY,
@@ -329,6 +341,13 @@ ALTER TABLE submissions ADD COLUMN IF NOT EXISTS lang       TEXT NOT NULL DEFAUL
 -- Unguessable handle for the receipt. A driver scanning a QR code may read
 -- their own receipt and nobody else's, so the id alone is not enough.
 ALTER TABLE submissions ADD COLUMN IF NOT EXISTS public_key TEXT;
+-- When the form was opened, and how long it took to fill in. The point is not
+-- speed but the opposite: a check filled in faster than anybody could have
+-- walked round the van is a check that was not done. Kept NULL rather than
+-- guessed whenever the number cannot mean anything -- a page left open all day,
+-- a clock that moved, a check posted without going through the form.
+ALTER TABLE submissions ADD COLUMN IF NOT EXISTS opened_at    TIMESTAMPTZ;
+ALTER TABLE submissions ADD COLUMN IF NOT EXISTS fill_seconds INTEGER;
 -- What the assigner had decided for this vehicle on the day the check was
 -- filed, kept ON the check rather than looked up later: assignments are
 -- replaced whenever the assigner re-runs, so a lookup a week from now could
@@ -836,6 +855,68 @@ async function countSubmissionsForPlate(plate) {
 }
 
 /* ------------------------------------------------------------------ *
+ * Settings                                                            *
+ * ------------------------------------------------------------------ */
+
+async function getSetting(key) {
+  const r = await pool.query('SELECT value FROM settings WHERE key = $1', [key]);
+  return r.rows.length ? r.rows[0].value : null;
+}
+
+async function setSetting(key, value) {
+  if (value === null || value === '') {
+    await pool.query('DELETE FROM settings WHERE key = $1', [key]);
+    return;
+  }
+  await pool.query(
+    `INSERT INTO settings (key, value) VALUES ($1,$2)
+     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`,
+    [key, String(value)]);
+}
+
+/**
+ * The statistics reset line.
+ *
+ * Everything the scoreboard and /admin/stats count starts here. It is a date,
+ * not a deletion: the checks, the photos and the odometer history are all
+ * still there, so a van's record survives a reset and the line can be moved
+ * or removed again. `null` means count from the beginning.
+ */
+const STATS_EPOCH_KEY = 'stats_epoch';
+
+async function getStatsEpoch() {
+  const v = await getSetting(STATS_EPOCH_KEY);
+  return /^\d{4}-\d{2}-\d{2}$/.test(String(v || '')) ? v : null;
+}
+
+async function setStatsEpoch(date) {
+  await setSetting(STATS_EPOCH_KEY, date || '');
+}
+
+/**
+ * What a reset line at this date would stop counting.
+ *
+ * Shown on the confirmation page so the admin sees the size of what they are
+ * about to hide before they hide it. "Hide", not "delete": these rows are
+ * still in the database afterwards, and moving the line back brings them
+ * straight back into the figures.
+ */
+async function countsBefore(date) {
+  const [subs, asg] = await Promise.all([
+    pool.query(
+      `SELECT COUNT(*)::int AS n, MIN(submitted_at) AS first
+         FROM submissions
+        WHERE submitted_at < ($1::date AT TIME ZONE 'Europe/Stockholm')`, [date]),
+    pool.query('SELECT COUNT(*)::int AS n FROM assignments WHERE date < $1', [date])
+  ]);
+  return {
+    submissions: subs.rows[0].n,
+    firstSubmission: subs.rows[0].first,
+    assignments: asg.rows[0].n
+  };
+}
+
+/* ------------------------------------------------------------------ *
  * Forms                                                               *
  * ------------------------------------------------------------------ */
 
@@ -1028,7 +1109,8 @@ async function moveField(id, direction) {
 
 async function saveSubmission({
   plate, owner, form, answers, roles, photos, userAgent, clientIp, lang,
-  assignedDriver = null, assignedRoute = null, driverChanged = false, changeApprover = null
+  assignedDriver = null, assignedRoute = null, driverChanged = false, changeApprover = null,
+  openedAt = null, fillSeconds = null
 }) {
   const client = await pool.connect();
   try {
@@ -1058,8 +1140,9 @@ async function saveSubmission({
       `INSERT INTO submissions
          (plate, owner, form_key, form_id, form_title, driver_name, route, odometer,
           answers, questions, photo_count, user_agent, client_ip, lang, public_key,
-          assigned_driver, assigned_route, driver_changed, change_approver)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
+          assigned_driver, assigned_route, driver_changed, change_approver,
+          opened_at, fill_seconds)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
        RETURNING id, submitted_at, public_key`,
       [
         plate, owner || '', form.key, form.id, form.title,
@@ -1067,7 +1150,8 @@ async function saveSubmission({
         JSON.stringify(answers), JSON.stringify(questions),
         photos.length, userAgent || null, clientIp || null, lang || 'sv',
         crypto.randomBytes(9).toString('base64url'),
-        assignedDriver || null, assignedRoute || null, !!driverChanged, changeApprover || null
+        assignedDriver || null, assignedRoute || null, !!driverChanged, changeApprover || null,
+        openedAt || null, Number.isFinite(fillSeconds) ? Math.round(fillSeconds) : null
       ]
     );
     const id = res.rows[0].id;
@@ -1216,7 +1300,7 @@ async function submissionsBetween(fromDate, toDate) {
   const r = await pool.query(
     `SELECT id, plate, owner, form_id, form_key, form_title, submitted_at, lang,
             driver_name, route, odometer, answers, questions, photo_count,
-            assigned_driver, driver_changed, change_approver
+            assigned_driver, driver_changed, change_approver, fill_seconds
        FROM submissions
       WHERE submitted_at >= ($1::date AT TIME ZONE 'Europe/Stockholm')
         AND submitted_at <  (($2::date + 1) AT TIME ZONE 'Europe/Stockholm')
@@ -1379,5 +1463,6 @@ module.exports = {
   listDrivers, replaceDrivers, claimJob, jobState, submissionsBetween, photoIdsFor,
   replaceAssignments, assignmentsBetween, assignmentRange,
   assignmentsForPlate, plateHistory, lastOdometer, deleteSubmission,
+  getSetting, setSetting, getStatsEpoch, setStatsEpoch, countsBefore,
   get pool() { return pool; }
 };
