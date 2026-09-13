@@ -128,6 +128,37 @@ function withList(blob, L) {
   return out;
 }
 
+/**
+ * Add a question's alert notice to its i18n blob.
+ *
+ * The Swedish wording lives in the `alertNotice` property (and the
+ * `alert_notice` column), exactly like the label does; only the three
+ * translations belong in the blob.
+ */
+function withNotice(blob, N) {
+  const out = { ...blob };
+  for (const c of ['en', 'ar', 'hi']) {
+    out[c] = { ...out[c], alertNotice: N[c] };
+  }
+  return out;
+}
+
+/**
+ * What the driver is told when the cab is not clean.
+ *
+ * A notice is an instruction, not a question: it appears the moment the
+ * answer flags, above the comment box, while the driver is still standing in
+ * the cab. "Är bilen städad? Nej" had quietly become a way of reporting the
+ * mess to somebody else -- the person holding the phone is the person who can
+ * pick the wrappers up, and the form now says so.
+ */
+const CLEAN_UP = {
+  sv: 'Städa upp innan du lämnar bilen – ta med skräpet ut!',
+  en: 'Clean it up before you leave the vehicle – take the rubbish out with you!',
+  ar: 'نظّف المقصورة قبل أن تترك المركبة – خذ النفايات معك!',
+  hi: 'गाड़ी छोड़ने से पहले सफ़ाई करें – कचरा अपने साथ बाहर ले जाएँ!'
+};
+
 /* ---- the follow-up lists -------------------------------------------------
  *
  * One per question that can be answered with "what exactly". They are the
@@ -423,13 +454,22 @@ const DEFAULT_FIELDS = [
       'هل يعمل قفل حزام الأمان كما ينبغي؟ أجب بنعم أو لا.',
       'क्या सीट बेल्ट का बकल ठीक से काम कर रहा है? हाँ या नहीं में उत्तर दें।'), BELTS) },
 
+  /* Answered Nej, this one asks the driver to do something rather than to
+     report something -- see CLEAN_UP. The wording spells out what "städad"
+     means, because "inga lösa föremål" was being read as "nothing rolling
+     around", and a cab with yesterday's wrappers in it passed. */
   { name: 'f12', kind: 'yesno', section: S4, required: true, alertOn: ['nej', 'annat'],
-    label: 'Är bilen städad? (inga lösa föremål i hytt). Svara ja eller nej.',
+    label: 'Är hytten städad? (inga matrester, inga omslagspapper, inga tomma burkar ' +
+      'eller flaskor, inga lösa föremål). Om nej – svara nej och städa upp!',
     commentOptions: CLEAN.sv,
-    i18n: withList(tr(S4,
-      'Is the cab clean? (no loose objects in the cab). Answer yes or no.',
-      'هل المقصورة نظيفة؟ (لا توجد أغراض سائبة في المقصورة). أجب بنعم أو لا.',
-      'क्या केबिन साफ़ है? (केबिन में कोई ढीली वस्तु नहीं)। हाँ या नहीं में उत्तर दें।'), CLEAN) },
+    alertNotice: CLEAN_UP.sv,
+    i18n: withNotice(withList(tr(S4,
+      'Is the cab clean? (no leftovers, no wrappers, no empty cans or bottles, ' +
+        'no loose objects). If no – answer no and clean it up!',
+      'هل المقصورة نظيفة؟ (لا بقايا طعام، لا أغلفة، لا علب أو زجاجات فارغة، لا أغراض سائبة). ' +
+        'إذا كانت الإجابة لا – أجب بلا ونظّفها!',
+      'क्या केबिन साफ़ है? (कोई बचा हुआ खाना नहीं, कोई रैपर नहीं, कोई खाली कैन या बोतल नहीं, ' +
+        'कोई ढीली वस्तु नहीं)। यदि नहीं – नहीं में उत्तर दें और सफ़ाई करें!'), CLEAN), CLEAN_UP) },
 
   { name: 'f13', kind: 'yesno', section: S4, required: true, alertOn: ['nej', 'annat'],
     label: 'Fungerar vindrutetorkarna? Svara ja eller nej. Om nej, rapportera till närmast ansvarig.',
@@ -507,7 +547,7 @@ const RETURN_FIELDS = DEFAULT_FIELDS.filter(f => f.section === SR);
 
 module.exports = {
   FORM_KEY, FORM_TITLE, FORM_I18N, DEFAULT_FIELDS, DEFAULT_VEHICLES, ROUTES, ADBLUE,
-  WHEELS, BODY, TAILLIFT, FLUIDS, FUELLING, BELTS, CLEAN, WIPERS, CAMERA, LEFT_ON, TAKEN,
+  WHEELS, BODY, TAILLIFT, FLUIDS, FUELLING, BELTS, CLEAN, CLEAN_UP, WIPERS, CAMERA, LEFT_ON, TAKEN,
   SECTION_RENAMES, RETURN_FIELDS, SECTION_RETURN: SR, SECTION_TEXT,
   LAMPS, LAMPS_I18N
 };

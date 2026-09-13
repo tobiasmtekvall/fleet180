@@ -1025,6 +1025,10 @@ function readFieldBody(body) {
   const commentOptions = String(body.commentOptions || '')
     .split('\n').map(o => o.trim()).filter(Boolean).slice(0, 100);
 
+  // The instruction shown the moment the answer flags ("städa upp"), Swedish
+  // here and translated below -- exactly like the label.
+  const alertNotice = String(body.alertNotice || '').trim().slice(0, 300);
+
   const i18nBlob = {};
   for (const code of i18n.CODES) {
     if (code === i18n.DEFAULT_LANG) continue;
@@ -1032,9 +1036,11 @@ function readFieldBody(body) {
     const section = String(body['section_' + code] || '').trim().slice(0, 120);
     const picks = String(body['picks_' + code] || '')
       .split('\n').map(o => o.trim()).filter(Boolean).slice(0, 100);
-    if (label || section || picks.length) {
+    const notice = String(body['notice_' + code] || '').trim().slice(0, 300);
+    if (label || section || picks.length || notice) {
       i18nBlob[code] = { label, section };
       if (picks.length) i18nBlob[code].commentOptions = picks;
+      if (notice) i18nBlob[code].alertNotice = notice;
     }
   }
 
@@ -1050,9 +1056,34 @@ function readFieldBody(body) {
     options,
     source: body.source === 'drivers' ? 'drivers' : '',
     alertOn,
+    alertNotice,
     commentOptions,
     i18n: i18nBlob
   };
+}
+
+/**
+ * What the editor does not show, kept as it was.
+ *
+ * The blob above is rebuilt from the posted form, so anything the editor has
+ * no box for would be silently dropped by pressing Save. `pickLabel` -- the
+ * little heading above a follow-up list -- is exactly that: it is seeded per
+ * question, and until this was here, saving a question in /admin reset
+ * "Vilket däck?" to the generic phrasing without saying so.
+ */
+const KEPT_I18N_KEYS = ['pickLabel'];
+
+function keepUneditedI18n(data, existing) {
+  const old = (existing && existing.i18n) || {};
+  const blob = { ...data.i18n };
+  for (const code of Object.keys(old)) {
+    const kept = {};
+    for (const key of KEPT_I18N_KEYS) {
+      if (old[code] && old[code][key]) kept[key] = old[code][key];
+    }
+    if (Object.keys(kept).length) blob[code] = { ...kept, ...(blob[code] || {}) };
+  }
+  return { ...data, i18n: blob };
 }
 
 app.get('/admin/forms', async (req, res, next) => {
@@ -1151,7 +1182,7 @@ app.post('/admin/forms/:id/fields/:fieldId', async (req, res, next) => {
     }
     const data = readFieldBody(req.body);
     if (!data.label) return back(res, `/admin/forms/${field.form_id}`, 'Frågan behöver en text.');
-    await db.updateField(field.id, data);
+    await db.updateField(field.id, keepUneditedI18n(data, field));
     back(res, `/admin/forms/${field.form_id}`, 'Frågan sparad.');
   } catch (err) { next(err); }
 });

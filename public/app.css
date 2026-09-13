@@ -371,6 +371,17 @@ footer{border-top:1px solid var(--border);padding:18px 24px;color:var(--muted);f
 .card-warn > .card-header { background: #fff8ec; color: #a86b00; }
 
 
+/* ---------- "Clean it up!" ----------
+ * The instruction a question can carry, shown with the answer that raised it.
+ * Amber and bordered like the driver-change box, because it is the same kind
+ * of thing: something to do before leaving, not something to fill in. */
+.comment-notice{
+  margin:0 0 10px;padding:11px 13px;
+  border:1px solid #f0c27a;border-inline-start:4px solid #d98a00;
+  border-radius:8px;background:#fff8ec;
+  color:#7a4b00;font-size:15px;font-weight:600;line-height:1.4;
+}
+
 /* ---------- "Which one is not working?" ----------
  * The list sits above the free-text box inside the same comment area, so it
  * appears and disappears with the answer that raised it. */

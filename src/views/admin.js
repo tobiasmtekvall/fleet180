@@ -361,6 +361,13 @@ function fieldRow(form, f, isFirst, isLast) {
               </div>
               <p class="q-hint">Styr vad dagsmejlet och FLEET180-vyn lyfter fram.
                  "Fungerar X?" larmar på Nej, "Finns nya skador?" larmar på Ja.</p>
+              <label class="q-lab">Uppmaning när svaret larmar</label>
+              <input class="form-control" type="text" name="alertNotice"
+                     value="${esc(f.alert_notice || '')}"
+                     placeholder="T.ex. Städa upp innan du lämnar bilen!">
+              <p class="q-hint">Visas för föraren i samma stund svaret larmar, ovanför
+                 kommentarsrutan. Använd den när föraren ska göra något på plats –
+                 inte när något bara ska rapporteras vidare.</p>
               <label class="q-lab">Hämta välj-listan från</label>
               ${select('commentSource', [
                 { value: '', label: 'Listan nedan' },
@@ -383,7 +390,11 @@ function fieldRow(form, f, isFirst, isLast) {
               <input class="form-control" type="text" name="section_${c}" value="${esc((blob[c] && blob[c].section) || '')}">
               ${picks.length ? `<label class="q-lab">${m.flag} välj-listan (samma ordning)</label>
               <textarea class="form-control" name="picks_${c}" rows="3"
-                        placeholder="(tomt = svenska visas)">${esc(((blob[c] && blob[c].commentOptions) || []).join('\n'))}</textarea>` : ''}`;
+                        placeholder="(tomt = svenska visas)">${esc(((blob[c] && blob[c].commentOptions) || []).join('\n'))}</textarea>` : ''}
+              ${f.alert_notice ? `<label class="q-lab">${m.flag} uppmaningen</label>
+              <input class="form-control" type="text" name="notice_${c}"
+                     value="${esc((blob[c] && blob[c].alertNotice) || '')}"
+                     placeholder="(tomt = svenska visas)">` : ''}`;
               }).join('')}
             </div>
           </div>

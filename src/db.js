@@ -261,6 +261,12 @@ ALTER TABLE form_fields ADD COLUMN IF NOT EXISTS comment_options JSONB NOT NULL 
 -- the dashboard telltales of the vehicle being checked, which differ per model
 -- and are therefore not something one shared form can hold.
 ALTER TABLE form_fields ADD COLUMN IF NOT EXISTS comment_source TEXT NOT NULL DEFAULT '';
+-- What the driver is TOLD when the answer flags, as opposed to what they are
+-- asked. "Is the cab clean? No" was being filed as somebody else's problem;
+-- the person holding the phone is the one who can pick the wrappers up, so
+-- the instruction appears the moment they answer, above the comment box.
+-- Swedish here, the three translations in the i18n blob beside the label.
+ALTER TABLE form_fields ADD COLUMN IF NOT EXISTS alert_notice TEXT NOT NULL DEFAULT '';
 CREATE INDEX IF NOT EXISTS form_fields_order_idx ON form_fields (form_id, position);
 
 ALTER TABLE forms ADD COLUMN IF NOT EXISTS i18n JSONB NOT NULL DEFAULT '{}'::jsonb;
@@ -399,12 +405,14 @@ async function seedIfEmpty(client) {
       await client.query(
         `INSERT INTO form_fields
            (form_id, position, name, kind, label, section, required, role,
-            options, source, alert_on, i18n, comment_options, comment_source)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+            options, source, alert_on, i18n, comment_options, comment_source,
+            alert_notice)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
         [formId, pos += 10, f.name, f.kind, f.label, f.section || '', !!f.required, f.role || '',
          JSON.stringify(f.options || []), f.source || '',
          JSON.stringify(f.alertOn || []), JSON.stringify(f.i18n || {}),
-         JSON.stringify(f.commentOptions || []), f.commentSource || '']);
+         JSON.stringify(f.commentOptions || []), f.commentSource || '',
+         f.alertNotice || '']);
     }
     console.log(`[db] seeded default form with ${seed.DEFAULT_FIELDS.length} questions`);
   }
@@ -669,6 +677,66 @@ async function addQuestionLists(client) {
   return { lists, lamps, models, heads };
 }
 
+/**
+ * The cab question, rewritten so it says what it means and asks the driver to
+ * fix what they find.
+ *
+ * Three things at once, all about the same question: the wording spells out
+ * what a clean cab is (matrester, omslagspapper, burkar och flaskor -- "inga
+ * lösa föremål" was being read as "nothing rolling around"), the follow-up
+ * list gains the three answers that were missing from it, and the question
+ * gets a notice, shown the moment the answer flags: städa upp.
+ *
+ * Timid like the migrations above. The question is only touched where its
+ * Swedish wording is still exactly the old template's -- proof nobody has
+ * rewritten it -- and the notice is filled in separately where the wording is
+ * already the new one but no notice has been written, so a form that has been
+ * updated by hand still gets the half it is missing. Recorded in `jobs`.
+ */
+const CLEAN_UPGRADE_KEY = 'seed-2026-09-13-cab-clean-and-notices';
+const OLD_CLEAN_LABEL = 'Är bilen städad? (inga lösa föremål i hytt). Svara ja eller nej.';
+
+async function addCleanQuestion(client) {
+  const done = await client.query('SELECT 1 FROM jobs WHERE name = $1', [CLEAN_UPGRADE_KEY]);
+  if (done.rowCount) return null;
+
+  const clean = seed.DEFAULT_FIELDS.find(f => f.name === 'f12');
+
+  // The whole question, where it still reads as the old template's. The
+  // translations go with it: a Swedish label that lists the wrappers over an
+  // English one that does not is worse than leaving both alone.
+  const rewritten = await client.query(
+    `UPDATE form_fields
+        SET label = $2, i18n = i18n || $3::jsonb, comment_options = $4::jsonb,
+            alert_notice = $5
+      WHERE name = $1 AND label = $6`,
+    [clean.name, clean.label, JSON.stringify(clean.i18n || {}),
+     JSON.stringify(clean.commentOptions || []), clean.alertNotice || '',
+     OLD_CLEAN_LABEL]);
+
+  // Any question already carrying the current wording but no notice. Keyed on
+  // the notice being absent rather than on the label being old, because the
+  // pass above can only fire once per question -- see the heading pass in
+  // addQuestionLists() for the same trap.
+  let noticed = 0;
+  for (const f of seed.DEFAULT_FIELDS) {
+    if (!f.alertNotice) continue;
+    const r = await client.query(
+      `UPDATE form_fields SET alert_notice = $3, i18n = i18n || $4::jsonb
+        WHERE name = $1 AND label = $2 AND alert_notice = ''`,
+      [f.name, f.label, f.alertNotice, JSON.stringify(f.i18n || {})]);
+    noticed += r.rowCount;
+  }
+
+  await client.query(
+    `INSERT INTO jobs (name, last_run, note) VALUES ($1, now(), $2)
+     ON CONFLICT (name) DO NOTHING`,
+    [CLEAN_UPGRADE_KEY,
+     `${rewritten.rowCount} städfrågor omskrivna, ${noticed} frågor fick uppmaning`]);
+
+  return { rewritten: rewritten.rowCount, noticed };
+}
+
 async function init() {
   pool = await connectWithRetry();
   await pool.query(SCHEMA);
@@ -680,7 +748,12 @@ async function init() {
     const added = await addReturnQuestions(client);
     const lamps = await addLampsAndKilometres(client);
     const lists = await addQuestionLists(client);
+    const clean = await addCleanQuestion(client);
     await client.query('COMMIT');
+    if (clean && (clean.rewritten || clean.noticed)) {
+      console.log(`[db] städfrågan omskriven i ${clean.rewritten} formulär, ` +
+        `${clean.noticed} frågor fick en uppmaning vid larm`);
+    }
     if (lists && (lists.lists || lists.lamps || lists.models)) {
       console.log(`[db] välj-listor på ${lists.lists} frågor, ${lists.lamps} fråga kopplad ` +
         `till fordonets varningslampor, modell satt på ${lists.models} fordon`);
@@ -826,11 +899,16 @@ async function createForm({ title, copyFromId = null }) {
     const id = f.rows[0].id;
     if (copyFromId) {
       await client.query(
+        /* Every column a question carries, not just the ones it had when this
+           was written: a copy that quietly loses its follow-up lists or its
+           clean-up notice is a copy the admin has to notice is wrong. */
         `INSERT INTO form_fields
            (form_id, position, name, kind, label, section, required, role,
-            options, source, alert_on, i18n)
+            options, source, alert_on, i18n, comment_options, comment_source,
+            alert_notice)
          SELECT $1, position, name, kind, label, section, required, role,
-                options, source, alert_on, i18n
+                options, source, alert_on, i18n, comment_options, comment_source,
+                alert_notice
            FROM form_fields WHERE form_id = $2`, [id, copyFromId]);
     }
     await client.query('COMMIT');
@@ -869,19 +947,20 @@ async function nextFieldName(formId) {
 async function addField(formId, {
   kind, label, section = '', required = false, role = '',
   options = [], source = '', alertOn = [], i18n = {}, commentOptions = [],
-  commentSource = ''
+  commentSource = '', alertNotice = ''
 }) {
   const name = await nextFieldName(formId);
   const r = await pool.query(
     `INSERT INTO form_fields
        (form_id, position, name, kind, label, section, required, role,
-        options, source, alert_on, i18n, comment_options, comment_source)
+        options, source, alert_on, i18n, comment_options, comment_source,
+        alert_notice)
      VALUES ($1, COALESCE((SELECT MAX(position) FROM form_fields WHERE form_id = $1), 0) + 10,
-             $2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+             $2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
      RETURNING *`,
     [formId, name, kind, label, section, required, role,
      JSON.stringify(options), source, JSON.stringify(alertOn), JSON.stringify(i18n),
-     JSON.stringify(commentOptions || []), commentSource || '']);
+     JSON.stringify(commentOptions || []), commentSource || '', alertNotice || '']);
   await touchForm(formId);
   return r.rows[0];
 }
@@ -894,17 +973,17 @@ async function getField(id) {
 
 async function updateField(id, {
   kind, label, section, required, role, options, source, alertOn, i18n,
-  commentOptions, commentSource
+  commentOptions, commentSource, alertNotice
 }) {
   const r = await pool.query(
     `UPDATE form_fields SET kind = $2, label = $3, section = $4, required = $5,
             role = $6, options = $7, source = $8, alert_on = $9, i18n = $10,
-            comment_options = $11, comment_source = $12
+            comment_options = $11, comment_source = $12, alert_notice = $13
       WHERE id = $1 RETURNING form_id`,
     [id, kind, label, section, required, role,
      JSON.stringify(options || []), source || '',
      JSON.stringify(alertOn || []), JSON.stringify(i18n || {}),
-     JSON.stringify(commentOptions || []), commentSource || '']);
+     JSON.stringify(commentOptions || []), commentSource || '', alertNotice || '']);
   if (r.rows.length) await touchForm(r.rows[0].form_id);
 }
 
@@ -969,6 +1048,9 @@ async function saveSubmission({
       // language ride in `i18n` beside them.
       comment_options: Array.isArray(f.comment_options) ? f.comment_options : [],
       comment_source: f.comment_source || '',
+      // The instruction the driver was given at the time. A notice reworded
+      // next month must not rewrite what last month's check said.
+      alert_notice: f.alert_notice || '',
       source: f.source || '',
       i18n: f.i18n || {}
     }));

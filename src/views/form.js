@@ -152,11 +152,27 @@ ${picks.map((o, i) => {
             </select>
 ${lampGrid(f, lang, pickLabel)}
           </div>` : '';
+    /* An instruction rather than a question: "städa upp". It lives inside the
+       comment area, so it appears with the answer that raised it and goes away
+       again if the driver changes their mind -- and it sits above the list,
+       because the point is what to do, not what to file. Swedish comes from
+       the question's own column; the translations from the blob. */
+    const noticeSv = String(f.alert_notice || f.alertNotice || '').trim();
+    let noticeBox = '';
+    if (noticeSv) {
+      const texts = {};
+      for (const c of i18n.CODES) {
+        const own = pickI18n[c] && pickI18n[c].alertNotice;
+        texts[c] = (own && String(own).trim()) || noticeSv;
+      }
+      noticeBox = `
+            <p class="comment-notice" ${langAttrs(texts)}>${show(texts, lang)}</p>`;
+    }
     return `        <div class="field" data-kind="yesno" data-name="${esc(f.name)}" data-comment-on="${esc(opens)}">
           <label id="lbl-${esc(f.name)}" ${labelAttrs}>${show(labels, lang)}${star}</label>
           <div class="choices" role="radiogroup" aria-labelledby="lbl-${esc(f.name)}">${choices}
           </div>
-          <div class="comment" data-comment-for="${esc(f.name)}">${pickBox}
+          <div class="comment" data-comment-for="${esc(f.name)}">${noticeBox}${pickBox}
             <label for="${esc(f.name)}__comment" ${uiAttrs('comment')}>${esc(i18n.t(lang, 'comment'))}</label>
             <input type="text" class="form-control optional" id="${esc(f.name)}__comment"
                    name="${esc(f.name)}__comment" ${uiAttrs('commentPlaceholder')}
