@@ -56,7 +56,7 @@ app.disable('x-powered-by');
 let calendarStore = null;
 let calendarApi = null;
 const swedishToday = () => summaryLib.dayKey();
-app.use('/kalender', (req, res, next) => adminAuth(req, res, next));
+app.use('/kalender', (req, res, next) => calendarAuth(req, res, next));
 app.use('/kalender/api', (req, res, next) => {
   if (!calendarApi) {
     return res.status(503).json({ error: 'Kalendern är inte klar ännu.' });
@@ -767,6 +767,54 @@ function adminAuth(req, res, next) {
 }
 
 app.use('/admin', adminAuth);
+
+/**
+ * The calendar has a login of its own.
+ *
+ * Not the admin one: the people who keep the checklist calendar are not the
+ * people who read invoices and driver statistics, and one password for both
+ * means everybody who needs the calendar can also delete a safety check.
+ * Username `superuser` unless CALENDAR_USER says otherwise, password from
+ * CALENDAR_PASSWORD -- an environment variable, never a value in this repo,
+ * because everything here is on GitHub.
+ *
+ * A separate realm string matters: browsers cache Basic credentials per realm,
+ * so sharing one would send the admin password to the calendar and log the
+ * wrong person in silently.
+ *
+ * With CALENDAR_PASSWORD unset it falls back to the admin login rather than
+ * standing open or locking shut -- the deploy must never be the moment the
+ * calendar becomes unreachable, or public. The startup banner says which of
+ * the two is in force.
+ */
+function calendarAuth(req, res, next) {
+  const password = (process.env.CALENDAR_PASSWORD || '').trim();
+  if (!password) return adminAuth(req, res, next);
+
+  // Same cross-origin rule as the admin pages: the browser resends Basic
+  // credentials on any request, so a POST from somewhere else is refused
+  // before it can write to a day.
+  if (req.method === 'POST') {
+    const origin = req.get('origin');
+    if (origin && origin !== requestOrigin(req)) {
+      return res.status(403).type('text/plain').send('Fel ursprung.');
+    }
+  }
+  const header = req.get('authorization') || '';
+  const [scheme, encoded] = header.split(' ');
+  if (scheme === 'Basic' && encoded) {
+    const decoded = Buffer.from(encoded, 'base64').toString('utf8');
+    const idx = decoded.indexOf(':');
+    if (idx > -1) {
+      const user = decoded.slice(0, idx);
+      const pass = decoded.slice(idx + 1);
+      if (safeEqual(user, process.env.CALENDAR_USER || 'superuser') &&
+          safeEqual(pass, password)) return next();
+    }
+  }
+  res.set('WWW-Authenticate', 'Basic realm="Fleet 180 kalender", charset="UTF-8"')
+     .status(401).type('text/plain').send('Behörighet krävs.');
+}
 
 function readFilters(req) {
   const plate = normalisePlate(req.query.plate || '');
@@ -1732,6 +1780,13 @@ db.init()
         if (r && r.moved) console.log(`[kalender] flyttade ${r.moved} punkter till närmaste arbetsdag`);
       })
       .catch(err => console.error('[kalender] carry-forward misslyckades', err.message));
+
+    /* Which login the calendar is behind is worth one line in the log: the
+       fallback is deliberate but silent, and "I set the variable, did it take"
+       is otherwise unanswerable without trying the page. */
+    console.log((process.env.CALENDAR_PASSWORD || '').trim()
+      ? `[kalender] egen inloggning aktiv (användare: ${process.env.CALENDAR_USER || 'superuser'})`
+      : '[kalender] CALENDAR_PASSWORD är inte satt – kalendern använder admin-inloggningen tills den sätts');
 
     const [vehicles, drivers] = await Promise.all([db.listVehicles(), db.listDrivers()]);
     app.listen(PORT, () => {

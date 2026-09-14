@@ -106,6 +106,8 @@ git push -u origin main
    | `DATABASE_URL` | `${{Postgres.DATABASE_URL}}` (referens till databasen) |
    | `ADMIN_PASSWORD` | ett lösenord du väljer, för `/admin` |
    | `ADMIN_USER` | *(valfritt, standard `admin`)* |
+   | `CALENDAR_PASSWORD` | lösenord för `/kalender`, som har en egen inloggning |
+   | `CALENDAR_USER` | *(valfritt, standard `superuser`)* |
    | `PUBLIC_BASE_URL` | **lämna osatt.** Sätts bara om du kopplat en egen domän – se nedan. |
 
 4. **Settings → Networking → Generate Domain** för att få en publik adress.

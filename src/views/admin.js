@@ -21,14 +21,17 @@ const TABS = [
   { href: '/admin/stats', text: 'Statistik', key: 'stats' },
   { href: '/admin/daily-summary', text: 'Dagsmejl', key: 'mail' },
   // Not an /admin page -- it is the Checklist Calendar, mounted whole at
-  // /kalender behind the same login. It sits in this row because that is
-  // where he will look for it.
-  { href: '/kalender', text: 'Kalender', key: 'calendar' }
+  // /kalender behind a login of its OWN (superuser). It sits in this row
+  // because that is where he will look for it, and it says so on hover: a
+  // tab that asks for a password the admin has not got should warn first.
+  { href: '/kalender', text: 'Kalender', key: 'calendar',
+    title: 'Kalendern har en egen inloggning (superuser)' }
 ];
 
 function nav(active) {
   return `<div class="admin-nav no-print">${TABS.map(t =>
-    `<a href="${t.href}"${t.key === active ? ' class="on"' : ''}>${esc(t.text)}</a>`).join('')}</div>`;
+    `<a href="${t.href}"${t.key === active ? ' class="on"' : ''}${
+      t.title ? ` title="${esc(t.title)}"` : ''}>${esc(t.text)}</a>`).join('')}</div>`;
 }
 
 function flash(message) {
