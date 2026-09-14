@@ -436,6 +436,92 @@ footer{border-top:1px solid var(--border);padding:18px 24px;color:var(--muted);f
 .comment-pick label{display:block;font-size:13px;margin-bottom:4px}
 .comment-pick select{width:100%}
 
+/* ---------- Händelser: the incident ledger ----------
+ *
+ * One row is one form, laid out as a line. It scrolls sideways rather than
+ * wrapping: eleven fields folded onto three lines is not a line any more, and
+ * this is a page somebody uses at a desk with an invoice in their hand. */
+/* Eleven fields on a line need more than the 1260 px the rest of the app
+   reads comfortably at, and the one column that must never be the one off
+   the edge is the SM check. So this page alone runs wide, and still scrolls
+   sideways on a small laptop rather than folding. */
+body.wide .wrap{max-width:1720px}
+.inc-scroll{overflow-x:auto}
+.inc-list{min-width:1360px}
+.inc-line + .inc-line{border-top:1px solid var(--border)}
+/* The headings use the line's own widths, so they cannot drift out of step
+   with it -- see head() in views/incidents.js. */
+.inc-head{
+  font-size:12px;color:var(--muted);white-space:nowrap;
+  border-bottom:1px solid var(--border);padding-bottom:5px;
+}
+.inc-head > *{padding-inline-start:2px}
+.inc-row{
+  display:flex;align-items:center;gap:6px;flex-wrap:nowrap;
+  padding:7px 10px;
+}
+/* Nothing on the line is allowed to shrink. A flex row that squeezes its
+   fields to fit is a row whose headings no longer sit over their fields, and
+   the honest answer when it will not fit is the sideways scroll above. Only
+   the description grows. */
+.inc-row > *{flex-shrink:0}
+.inc-row .form-control{height:34px;padding:5px 7px;font-size:14px}
+.inc-row .btn-sm{padding:5px 8px}
+.inc-plate{width:96px;font-weight:700}
+.inc-date{width:118px}
+.inc-desc{flex:1 1 160px;min-width:130px}
+.inc-driver{width:104px}
+.inc-cost{width:88px;text-align:end}
+.inc-days{
+  width:46px;text-align:center;font-size:12px;color:var(--muted);
+  font-variant-numeric:tabular-nums;white-space:nowrap;
+}
+.inc-days.open{color:#a86b00;font-weight:700}
+.inc-done{background:#f6fbf7}
+
+.inc-files{display:flex;align-items:center;gap:4px;flex:0 0 auto;min-width:96px}
+.filechip{
+  display:inline-flex;align-items:center;border:1px solid var(--border);
+  border-radius:999px;background:#fff;font-size:12px;overflow:hidden;
+}
+.filechip a{padding:2px 4px 2px 8px;text-decoration:none;color:var(--primary);white-space:nowrap}
+.filechip.file-invoice a{color:#7a4b00}
+.filex{
+  border:0;background:none;cursor:pointer;color:var(--muted);
+  font-size:14px;line-height:1;padding:2px 6px 3px;
+}
+.filex:hover{color:#c0392b}
+.addfile{
+  display:inline-flex;align-items:center;justify-content:center;
+  width:30px;height:30px;border:1px dashed #c3ccd6;border-radius:6px;
+  cursor:pointer;color:var(--muted);
+}
+.addfile:hover{border-color:var(--primary);color:var(--primary)}
+/* A file waiting to be saved has to look different from one already stored,
+   or the Spara button is a step people forget. */
+.addfile.staged{border-style:solid;border-color:var(--green);color:var(--green);background:#f2faf4}
+
+.inc-sm{flex:0 0 auto;min-width:176px}
+.sm{display:flex;align-items:center;gap:5px}
+.sm-name{width:98px}
+.sm-ok{color:#1e7e34}
+.sm-tick{font-weight:700}
+.sm-who{font-weight:600;font-size:13px;max-width:96px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sm-when{font-size:11px;color:var(--muted);white-space:nowrap}
+.sm-blocked{font-size:12px}
+/* Fixed, and the same in the heading row: rows with a link back to the check
+   and rows without must still line up with each other. */
+.inc-actions{display:flex;align-items:center;justify-content:flex-end;gap:5px;width:186px}
+
+/* The damage reports nobody has opened a case for yet. */
+.pending-list{list-style:none;margin:0;padding:0}
+.pending-list li+li{border-top:1px solid var(--border)}
+.pending-row{display:flex;align-items:center;gap:10px;padding:8px 14px;flex-wrap:wrap}
+.pending-plate{font-weight:700;width:78px}
+.pending-date{font-size:13px;color:var(--muted);width:92px}
+.pending-who{font-size:13px;width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pending-what{flex:1 1 220px;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
 /* ---------- Odometer ----------
  * The previous reading under the field. It is there to be checked against the
  * dashboard: a prefix nobody can verify is a prefix nobody should trust. */

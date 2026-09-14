@@ -295,6 +295,63 @@ CREATE TABLE IF NOT EXISTS settings (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- The incident ledger: one row per damage to a vehicle, from what happened to
+-- what it cost and who signed it off. Deliberately separate from submissions --
+-- a safety check is a driver saying what they saw on one morning, an incident
+-- is a case that stays open for weeks while the van is at the body shop and an
+-- invoice makes its way over. They are linked (submission_id) but not merged.
+CREATE TABLE IF NOT EXISTS incidents (
+  id            BIGSERIAL PRIMARY KEY,
+  plate         TEXT        NOT NULL,
+  occurred_on   DATE        NOT NULL,
+  description   TEXT        NOT NULL DEFAULT '',
+  driver_name   TEXT        NOT NULL DEFAULT '',
+  shop_in       DATE,
+  shop_out      DATE,
+  -- Kronor and ore. NUMERIC, never a float: money that is out by a rounding
+  -- error is money somebody has to explain.
+  cost_sek      NUMERIC(12,2),
+  sm_ok         BOOLEAN     NOT NULL DEFAULT false,
+  sm_by         TEXT        NOT NULL DEFAULT '',
+  sm_at         TIMESTAMPTZ,
+  submission_id BIGINT      REFERENCES submissions(id) ON DELETE SET NULL,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS incidents_plate_idx ON incidents (plate, occurred_on DESC);
+CREATE INDEX IF NOT EXISTS incidents_date_idx ON incidents (occurred_on DESC, id DESC);
+-- One incident per damage report, so the "not yet handled" list above the
+-- table cannot show the same report twice and two people cannot both file it.
+CREATE UNIQUE INDEX IF NOT EXISTS incidents_submission_idx
+  ON incidents (submission_id) WHERE submission_id IS NOT NULL;
+
+-- Photos of the damage and invoices from the workshop, in the database beside
+-- everything else so a backup is a backup of the whole case.
+CREATE TABLE IF NOT EXISTS incident_files (
+  id          BIGSERIAL PRIMARY KEY,
+  incident_id BIGINT      NOT NULL REFERENCES incidents(id) ON DELETE CASCADE,
+  kind        TEXT        NOT NULL DEFAULT 'photo',
+  filename    TEXT,
+  mime        TEXT        NOT NULL,
+  bytes       BYTEA       NOT NULL,
+  byte_size   INTEGER     NOT NULL DEFAULT 0,
+  uploaded_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS incident_files_idx ON incident_files (incident_id, id);
+
+-- Every time the Site Manager signs off or takes it back. The incident row
+-- carries the current state; this carries how it got there, because an
+-- approval that was withdrawn is exactly the thing somebody will ask about.
+CREATE TABLE IF NOT EXISTS incident_sm_events (
+  id          BIGSERIAL PRIMARY KEY,
+  incident_id BIGINT      NOT NULL REFERENCES incidents(id) ON DELETE CASCADE,
+  action      TEXT        NOT NULL,
+  who         TEXT        NOT NULL DEFAULT '',
+  cost_sek    NUMERIC(12,2),
+  happened_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS incident_sm_events_idx ON incident_sm_events (incident_id, id);
+
 -- One row per background job, so a restart cannot send the daily mail twice.
 CREATE TABLE IF NOT EXISTS jobs (
   name      TEXT PRIMARY KEY,
@@ -756,6 +813,37 @@ async function addCleanQuestion(client) {
   return { rewritten: rewritten.rowCount, noticed };
 }
 
+/**
+ * Mark the two damage questions as such.
+ *
+ * The Händelser page finds damage reports by the question's role, not by its
+ * wording -- see ROLES in fields.js. Existing forms have no role on them, so
+ * they get one here: only where the Swedish wording is still exactly the
+ * template's and no role has been set by hand.
+ */
+const DAMAGE_ROLE_KEY = 'seed-2026-09-14-damage-role';
+
+async function addDamageRole(client) {
+  const done = await client.query('SELECT 1 FROM jobs WHERE name = $1', [DAMAGE_ROLE_KEY]);
+  if (done.rowCount) return null;
+
+  let marked = 0;
+  for (const f of seed.DEFAULT_FIELDS) {
+    if (f.role !== 'damage') continue;
+    const r = await client.query(
+      `UPDATE form_fields SET role = 'damage'
+        WHERE name = $1 AND label = $2 AND role = ''`, [f.name, f.label]);
+    marked += r.rowCount;
+  }
+
+  await client.query(
+    `INSERT INTO jobs (name, last_run, note) VALUES ($1, now(), $2)
+     ON CONFLICT (name) DO NOTHING`,
+    [DAMAGE_ROLE_KEY, `${marked} skadefrågor märkta`]);
+
+  return { marked };
+}
+
 async function init() {
   pool = await connectWithRetry();
   await pool.query(SCHEMA);
@@ -768,7 +856,11 @@ async function init() {
     const lamps = await addLampsAndKilometres(client);
     const lists = await addQuestionLists(client);
     const clean = await addCleanQuestion(client);
+    const damage = await addDamageRole(client);
     await client.query('COMMIT');
+    if (damage && damage.marked) {
+      console.log(`[db] ${damage.marked} skadefrågor märkta för händelseloggen`);
+    }
     if (clean && (clean.rewritten || clean.noticed)) {
       console.log(`[db] städfrågan omskriven i ${clean.rewritten} formulär, ` +
         `${clean.noticed} frågor fick en uppmaning vid larm`);
@@ -914,6 +1006,176 @@ async function countsBefore(date) {
     firstSubmission: subs.rows[0].first,
     assignments: asg.rows[0].n
   };
+}
+
+/* ------------------------------------------------------------------ *
+ * Incidents                                                           *
+ * ------------------------------------------------------------------ */
+
+const INCIDENT_COLS = `id, plate, occurred_on, description, driver_name,
+  shop_in, shop_out, cost_sek, sm_ok, sm_by, sm_at, submission_id,
+  created_at, updated_at`;
+
+/** Dates come back as Date objects; the page wants 2026-09-14. */
+function dayOf(v) {
+  if (!v) return '';
+  if (typeof v === 'string') return v.slice(0, 10);
+  const d = new Date(v);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function shapeIncident(row, files = [], events = []) {
+  return {
+    ...row,
+    occurred_on: dayOf(row.occurred_on),
+    shop_in: dayOf(row.shop_in),
+    shop_out: dayOf(row.shop_out),
+    cost_sek: row.cost_sek === null || row.cost_sek === undefined ? null : Number(row.cost_sek),
+    files, events
+  };
+}
+
+async function listIncidents({ plate = '', from = '', to = '', smOk = null } = {}) {
+  const where = [];
+  const args = [];
+  if (plate) { args.push(plate); where.push(`plate = $${args.length}`); }
+  if (from) { args.push(from); where.push(`occurred_on >= $${args.length}`); }
+  if (to) { args.push(to); where.push(`occurred_on <= $${args.length}`); }
+  if (smOk !== null) { args.push(smOk); where.push(`sm_ok = $${args.length}`); }
+  const rows = (await pool.query(
+    `SELECT ${INCIDENT_COLS} FROM incidents
+      ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
+      ORDER BY occurred_on DESC, id DESC`, args)).rows;
+  if (!rows.length) return [];
+
+  // Files and the sign-off history for the whole page in two queries rather
+  // than two per row: forty incidents used to be eighty round trips.
+  const ids = rows.map(r => Number(r.id));
+  const files = (await pool.query(
+    `SELECT id, incident_id, kind, filename, mime, byte_size, uploaded_at
+       FROM incident_files WHERE incident_id = ANY($1::bigint[]) ORDER BY id`, [ids])).rows;
+  const events = (await pool.query(
+    `SELECT id, incident_id, action, who, cost_sek, happened_at
+       FROM incident_sm_events WHERE incident_id = ANY($1::bigint[]) ORDER BY id`, [ids])).rows;
+
+  const byId = new Map(rows.map(r => [String(r.id), { files: [], events: [] }]));
+  for (const f of files) byId.get(String(f.incident_id)).files.push(f);
+  for (const e of events) byId.get(String(e.incident_id)).events.push(e);
+  return rows.map(r => shapeIncident(r, byId.get(String(r.id)).files, byId.get(String(r.id)).events));
+}
+
+async function getIncident(id) {
+  if (!/^\d+$/.test(String(id))) return null;
+  const r = await pool.query(`SELECT ${INCIDENT_COLS} FROM incidents WHERE id = $1`, [id]);
+  if (!r.rows.length) return null;
+  const files = (await pool.query(
+    `SELECT id, incident_id, kind, filename, mime, byte_size, uploaded_at
+       FROM incident_files WHERE incident_id = $1 ORDER BY id`, [id])).rows;
+  const events = (await pool.query(
+    `SELECT id, incident_id, action, who, cost_sek, happened_at
+       FROM incident_sm_events WHERE incident_id = $1 ORDER BY id`, [id])).rows;
+  return shapeIncident(r.rows[0], files, events);
+}
+
+async function createIncident(data) {
+  const r = await pool.query(
+    `INSERT INTO incidents
+       (plate, occurred_on, description, driver_name, shop_in, shop_out, cost_sek, submission_id)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
+    [data.plate, data.occurredOn, data.description || '', data.driverName || '',
+     data.shopIn || null, data.shopOut || null,
+     data.cost === null || data.cost === undefined ? null : data.cost,
+     data.submissionId || null]);
+  return String(r.rows[0].id);
+}
+
+/**
+ * Edit the case, never the sign-off.
+ *
+ * `sm_ok`, `sm_by` and `sm_at` are deliberately not writable here: they change
+ * only through signOff(), which records why. What this does do is clear the
+ * approval when the cost changes -- an OK is an OK of an amount, and a figure
+ * edited after the fact would otherwise carry yesterday's signature.
+ */
+async function updateIncident(id, data) {
+  const before = await pool.query('SELECT cost_sek, sm_ok FROM incidents WHERE id = $1', [id]);
+  if (!before.rows.length) return null;
+  const oldCost = before.rows[0].cost_sek === null ? null : Number(before.rows[0].cost_sek);
+  const newCost = data.cost === null || data.cost === undefined ? null : Number(data.cost);
+  const costChanged = before.rows[0].sm_ok && oldCost !== newCost;
+
+  await pool.query(
+    `UPDATE incidents SET plate = $2, occurred_on = $3, description = $4, driver_name = $5,
+            shop_in = $6, shop_out = $7, cost_sek = $8, updated_at = now()
+      WHERE id = $1`,
+    [id, data.plate, data.occurredOn, data.description || '', data.driverName || '',
+     data.shopIn || null, data.shopOut || null, newCost]);
+
+  if (costChanged) {
+    await pool.query(
+      `UPDATE incidents SET sm_ok = false, sm_by = '', sm_at = NULL WHERE id = $1`, [id]);
+    await pool.query(
+      `INSERT INTO incident_sm_events (incident_id, action, who, cost_sek)
+       VALUES ($1, 'cleared-by-cost-change', '', $2)`, [id, newCost]);
+  }
+  return { costChanged };
+}
+
+async function deleteIncident(id) {
+  const r = await pool.query(
+    'DELETE FROM incidents WHERE id = $1 RETURNING id, plate, occurred_on', [id]);
+  return r.rows[0] || null;
+}
+
+/**
+ * The Site Manager's signature, or its withdrawal.
+ *
+ * The cost as it stood is copied onto the event: the row can be edited later,
+ * and "approved 12 400 kr on the 14th" must stay true whatever the figure
+ * becomes afterwards.
+ */
+async function signOffIncident(id, { ok, who }) {
+  const cur = await pool.query('SELECT cost_sek FROM incidents WHERE id = $1', [id]);
+  if (!cur.rows.length) return null;
+  await pool.query(
+    `UPDATE incidents SET sm_ok = $2, sm_by = $3, sm_at = $4, updated_at = now() WHERE id = $1`,
+    [id, !!ok, ok ? who : '', ok ? new Date() : null]);
+  await pool.query(
+    `INSERT INTO incident_sm_events (incident_id, action, who, cost_sek)
+     VALUES ($1, $2, $3, $4)`,
+    [id, ok ? 'ok' : 'withdrawn', who || '', cur.rows[0].cost_sek]);
+  return getIncident(id);
+}
+
+async function addIncidentFile(incidentId, { kind, filename, mime, buffer }) {
+  const r = await pool.query(
+    `INSERT INTO incident_files (incident_id, kind, filename, mime, bytes, byte_size)
+     VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
+    [incidentId, kind, filename || null, mime, buffer, buffer.length]);
+  await pool.query('UPDATE incidents SET updated_at = now() WHERE id = $1', [incidentId]);
+  return String(r.rows[0].id);
+}
+
+async function getIncidentFile(id) {
+  if (!/^\d+$/.test(String(id))) return null;
+  const r = await pool.query(
+    'SELECT id, incident_id, kind, filename, mime, bytes FROM incident_files WHERE id = $1', [id]);
+  return r.rows[0] || null;
+}
+
+async function deleteIncidentFile(id) {
+  const r = await pool.query(
+    'DELETE FROM incident_files WHERE id = $1 RETURNING incident_id, filename', [id]);
+  return r.rows[0] || null;
+}
+
+/** Which submissions already have an incident, so the list above the table
+ *  can leave them out. */
+async function submissionsWithIncident(ids) {
+  if (!ids.length) return new Set();
+  const r = await pool.query(
+    'SELECT submission_id FROM incidents WHERE submission_id = ANY($1::bigint[])', [ids]);
+  return new Set(r.rows.map(x => String(x.submission_id)));
 }
 
 /* ------------------------------------------------------------------ *
@@ -1464,5 +1726,8 @@ module.exports = {
   replaceAssignments, assignmentsBetween, assignmentRange,
   assignmentsForPlate, plateHistory, lastOdometer, deleteSubmission,
   getSetting, setSetting, getStatsEpoch, setStatsEpoch, countsBefore,
+  listIncidents, getIncident, createIncident, updateIncident, deleteIncident,
+  signOffIncident, addIncidentFile, getIncidentFile, deleteIncidentFile,
+  submissionsWithIncident,
   get pool() { return pool; }
 };

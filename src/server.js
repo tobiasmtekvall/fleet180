@@ -24,6 +24,7 @@ const {
 } = require('./views/admin');
 const { qrPage } = require('./views/qr');
 const { statsPage, statsResetPage } = require('./views/stats');
+const { incidentsPage, incidentDeletePage } = require('./views/incidents');
 const statsLib = require('./stats');
 const { buildDriverStats } = statsLib;
 const { badgeText } = require('./badges');
@@ -1078,6 +1079,329 @@ app.get('/admin/stats.csv', async (req, res, next) => {
     res.type('text/csv; charset=utf-8')
       .set('Content-Disposition', `attachment; filename="forarstatistik-${from}_${to}.csv"`)
       .send('\ufeff' + lines.join('\r\n'));
+  } catch (err) { next(err); }
+});
+
+/* ---------------------------- incidents ---------------------------
+ *
+ * The damage ledger. Everything here is admin-only (app.use('/admin', …)),
+ * because it holds invoices and money and is nobody's business at the van.
+ */
+
+/** How far back the "reported but no incident yet" list looks. */
+const PENDING_DAYS = 60;
+
+/** Files a workshop actually sends: pictures and PDFs, nothing executable. */
+const INCIDENT_MIME = /^(image\/(jpeg|png|webp|gif|heic|heif)|application\/pdf)$/i;
+
+/**
+ * "12 345,50", "12345.5", "12 345 kr" -> 12345.5. Empty stays empty.
+ *
+ * Swedish keyboards produce a comma and Swedish eyes produce spaces between
+ * the thousands; a cost field that rejects both would be a cost field people
+ * work around by writing the figure in the description.
+ */
+function parseCost(raw) {
+  const s = String(raw ?? '').replace(/\s|kr/gi, '').replace(',', '.').trim();
+  if (!s) return null;
+  const n = Number(s);
+  if (!Number.isFinite(n) || n < 0) return null;
+  return Math.round(n * 100) / 100;
+}
+
+function readIncidentBody(body) {
+  const day = s => (/^\d{4}-\d{2}-\d{2}$/.test(String(s || '')) ? String(s) : null);
+  return {
+    plate: normalisePlate(body.plate),
+    occurredOn: day(body.occurredOn),
+    description: String(body.description || '').trim().slice(0, 600),
+    driverName: String(body.driverName || '').trim().slice(0, 120),
+    shopIn: day(body.shopIn),
+    shopOut: day(body.shopOut),
+    cost: parseCost(body.cost)
+  };
+}
+
+/** Photos and invoices off a multipart post, by the field they came from. */
+async function saveIncidentFiles(incidentId, files) {
+  let n = 0, skipped = 0;
+  for (const f of files || []) {
+    if (f.fieldname !== 'photos' && f.fieldname !== 'invoices') continue;
+    if (!INCIDENT_MIME.test(f.mimetype)) { skipped++; continue; }
+    await db.addIncidentFile(incidentId, {
+      kind: f.fieldname === 'invoices' ? 'invoice' : 'photo',
+      filename: (f.originalname || '').slice(0, 200),
+      mime: f.mimetype,
+      buffer: f.buffer
+    });
+    n++;
+  }
+  return { added: n, skipped };
+}
+
+/**
+ * The damage drivers reported that nobody has opened a case for.
+ *
+ * Found by the question's ROLE, not its wording -- see ROLES in fields.js.
+ * A form can be copied and rephrased; a role survives that.
+ */
+async function damageNames() {
+  const fields = await fallbackFields();
+  return new Set(fields.filter(f => f.role === 'damage').map(f => f.name));
+}
+
+/**
+ * Is this question a damage question?
+ *
+ * The role is the answer -- except on a check filed before the role existed.
+ * Those carry a snapshot of the form as it was, with no role on anything, and
+ * they are exactly the reports somebody wants to see on the day this page
+ * opens. So a snapshot question also counts if the question of that name
+ * carries the role on the form today.
+ */
+function isDamageQuestion(q, names) {
+  return isAnswerable(q) && (q.role === 'damage' || names.has(q.name));
+}
+
+async function pendingDamage() {
+  const to = summaryLib.dayKey();
+  const from = assignmentLib.shiftDay(to, -PENDING_DAYS);
+  const [subs, fallback, names] = await Promise.all([
+    db.submissionsBetween(from, to),
+    fallbackFields(),
+    damageNames()
+  ]);
+
+  const hits = [];
+  for (const s of subs) {
+    const questions = (s.questions && s.questions.length) ? s.questions : fallback;
+    const said = [];
+    for (const q of questions) {
+      if (!isDamageQuestion(q, names)) continue;
+      const value = (s.answers || {})[q.name];
+      if (!isAlerting(q, value)) continue;
+      said.push(formatAnswer(q, value));
+    }
+    if (said.length) {
+      hits.push({
+        id: String(s.id),
+        plate: s.plate,
+        day: summaryLib.dayKey(s.submitted_at),
+        driver: s.driver_name || '',
+        text: said.join(' · '),
+        photos: s.photo_count || 0
+      });
+    }
+  }
+  if (!hits.length) return [];
+
+  const linked = await db.submissionsWithIncident(hits.map(h => Number(h.id)));
+  return hits.filter(h => !linked.has(h.id)).reverse();
+}
+
+function incidentFilters(req) {
+  const day = s => (/^\d{4}-\d{2}-\d{2}$/.test(String(s || '')) ? String(s) : '');
+  const sm = req.query.sm === 'yes' ? 'yes' : req.query.sm === 'no' ? 'no' : '';
+  const f = {
+    plate: normalisePlate(req.query.plate || ''),
+    from: day(req.query.from),
+    to: day(req.query.to),
+    sm
+  };
+  f.query = qsOf({ plate: f.plate, from: f.from, to: f.to, sm: f.sm });
+  return f;
+}
+
+function qsOf(params) {
+  const p = new URLSearchParams();
+  for (const [k, v] of Object.entries(params)) if (v) p.set(k, v);
+  const s = p.toString();
+  return s ? '?' + s : '';
+}
+
+async function incidentsFor(req) {
+  const filters = incidentFilters(req);
+  const incidents = await db.listIncidents({
+    plate: filters.plate, from: filters.from, to: filters.to,
+    smOk: filters.sm === 'yes' ? true : filters.sm === 'no' ? false : null
+  });
+  const withCost = incidents.filter(i => i.cost_sek !== null);
+  const totals = {
+    withCost: withCost.length,
+    cost: withCost.reduce((n, i) => n + i.cost_sek, 0),
+    waiting: incidents.filter(i => !i.sm_ok).length,
+    atShop: incidents.filter(i => i.shop_in && !i.shop_out).length
+  };
+  return { filters, incidents, totals };
+}
+
+app.get('/admin/incidents', async (req, res, next) => {
+  try {
+    const [{ filters, incidents, totals }, vehicles, pendingChecks] = await Promise.all([
+      incidentsFor(req),
+      db.listVehicles({ includeInactive: true }),
+      pendingDamage()
+    ]);
+    res.send(incidentsPage({
+      incidents, totals, filters, pendingChecks,
+      plates: vehicles.map(v => v.plate),
+      today: summaryLib.dayKey(),
+      message: flashOf(req), nav: adminNav('incidents')
+    }));
+  } catch (err) { next(err); }
+});
+
+app.post('/admin/incidents', upload, async (req, res, next) => {
+  try {
+    const data = readIncidentBody(req.body);
+    if (!data.plate) return back(res, '/admin/incidents', 'Välj vilken bil det gäller.');
+    if (!data.occurredOn) return back(res, '/admin/incidents', 'Händelsen behöver ett datum.');
+    const id = await db.createIncident(data);
+    const files = await saveIncidentFiles(id, req.files);
+    back(res, '/admin/incidents',
+      `Händelsen för ${data.plate} är tillagd.${files.added ? ` ${files.added} fil(er) bifogade.` : ''}` +
+      (files.skipped ? ` ${files.skipped} fil(er) hoppades över – bara bilder och PDF.` : ''));
+  } catch (err) { next(err); }
+});
+
+app.post('/admin/incidents/:id', upload, async (req, res, next) => {
+  try {
+    const inc = await db.getIncident(req.params.id);
+    if (!inc) return back(res, '/admin/incidents', 'Händelsen finns inte.');
+    const data = readIncidentBody(req.body);
+    if (!data.plate) return back(res, '/admin/incidents', 'Välj vilken bil det gäller.');
+    if (!data.occurredOn) return back(res, '/admin/incidents', 'Händelsen behöver ett datum.');
+    const result = await db.updateIncident(inc.id, data);
+    const files = await saveIncidentFiles(inc.id, req.files);
+    back(res, '/admin/incidents',
+      `Sparat.${files.added ? ` ${files.added} fil(er) bifogade.` : ''}` +
+      (files.skipped ? ` ${files.skipped} fil(er) hoppades över – bara bilder och PDF.` : '') +
+      (result && result.costChanged
+        ? ' Kostnaden ändrades, så SM-checken är nollställd och behöver ges om.' : ''));
+  } catch (err) { next(err); }
+});
+
+/**
+ * The Site Manager's OK.
+ *
+ * Two rules, both enforced here and not only in the page: a name is required,
+ * because a shared login cannot say who clicked and an unsigned approval is
+ * just a tick; and there must be a cost, because approving an unknown amount
+ * is not approving anything.
+ */
+app.post('/admin/incidents/:id/sm', upload, async (req, res, next) => {
+  try {
+    const inc = await db.getIncident(req.params.id);
+    if (!inc) return back(res, '/admin/incidents', 'Händelsen finns inte.');
+    const who = String(req.body.smBy || '').trim().slice(0, 120);
+    if (who.length < 2) {
+      return back(res, '/admin/incidents',
+        'Skriv ditt namn i SM-rutan innan du godkänner – godkännandet sparas på namnet.');
+    }
+    if (inc.cost_sek === null) {
+      return back(res, '/admin/incidents',
+        'Fyll i kostnaden först. Ett OK på ett okänt belopp är inget godkännande.');
+    }
+    const after = await db.signOffIncident(inc.id, { ok: true, who });
+    console.log(`[admin] SM-check ${inc.plate} ${inc.occurred_on} av ${who} (${inc.cost_sek} kr)`);
+    back(res, '/admin/incidents',
+      `Godkänt av ${who} ${fmtDateTime(after.sm_at)}.`);
+  } catch (err) { next(err); }
+});
+
+app.post('/admin/incidents/:id/sm/withdraw', upload, async (req, res, next) => {
+  try {
+    const inc = await db.getIncident(req.params.id);
+    if (!inc) return back(res, '/admin/incidents', 'Händelsen finns inte.');
+    const who = String(req.body.smBy || '').trim().slice(0, 120);
+    await db.signOffIncident(inc.id, { ok: false, who });
+    back(res, '/admin/incidents',
+      `Godkännandet för ${inc.plate} ${inc.occurred_on} är borttaget. Historiken finns kvar.`);
+  } catch (err) { next(err); }
+});
+
+/** Open a case straight from the damage a driver reported. */
+app.post('/admin/incidents/from-check/:id', async (req, res, next) => {
+  try {
+    const s = await db.getSubmission(req.params.id);
+    if (!s) return back(res, '/admin/incidents', 'Kontrollen finns inte.');
+    const [fallback, names] = await Promise.all([fallbackFields(), damageNames()]);
+    const questions = (s.questions && s.questions.length) ? s.questions : fallback;
+    const said = [];
+    for (const q of questions) {
+      if (!isDamageQuestion(q, names)) continue;
+      const value = (s.answers || {})[q.name];
+      if (isAlerting(q, value)) said.push(formatAnswer(q, value));
+    }
+    const id = await db.createIncident({
+      plate: s.plate,
+      occurredOn: summaryLib.dayKey(s.submitted_at),
+      description: said.join(' · ').slice(0, 600),
+      driverName: s.driver_name || '',
+      submissionId: Number(s.id)
+    });
+    back(res, '/admin/incidents',
+      `Händelse skapad för ${s.plate}. Fyll i verkstadsdatum och kostnad när du har dem.`);
+  } catch (err) { next(err); }
+});
+
+app.get('/admin/incidents/file/:id', async (req, res, next) => {
+  try {
+    const f = await db.getIncidentFile(req.params.id);
+    if (!f) return res.status(404).type('text/plain').send('Filen finns inte.');
+    // inline: an invoice is something you glance at, not something you collect
+    // in a downloads folder. The filename still travels for a save-as.
+    res.type(f.mime)
+      .set('Content-Disposition', `inline; filename="${encodeURIComponent(f.filename || 'fil')}"`)
+      .set('Cache-Control', 'private, max-age=3600')
+      .send(f.bytes);
+  } catch (err) { next(err); }
+});
+
+app.post('/admin/incidents/file/:id/delete', upload, async (req, res, next) => {
+  try {
+    const gone = await db.deleteIncidentFile(req.params.id);
+    back(res, '/admin/incidents', gone ? 'Filen är borttagen.' : 'Filen fanns inte.');
+  } catch (err) { next(err); }
+});
+
+app.post('/admin/incidents/:id/delete', upload, async (req, res, next) => {
+  try {
+    const inc = await db.getIncident(req.params.id);
+    if (!inc) return back(res, '/admin/incidents', 'Händelsen finns inte.');
+    // A row with an invoice and a signature on it does not disappear on one
+    // stray click, the same rule the check delete follows.
+    if (req.query.confirm !== '1') {
+      return res.send(incidentDeletePage({ inc, nav: adminNav('incidents') }));
+    }
+    await db.deleteIncident(inc.id);
+    console.log(`[admin] raderade händelse ${inc.id} (${inc.plate} ${inc.occurred_on})`);
+    back(res, '/admin/incidents', `Händelsen för ${inc.plate} ${inc.occurred_on} är borttagen.`);
+  } catch (err) { next(err); }
+});
+
+app.get('/admin/incidents.csv', async (req, res, next) => {
+  try {
+    const { incidents } = await incidentsFor(req);
+    const header = ['Id', 'Bil', 'Datum', 'Beskrivning', 'Förare', 'Verkstad in', 'Verkstad ut',
+      'Dagar', 'Kostnad (kr)', 'Foton', 'Fakturor', 'SM-check', 'SM av', 'SM tid', 'Kontroll'];
+    const lines = [header.map(csvCell).join(';')];
+    for (const i of incidents) {
+      const dayCount = i.shop_in && i.shop_out
+        ? Math.round((Date.parse(i.shop_out) - Date.parse(i.shop_in)) / 86400000) + 1 : '';
+      lines.push([
+        i.id, i.plate, i.occurred_on, i.description, i.driver_name,
+        i.shop_in, i.shop_out, dayCount,
+        i.cost_sek === null ? '' : String(i.cost_sek).replace('.', ','),
+        i.files.filter(f => f.kind !== 'invoice').length,
+        i.files.filter(f => f.kind === 'invoice').length,
+        i.sm_ok ? 'JA' : 'NEJ', i.sm_by, i.sm_at ? fmtDateTime(i.sm_at) : '',
+        i.submission_id || ''
+      ].map(csvCell).join(';'));
+    }
+    res.type('text/csv; charset=utf-8')
+      .set('Content-Disposition', 'attachment; filename="handelser.csv"')
+      .send('﻿' + lines.join('\r\n'));
   } catch (err) { next(err); }
 });
 

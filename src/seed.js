@@ -361,7 +361,10 @@ const DEFAULT_FIELDS = [
       'هل أخذت أي كابل شحن أو حامل هاتف أو حزام ربط من هذه المركبة؟',
       'क्या आपने इस वाहन से कोई चार्जिंग केबल, फ़ोन होल्डर या रैचेट स्ट्रैप लिया है?'), TAKEN) },
 
+  /* role 'damage': answered so it flags, this question puts the check on the
+     Händelser page as something that may need an incident opened. */
   { name: 'r3', kind: 'yesno', section: SR, required: true, alertOn: ['ja', 'annat'],
+    role: 'damage',
     label: 'Har du orsakat NÅGON skada på den här bilen i dag?',
     commentOptions: BODY.sv,
     i18n: withList(tr(SR,
@@ -386,6 +389,7 @@ const DEFAULT_FIELDS = [
       'क्या टायर अच्छी हालत में हैं? यदि नहीं, तो समस्या बताएं और अपने निकटतम प्रभारी को सूचित करें।'), WHEELS) },
 
   { name: 'f5', kind: 'yesno', section: S2, required: true, alertOn: ['ja', 'annat'],
+    role: 'damage',
     label: 'Finns det några nya yttre skador på kaross? Svara ja eller nej.',
     commentOptions: BODY.sv,
     i18n: withList(tr(S2,

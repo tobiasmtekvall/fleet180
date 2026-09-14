@@ -63,11 +63,21 @@ function commentOptionsFor(field) {
   return Array.isArray(list) ? list.filter(Boolean).map(String) : [];
 }
 
+/**
+ * What a question *is*, as opposed to what it asks.
+ *
+ * `damage` is what the incident ledger looks for. It is a role rather than a
+ * list of question names because a form can be copied and its wording edited,
+ * and an incident page that found damage reports by matching a Swedish
+ * sentence would quietly stop finding them the first time somebody rephrased
+ * the question.
+ */
 const ROLES = [
   { value: '',         label: '—' },
   { value: 'driver',   label: 'Förarens namn' },
   { value: 'route',    label: 'Rutt' },
-  { value: 'odometer', label: 'Miltal' }
+  { value: 'odometer', label: 'Mätarställning' },
+  { value: 'damage',   label: 'Skada (visas på Händelser)' }
 ];
 
 /** Answers as posted -> the shape stored in the answers JSONB column. */

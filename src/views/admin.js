@@ -17,6 +17,7 @@ const TABS = [
   { href: '/admin/vehicles', text: 'Fordon', key: 'vehicles' },
   { href: '/admin/forms', text: 'Formulär', key: 'forms' },
   { href: '/admin/drivers', text: 'Förare', key: 'drivers' },
+  { href: '/admin/incidents', text: 'Händelser', key: 'incidents' },
   { href: '/admin/stats', text: 'Statistik', key: 'stats' },
   { href: '/admin/daily-summary', text: 'Dagsmejl', key: 'mail' },
   // Not an /admin page -- it is the Checklist Calendar, mounted whole at
