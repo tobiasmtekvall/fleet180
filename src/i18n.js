@@ -280,6 +280,30 @@ const UI = {
 };
 
 /**
+ * One Latin phrase, fenced off so right-to-left text cannot take it apart.
+ *
+ * `isolateLatin` below fences each Latin *word* on its own, which is right
+ * for a stray "EOBD" inside an Arabic sentence but wrong for a phrase: two
+ * separately-fenced words are laid out in the paragraph's own direction, so
+ * "Simon Bergman" reads "Bergman Simon" on an Arabic page, and a masked
+ * "Simon B****" loses its stars off the left-hand end entirely (the stars are
+ * neutral characters and belong to no run). Wrapping the whole phrase once
+ * settles its direction from its own first letter, which is what `fill` has
+ * always done for a plate. Invisible in the three left-to-right languages.
+ *
+ * Use it for a value the app puts on the page itself -- a name, a plate, a
+ * route id. Free text the driver typed still goes through `isolateLatin`.
+ */
+function isolate(text) {
+  const value = String(text === null || text === undefined ? '' : text);
+  if (!value) return value;
+  // Idempotent: `fill` already fences what it substitutes, and a second pair
+  // round the first would be an unbalanced mess the moment anything trims it.
+  if (value.startsWith('⁨') && value.endsWith('⁩')) return value;
+  return '⁨' + value + '⁩';
+}
+
+/**
  * A UI string with {placeholders} replaced.
  *
  * The names, plates and routes in these sentences come from the assignment,
@@ -359,5 +383,5 @@ function allFieldText(field, key = 'label') {
 
 module.exports = {
   LANGS, CODES, DEFAULT_LANG, langOf, meta, UI, t, fill,
-  fieldText, formTitle, allFieldText, isolateLatin
+  fieldText, formTitle, allFieldText, isolateLatin, isolate
 };

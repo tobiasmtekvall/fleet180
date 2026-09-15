@@ -271,9 +271,10 @@ function buildDriverStats({ assignments, submissions, fallback = [], drivers = [
       ranked,
       score,
       // Said plainly on the page rather than hidden in a tooltip.
-      note: !r.expected ? 'inga tilldelningar i perioden'
-        : !ranked ? `bara ${r.expected} ${r.expected === 1 ? 'tilldelning' : 'tilldelningar'} – för lite underlag`
-        : care === null ? 'inget att rapportera, omsorg går inte att mäta'
+      // Admin-facing only (the Statistics tab and its CSV), so English.
+      note: !r.expected ? 'no assignments in the period'
+        : !ranked ? `only ${r.expected} ${r.expected === 1 ? 'assignment' : 'assignments'} – too little to go on`
+        : care === null ? 'nothing to report, so care cannot be measured'
         : ''
     };
     built.badges = badgesFor(built, fleetMedianFill);

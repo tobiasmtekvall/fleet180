@@ -436,7 +436,7 @@ footer{border-top:1px solid var(--border);padding:18px 24px;color:var(--muted);f
 .comment-pick label{display:block;font-size:13px;margin-bottom:4px}
 .comment-pick select{width:100%}
 
-/* ---------- Händelser: the incident ledger ----------
+/* ---------- Incidents / Expenses: the ledger ----------
  *
  * One row is one form, laid out as a line. It scrolls sideways rather than
  * wrapping: eleven fields folded onto three lines is not a line any more, and
@@ -447,7 +447,7 @@ footer{border-top:1px solid var(--border);padding:18px 24px;color:var(--muted);f
    sideways on a small laptop rather than folding. */
 body.wide .wrap{max-width:1720px}
 .inc-scroll{overflow-x:auto}
-.inc-list{min-width:1360px}
+.inc-list{min-width:1530px}
 .inc-line + .inc-line{border-top:1px solid var(--border)}
 /* The headings use the line's own widths, so they cannot drift out of step
    with it -- see head() in views/incidents.js. */
@@ -472,6 +472,14 @@ body.wide .wrap{max-width:1720px}
 .inc-desc{flex:1 1 160px;min-width:130px}
 .inc-driver{width:104px}
 .inc-cost{width:88px;text-align:end}
+/* 2026-09-15: category and who-did-the-work. */
+.inc-cat{width:108px}
+.inc-by{width:90px}
+/* A spare part never visits the workshop: its date fields are switched off
+   and must look it, not like two dates somebody forgot. */
+.inc-row .inc-shop:disabled{background:repeating-linear-gradient(135deg,#f3f5f8 0 6px,#e9edf2 6px 12px);color:transparent;cursor:not-allowed}
+.inc-parts{background:#fbfaf6}
+.inc-parts.inc-done{background:#f6fbf7}
 .inc-days{
   width:46px;text-align:center;font-size:12px;color:var(--muted);
   font-variant-numeric:tabular-nums;white-space:nowrap;
@@ -498,7 +506,7 @@ body.wide .wrap{max-width:1720px}
 }
 .addfile:hover{border-color:var(--primary);color:var(--primary)}
 /* A file waiting to be saved has to look different from one already stored,
-   or the Spara button is a step people forget. */
+   or the Save button is a step people forget. */
 .addfile.staged{border-style:solid;border-color:var(--green);color:var(--green);background:#f2faf4}
 
 .inc-sm{flex:0 0 auto;min-width:176px}
@@ -511,7 +519,7 @@ body.wide .wrap{max-width:1720px}
 .sm-blocked{font-size:12px}
 /* Fixed, and the same in the heading row: rows with a link back to the check
    and rows without must still line up with each other. */
-.inc-actions{display:flex;align-items:center;justify-content:flex-end;gap:5px;width:186px}
+.inc-actions{display:flex;align-items:center;justify-content:flex-end;gap:5px;width:160px}
 
 /* The damage reports nobody has opened a case for yet. */
 .pending-list{list-style:none;margin:0;padding:0}

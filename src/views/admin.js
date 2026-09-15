@@ -1,31 +1,33 @@
 'use strict';
 
 const { page, esc, fmtDateTime } = require('./layout');
-const { KINDS, KIND_LABEL, ROLES, SOURCES, CHOICES, formatAnswer } = require('../fields');
+const { KINDS, KIND_LABEL, ROLES, SOURCES, CHOICES, CHOICE_LABEL_EN, formatAnswer } = require('../fields');
 const i18n = require('../i18n');
 const { OWNER_LABEL, FLEET_LABEL } = require('./index');
 const telltales = require('../telltales');
 
 const LINKS = [
-  { href: '/', text: 'Fordon' },
-  { href: '/qr', text: 'QR-koder' },
+  { href: '/', text: 'Vehicles' },
+  { href: '/qr', text: 'QR codes' },
   { href: '/admin', text: 'Admin' }
 ];
 
 const TABS = [
-  { href: '/admin', text: 'Kontroller', key: 'checks' },
-  { href: '/admin/vehicles', text: 'Fordon', key: 'vehicles' },
-  { href: '/admin/forms', text: 'Formulär', key: 'forms' },
-  { href: '/admin/drivers', text: 'Förare', key: 'drivers' },
-  { href: '/admin/incidents', text: 'Händelser', key: 'incidents' },
-  { href: '/admin/stats', text: 'Statistik', key: 'stats' },
-  { href: '/admin/daily-summary', text: 'Dagsmejl', key: 'mail' },
+  { href: '/admin', text: 'Checks', key: 'checks' },
+  { href: '/admin/vehicles', text: 'Vehicles', key: 'vehicles' },
+  { href: '/admin/forms', text: 'Forms', key: 'forms' },
+  { href: '/admin/drivers', text: 'Drivers', key: 'drivers' },
+  { href: '/admin/incidents', text: 'Incidents', key: 'incidents' },
+  // The ledger, the SM check and the CSV, split off Incidents 2026-09-15.
+  { href: '/admin/expenses', text: 'Expenses', key: 'expenses' },
+  { href: '/admin/stats', text: 'Statistics', key: 'stats' },
+  { href: '/admin/daily-summary', text: 'Daily email', key: 'mail' },
   // Not an /admin page -- it is the Checklist Calendar, mounted whole at
   // /kalender behind a login of its OWN (superuser). It sits in this row
   // because that is where he will look for it, and it says so on hover: a
   // tab that asks for a password the admin has not got should warn first.
-  { href: '/kalender', text: 'Kalender', key: 'calendar',
-    title: 'Kalendern har en egen inloggning (superuser)' }
+  { href: '/kalender', text: 'Calendar', key: 'calendar',
+    title: 'The calendar has its own login (superuser)' }
 ];
 
 function nav(active) {
@@ -57,7 +59,7 @@ function select(name, options, current, extraClass = '') {
  * ------------------------------------------------------------------ */
 
 function adminListPage({ rows, total, filters, limit, offset, vehicles }) {
-  const options = ['<option value="">Alla fordon</option>'].concat(
+  const options = ['<option value="">All vehicles</option>'].concat(
     vehicles.map(v =>
       `<option value="${esc(v.plate)}"${filters.plate === v.plate ? ' selected' : ''}>${esc(v.plate)}</option>`)
   ).join('');
@@ -65,50 +67,50 @@ function adminListPage({ rows, total, filters, limit, offset, vehicles }) {
   const body = rows.length ? rows.map(r => `<tr>
       <td class="mono">${esc(fmtDateTime(r.submitted_at))}</td>
       <td class="mono" style="font-weight:700"><a href="/admin?plate=${esc(r.plate)}"
-          title="Bara ${esc(r.plate)}">${esc(r.plate)}</a></td>
+          title="Only ${esc(r.plate)}">${esc(r.plate)}</a></td>
       <td>${esc(r.driver_name || '—')}</td>
       <td>${esc(r.route || '—')}</td>
       <td class="mono">${esc(r.odometer || '—')}</td>
       <td>${r.photo_count ? esc(r.photo_count) + ' 📷' : '<span class="muted">—</span>'}</td>
-      <td><a href="/admin/s/${esc(r.id)}">Visa</a></td>
+      <td><a href="/admin/s/${esc(r.id)}">View</a></td>
     </tr>`).join('\n')
-    : `<tr><td colspan="7" class="muted" style="padding:20px">Inga kontroller matchar filtret.</td></tr>`;
+    : `<tr><td colspan="7" class="muted" style="padding:20px">No checks match the filter.</td></tr>`;
 
-  // Ten at a time, newest first, with the window spelled out -- "11-20 av
+  // Ten at a time, newest first, with the window spelled out -- "11-20 of
   // 63" tells you where you are in a way that two bare arrows do not.
   const from = total ? offset + 1 : 0;
   const to = Math.min(offset + limit, total);
   const prev = offset > 0
-    ? `<a class="btn btn-ghost" href="/admin${qs({ ...filters, offset: Math.max(0, offset - limit) })}">← Senare</a>`
-    : '<span class="btn btn-ghost" style="opacity:.4;cursor:default">← Senare</span>';
+    ? `<a class="btn btn-ghost" href="/admin${qs({ ...filters, offset: Math.max(0, offset - limit) })}">← Newer</a>`
+    : '<span class="btn btn-ghost" style="opacity:.4;cursor:default">← Newer</span>';
   const next = offset + limit < total
-    ? `<a class="btn btn-ghost" href="/admin${qs({ ...filters, offset: offset + limit })}">Tidigare →</a>`
-    : '<span class="btn btn-ghost" style="opacity:.4;cursor:default">Tidigare →</span>';
-  const where = `<span class="muted">${total ? `${from}–${to} av ${total}` : 'inga träffar'}${
-    filters.plate ? ' för ' + esc(filters.plate) : ''}</span>`;
+    ? `<a class="btn btn-ghost" href="/admin${qs({ ...filters, offset: offset + limit })}">Older →</a>`
+    : '<span class="btn btn-ghost" style="opacity:.4;cursor:default">Older →</span>';
+  const where = `<span class="muted">${total ? `${from}–${to} of ${total}` : 'no matches'}${
+    filters.plate ? ' for ' + esc(filters.plate) : ''}</span>`;
 
   const html = `  <div class="page-head">
     <h1>Administration</h1>
-    <div class="muted">${esc(total)} kontroller</div>
+    <div class="muted">${esc(total)} ${total === 1 ? 'check' : 'checks'}</div>
   </div>
 ${nav('checks')}
 
   <form class="filters no-print" method="get" action="/admin">
-    <div class="f"><label for="plate">Fordon</label>
+    <div class="f"><label for="plate">Vehicle</label>
       <select class="form-control" id="plate" name="plate">${options}</select></div>
-    <div class="f"><label for="from">Från</label>
+    <div class="f"><label for="from">From</label>
       <input class="form-control" type="date" id="from" name="from" value="${esc(filters.from || '')}"></div>
-    <div class="f"><label for="to">Till</label>
+    <div class="f"><label for="to">To</label>
       <input class="form-control" type="date" id="to" name="to" value="${esc(filters.to || '')}"></div>
-    <button class="btn btn-primary" type="submit">Filtrera</button>
-    <a class="btn btn-ghost" href="/admin">Rensa</a>
-    <a class="btn btn-secondary" href="/admin/export.csv${qs(filters)}">Ladda ner CSV</a>
+    <button class="btn btn-primary" type="submit">Filter</button>
+    <a class="btn btn-ghost" href="/admin">Clear</a>
+    <a class="btn btn-secondary" href="/admin/export.csv${qs(filters)}">Download CSV</a>
   </form>
 
   <div class="card">
     <table class="table">
       <thead><tr>
-        <th>Tidpunkt</th><th>Reg.nr</th><th>Förare</th><th>Rutt</th><th>Miltal</th><th>Foton</th><th></th>
+        <th>Time</th><th>Reg. no.</th><th>Driver</th><th>Route</th><th>Odometer</th><th>Photos</th><th></th>
       </tr></thead>
       <tbody>
 ${body}
@@ -120,7 +122,18 @@ ${body}
     ${prev}${where}${next}
   </div>`;
 
-  return page({ title: 'Administration – säkerhetskontroller', body: html, links: LINKS });
+  return page({ title: 'Administration – safety checks', body: html, links: LINKS, lang: 'en', admin: true });
+}
+
+/**
+ * A question as the admin reads it: the English translation when the form has
+ * one, with the Swedish the driver actually saw on hover. The questions are
+ * form content, edited in Swedish, so a question without a translation is
+ * shown as written rather than left blank.
+ */
+function qLabel(q) {
+  const en = q.i18n && q.i18n.en && String(q.i18n.en.label || '').trim();
+  return en ? `<span title="${esc(q.label)}">${esc(en)}</span>` : esc(q.label);
 }
 
 function adminDetailPage({ s, fallbackFields }) {
@@ -133,12 +146,12 @@ function adminDetailPage({ s, fallbackFields }) {
       const grid = pics.length
         ? `<div class="photo-grid">${pics.map(p =>
             `<a href="/admin/photo/${esc(p.id)}" target="_blank" rel="noopener">
-               <img src="/admin/photo/${esc(p.id)}" alt="${esc(p.filename || 'foto')}"></a>`).join('')}</div>`
+               <img src="/admin/photo/${esc(p.id)}" alt="${esc(p.filename || 'photo')}"></a>`).join('')}</div>`
         : '<span class="muted">—</span>';
-      return `<tr><td>${esc(q.label)}</td><td>${grid}</td></tr>`;
+      return `<tr><td>${qLabel(q)}</td><td>${grid}</td></tr>`;
     }
-    if (q.kind === 'info') return `<tr><td colspan="2" class="muted">${esc(q.label)}</td></tr>`;
-    return `<tr><td>${esc(q.label)}</td><td>${esc(formatAnswer(q, answers[q.name]))}</td></tr>`;
+    if (q.kind === 'info') return `<tr><td colspan="2" class="muted">${qLabel(q)}</td></tr>`;
+    return `<tr><td>${qLabel(q)}</td><td>${esc(formatAnswer(q, answers[q.name], 'en'))}</td></tr>`;
   }).join('\n');
 
   /* Who the van was given to that day, and -- when the check was signed by
@@ -147,48 +160,48 @@ function adminDetailPage({ s, fallbackFields }) {
      by a later run of the assigner. */
   const assignedBlock = (s.assigned_driver || s.driver_changed) ? `
   <div class="card${s.driver_changed ? ' card-warn' : ''}">
-    <div class="card-header">Tilldelning${s.driver_changed ? '<span class="step-tag">Föraren byttes</span>' : ''}</div>
+    <div class="card-header">Assignment${s.driver_changed ? '<span class="step-tag">Driver was changed</span>' : ''}</div>
     <div class="card-body"><table class="kv">
-      <tr><td>Tilldelad förare</td><td>${esc(s.assigned_driver || '—')}</td></tr>
-      <tr><td>Tilldelad rutt</td><td>${esc(s.assigned_route || '—')}</td></tr>
-      ${s.driver_changed ? `<tr><td>Kontrollen gjord av</td><td>${esc(s.driver_name || '—')}</td></tr>
-      <tr><td>Godkänt av (OC / Fleet Manager)</td><td>${esc(s.change_approver || '—')}</td></tr>` : ''}
+      <tr><td>Assigned driver</td><td>${esc(s.assigned_driver || '—')}</td></tr>
+      <tr><td>Assigned route</td><td>${esc(s.assigned_route || '—')}</td></tr>
+      ${s.driver_changed ? `<tr><td>Check done by</td><td>${esc(s.driver_name || '—')}</td></tr>
+      <tr><td>Approved by (OC / Fleet Manager)</td><td>${esc(s.change_approver || '—')}</td></tr>` : ''}
     </table></div>
   </div>
 ` : '';
 
   const html = `  <div class="page-head">
-    <h1>Kontroll #${esc(s.id)}</h1>
+    <h1>Check #${esc(s.id)}</h1>
     <div class="plate">${esc(s.plate)}</div>
   </div>
-  <p class="lede">${esc(fmtDateTime(s.submitted_at))} · förare ${esc(s.driver_name || '—')} ·
-     rutt ${esc(s.route || '—')} · miltal ${esc(s.odometer || '—')}${
-       s.driver_changed ? ' · <strong>bilbyte godkänt av ' + esc(s.change_approver || '—') + '</strong>' : ''}</p>
+  <p class="lede">${esc(fmtDateTime(s.submitted_at))} · driver ${esc(s.driver_name || '—')} ·
+     route ${esc(s.route || '—')} · odometer ${esc(s.odometer || '—')}${
+       s.driver_changed ? ' · <strong>vehicle change approved by ' + esc(s.change_approver || '—') + '</strong>' : ''}</p>
 ${assignedBlock}
   <div class="card">
-    <div class="card-header">Svar<span class="step-tag">${esc(s.form_title || s.form_key)}</span></div>
+    <div class="card-header">Answers<span class="step-tag">${esc(s.form_title || s.form_key)}</span></div>
     <div class="card-body"><table class="kv">
 ${rows}
     </table></div>
   </div>
 
   <div class="card no-print">
-    <div class="card-header">Teknisk information</div>
+    <div class="card-header">Technical information</div>
     <div class="card-body"><table class="kv">
-      <tr><td>Enhet</td><td style="font-weight:400" class="muted">${esc(s.user_agent || '—')}</td></tr>
+      <tr><td>Device</td><td style="font-weight:400" class="muted">${esc(s.user_agent || '—')}</td></tr>
       <tr><td>IP</td><td style="font-weight:400" class="muted">${esc(s.client_ip || '—')}</td></tr>
     </table></div>
   </div>
 
   <div class="actions no-print" style="justify-content:space-between">
-    <a class="btn btn-danger" href="/admin/s/${esc(s.id)}/delete">Ta bort kontrollen</a>
+    <a class="btn btn-danger" href="/admin/s/${esc(s.id)}/delete">Delete this check</a>
     <span>
-      <button class="btn btn-secondary" type="button" onclick="window.print()">Skriv ut / PDF</button>
-      <a class="btn btn-primary" href="/admin?plate=${esc(s.plate)}">Tillbaka till ${esc(s.plate)}</a>
+      <button class="btn btn-secondary" type="button" onclick="window.print()">Print / PDF</button>
+      <a class="btn btn-primary" href="/admin?plate=${esc(s.plate)}">Back to ${esc(s.plate)}</a>
     </span>
   </div>`;
 
-  return page({ title: `Kontroll ${s.id} – ${s.plate}`, body: html, links: LINKS });
+  return page({ title: `Check ${s.id} – ${s.plate}`, body: html, links: LINKS, lang: 'en', admin: true });
 }
 
 /* ------------------------------------------------------------------ *
@@ -196,20 +209,20 @@ ${rows}
  * ------------------------------------------------------------------ */
 
 const OWNER_OPTIONS = [
-  { value: '', label: '— (ej angivet)' },
+  { value: '', label: '— (not set)' },
   { value: 'own', label: OWNER_LABEL.own },
   { value: 'okq8', label: OWNER_LABEL.okq8 }
 ];
 const FLEET_OPTIONS = Object.entries(FLEET_LABEL).map(([value, label]) => ({ value, label }));
 
 function adminVehiclesPage({ vehicles, forms, message, counts }) {
-  const formOptions = [{ value: '', label: 'Standardformulär' }]
+  const formOptions = [{ value: '', label: 'Default form' }]
     .concat(forms.filter(f => !f.is_default).map(f => ({ value: String(f.id), label: f.title })));
 
   /* Which van it is. This decides the list of warning lights a driver is
      offered when they report a lamp, so it is set here rather than in the
      form: one form, many models. */
-  const modelOptions = [{ value: '', label: 'Modell – ej satt' }].concat(
+  const modelOptions = [{ value: '', label: 'Model – not set' }].concat(
     telltales.MODEL_KEYS.filter(k => k !== 'generic').map(k => ({
       value: k,
       label: `${telltales.MODELS[k].brand} ${telltales.MODELS[k].name}`.trim()
@@ -224,54 +237,54 @@ function adminVehiclesPage({ vehicles, forms, message, counts }) {
           ${select('fleet', FLEET_OPTIONS, v.fleet)}
           ${select('modelKey', modelOptions, v.model_key || '')}
           ${select('formId', formOptions, v.form_id ? String(v.form_id) : '', 'grow')}
-          <label class="check"><input type="checkbox" name="active" value="1"${v.active ? ' checked' : ''}> Aktiv</label>
-          <span class="muted" style="font-size:13px">${esc(counts.get(v.plate) || 0)} kontroller</span>
-          <button class="btn btn-primary btn-sm" type="submit">Spara</button>
+          <label class="check"><input type="checkbox" name="active" value="1"${v.active ? ' checked' : ''}> Active</label>
+          <span class="muted" style="font-size:13px">${esc(counts.get(v.plate) || 0)} checks</span>
+          <button class="btn btn-primary btn-sm" type="submit">Save</button>
           <a class="btn btn-ghost btn-sm" href="/qr/${esc(v.plate)}.png" target="_blank" rel="noopener">QR</a>
-          <button class="btn btn-danger btn-sm" type="submit" formaction="/admin/vehicles/${esc(v.id)}/delete">Ta bort</button>
+          <button class="btn btn-danger btn-sm" type="submit" formaction="/admin/vehicles/${esc(v.id)}/delete">Delete</button>
         </form>
       </td>
     </tr>`).join('\n');
 
   const html = `  <div class="page-head">
-    <h1>Fordon</h1>
-    <div class="muted">${vehicles.length} st</div>
+    <h1>Vehicles</h1>
+    <div class="muted">${vehicles.length} in total</div>
   </div>
 ${nav('vehicles')}
 ${flash(message)}
 
-  <p class="lede">Ett fordon som läggs upp här får omedelbart en egen sida och en egen QR-kod
-     på <a href="/qr">QR-sidan</a>. Ett fordon som inte längre används bockas ur som
-     <em>Aktivt</em> – då försvinner det från listor och QR-arket, men dess gamla kontroller
-     finns kvar. <em>Ta bort</em> går bara på fordon utan registrerade kontroller.</p>
+  <p class="lede">A vehicle added here immediately gets its own page and its own QR code
+     on the <a href="/qr">QR page</a>. A vehicle no longer in use is unticked as
+     <em>Active</em> – it then disappears from the lists and the QR sheet, but its old checks
+     are kept. <em>Delete</em> only works on vehicles with no recorded checks.</p>
 
-  <p class="lede"><strong>Modellen styr varningslamporna.</strong> När en förare svarar Ja på
-     frågan om kontrollampor får hen en lista med just den här bilens lampor och symboler.
-     Ett fordon utan modell får en gemensam lista med de lampor alla bilar har.</p>
+  <p class="lede"><strong>The model decides the warning lights.</strong> When a driver answers Yes
+     to the dashboard-lights question, they get a list of this particular van's lamps and symbols.
+     A vehicle with no model gets a shared list of the lamps every van has.</p>
 
   <div class="card">
-    <div class="card-header">Nytt fordon</div>
+    <div class="card-header">New vehicle</div>
     <div class="card-body">
       <form class="row-form" method="post" action="/admin/vehicles">
-        <input class="form-control mono" type="text" name="plate" placeholder="REG.NR"
+        <input class="form-control mono" type="text" name="plate" placeholder="REG. NO."
                style="font-weight:700;width:130px" maxlength="16" required>
         ${select('owner', OWNER_OPTIONS, '')}
         ${select('fleet', FLEET_OPTIONS, 'box')}
         ${select('modelKey', modelOptions, '')}
         ${select('formId', formOptions, '', 'grow')}
-        <button class="btn btn-primary" type="submit">Lägg till</button>
+        <button class="btn btn-primary" type="submit">Add</button>
       </form>
     </div>
   </div>
 
   <div class="card">
-    <div class="card-header">Alla fordon<span class="step-tag">Reg.nr · ägare · flotta · modell · formulär</span></div>
+    <div class="card-header">All vehicles<span class="step-tag">Reg. no. · owner · fleet · model · form</span></div>
     <table class="table"><tbody>
-${rows || '<tr><td class="muted" style="padding:20px">Inga fordon ännu.</td></tr>'}
+${rows || '<tr><td class="muted" style="padding:20px">No vehicles yet.</td></tr>'}
     </tbody></table>
   </div>`;
 
-  return page({ title: 'Fordon – administration', body: html, links: LINKS });
+  return page({ title: 'Vehicles – admin', body: html, links: LINKS, lang: 'en', admin: true });
 }
 
 /* ------------------------------------------------------------------ *
@@ -281,56 +294,58 @@ ${rows || '<tr><td class="muted" style="padding:20px">Inga fordon ännu.</td></t
 function adminFormsPage({ forms, message }) {
   const rows = forms.map(f => `<tr>
       <td><a href="/admin/forms/${esc(f.id)}"><strong>${esc(f.title)}</strong></a>
-          ${f.is_default ? ' <span class="chip">standard</span>' : ''}</td>
+          ${f.is_default ? ' <span class="chip">default</span>' : ''}</td>
       <td class="mono muted">${esc(f.key)}</td>
-      <td>${esc(f.field_count)} frågor</td>
-      <td>${f.is_default ? 'alla utom särskilt tilldelade' : esc(f.vehicle_count) + ' fordon'}</td>
+      <td>${esc(f.field_count)} questions</td>
+      <td>${f.is_default ? 'all except those given their own' : esc(f.vehicle_count) + (Number(f.vehicle_count) === 1 ? ' vehicle' : ' vehicles')}</td>
       <td class="mono muted">${esc(fmtDateTime(f.updated_at))}</td>
       <td>
         <form class="row-form" method="post" action="/admin/forms/${esc(f.id)}/duplicate">
-          <a class="btn btn-ghost btn-sm" href="/admin/forms/${esc(f.id)}">Redigera</a>
-          <button class="btn btn-ghost btn-sm" type="submit">Kopiera</button>
+          <a class="btn btn-ghost btn-sm" href="/admin/forms/${esc(f.id)}">Edit</a>
+          <button class="btn btn-ghost btn-sm" type="submit">Copy</button>
           ${f.is_default ? '' :
             `<button class="btn btn-danger btn-sm" type="submit"
-               formaction="/admin/forms/${esc(f.id)}/delete">Ta bort</button>`}
+               formaction="/admin/forms/${esc(f.id)}/delete">Delete</button>`}
         </form>
       </td>
     </tr>`).join('\n');
 
-  const copyOptions = [{ value: '', label: 'Tomt formulär' }]
-    .concat(forms.map(f => ({ value: String(f.id), label: 'Kopia av: ' + f.title })));
+  const copyOptions = [{ value: '', label: 'Empty form' }]
+    .concat(forms.map(f => ({ value: String(f.id), label: 'Copy of: ' + f.title })));
 
   const html = `  <div class="page-head">
-    <h1>Formulär</h1>
+    <h1>Forms</h1>
   </div>
 ${nav('forms')}
 ${flash(message)}
 
-  <p class="lede">Standardformuläret används av alla fordon som inte fått ett eget.
-     Vill du att ett fordon ska ha en egen kontroll: gör en kopia här, ändra frågorna,
-     och välj kopian för det fordonet under <a href="/admin/vehicles">Fordon</a>.</p>
+  <p class="lede">The default form is used by every vehicle that has not been given its own.
+     To give a vehicle its own check: make a copy here, change the questions, and choose
+     the copy for that vehicle under <a href="/admin/vehicles">Vehicles</a>.
+     The questions themselves are what the drivers read, so they stay in Swedish with
+     their translations.</p>
 
   <div class="card">
-    <div class="card-header">Nytt formulär</div>
+    <div class="card-header">New form</div>
     <div class="card-body">
       <form class="row-form" method="post" action="/admin/forms">
-        <input class="form-control grow" type="text" name="title" placeholder="Namn på formuläret" required>
+        <input class="form-control grow" type="text" name="title" placeholder="Name of the form" required>
         ${select('copyFromId', copyOptions, '')}
-        <button class="btn btn-primary" type="submit">Skapa</button>
+        <button class="btn btn-primary" type="submit">Create</button>
       </form>
     </div>
   </div>
 
   <div class="card">
     <table class="table">
-      <thead><tr><th>Formulär</th><th>Nyckel</th><th>Frågor</th><th>Används av</th><th>Ändrad</th><th></th></tr></thead>
+      <thead><tr><th>Form</th><th>Key</th><th>Questions</th><th>Used by</th><th>Changed</th><th></th></tr></thead>
       <tbody>
 ${rows}
       </tbody>
     </table>
   </div>`;
 
-  return page({ title: 'Formulär – administration', body: html, links: LINKS });
+  return page({ title: 'Forms – admin', body: html, links: LINKS, lang: 'en', admin: true });
 }
 
 const KIND_OPTIONS = KINDS.map(k => ({ value: k.value, label: k.label }));
@@ -348,57 +363,58 @@ function fieldRow(form, f, isFirst, isLast) {
      everything. */
   const extras = `
         <details class="q-extra">
-          <summary>Alternativ, larm och översättningar</summary>
+          <summary>Options, alerts and translations</summary>
           <div class="q-extra-body">
             <div class="q-col">
-              <label class="q-lab">Rullgardinens alternativ (ett per rad)</label>
+              <label class="q-lab">Dropdown options (one per line)</label>
               <textarea class="form-control" name="options" rows="4"
                         placeholder="JK-EM-1&#10;JK-EM-2">${esc(opts.join('\n'))}</textarea>
-              <label class="q-lab">Hämta listan från</label>
+              <label class="q-lab">Take the list from</label>
               ${select('source', SOURCES.map(o => ({ value: o.value, label: o.label })), f.source)}
             </div>
             <div class="q-col">
-              <label class="q-lab">Larma när svaret är</label>
+              <label class="q-lab">Alert when the answer is</label>
               <div class="q-checks">
                 ${CHOICES.map(c => `<label class="check"><input type="checkbox" name="alert_${esc(c.value)}" value="1"${
-                  alert.includes(c.value) ? ' checked' : ''}> ${esc(c.label)}</label>`).join('')}
+                  alert.includes(c.value) ? ' checked' : ''}> ${esc(CHOICE_LABEL_EN[c.value] || c.label)}</label>`).join('')}
               </div>
-              <p class="q-hint">Styr vad dagsmejlet och FLEET180-vyn lyfter fram.
-                 "Fungerar X?" larmar på Nej, "Finns nya skador?" larmar på Ja.</p>
-              <label class="q-lab">Uppmaning när svaret larmar</label>
+              <p class="q-hint">Decides what the daily email and the FLEET180 view highlight.
+                 "Does X work?" alerts on No, "Is there new damage?" alerts on Yes.</p>
+              <label class="q-lab">Instruction when the answer alerts</label>
               <input class="form-control" type="text" name="alertNotice"
                      value="${esc(f.alert_notice || '')}"
-                     placeholder="T.ex. Städa upp innan du lämnar bilen!">
-              <p class="q-hint">Visas för föraren i samma stund svaret larmar, ovanför
-                 kommentarsrutan. Använd den när föraren ska göra något på plats –
-                 inte när något bara ska rapporteras vidare.</p>
-              <label class="q-lab">Hämta välj-listan från</label>
+                     placeholder="Swedish, e.g. Städa upp innan du lämnar bilen!">
+              <p class="q-hint">Shown to the driver the moment the answer alerts, above the
+                 comment box. Use it when the driver should do something on the spot –
+                 not when something only needs reporting. Written in Swedish; the
+                 translations go below.</p>
+              <label class="q-lab">Take the pick list from</label>
               ${select('commentSource', [
-                { value: '', label: 'Listan nedan' },
-                { value: 'lights', label: 'Fordonets varningslampor (per modell)' }
+                { value: '', label: 'The list below' },
+                { value: 'lights', label: "The vehicle's warning lights (per model)" }
               ], f.comment_source || '')}
-              <label class="q-lab">Välj-lista när svaret larmar (ett per rad)</label>
+              <label class="q-lab">Pick list when the answer alerts (one per line, Swedish)</label>
               <textarea class="form-control" name="commentOptions" rows="4"
                         placeholder="Helljus&#10;Halvljus&#10;Bromsljus">${esc(picks.join('\n'))}</textarea>
-              <p class="q-hint">Föraren väljer ett av alternativen och kan skriva
-                 detaljer bredvid. Det som sparas är den svenska texten, oavsett
-                 vilket språk föraren läser på.</p>
+              <p class="q-hint">The driver picks one of the options and can type
+                 details beside it. What is saved is the Swedish text, whatever
+                 language the driver reads in.</p>
             </div>
             <div class="q-col q-col-wide">
               ${i18n.CODES.filter(c => c !== 'sv').map(c => {
                 const m = i18n.LANGS.find(l => l.code === c);
-                return `<label class="q-lab">${m.flag} ${esc(m.label)} – frågans text</label>
+                return `<label class="q-lab">${m.flag} ${esc(m.label)} – question text</label>
               <input class="form-control" type="text" name="label_${c}" value="${esc((blob[c] && blob[c].label) || '')}"
-                     placeholder="(tomt = svenska visas)">
-              <label class="q-lab">${m.flag} avsnitt</label>
+                     placeholder="(empty = Swedish is shown)">
+              <label class="q-lab">${m.flag} section</label>
               <input class="form-control" type="text" name="section_${c}" value="${esc((blob[c] && blob[c].section) || '')}">
-              ${picks.length ? `<label class="q-lab">${m.flag} välj-listan (samma ordning)</label>
+              ${picks.length ? `<label class="q-lab">${m.flag} pick list (same order)</label>
               <textarea class="form-control" name="picks_${c}" rows="3"
-                        placeholder="(tomt = svenska visas)">${esc(((blob[c] && blob[c].commentOptions) || []).join('\n'))}</textarea>` : ''}
-              ${f.alert_notice ? `<label class="q-lab">${m.flag} uppmaningen</label>
+                        placeholder="(empty = Swedish is shown)">${esc(((blob[c] && blob[c].commentOptions) || []).join('\n'))}</textarea>` : ''}
+              ${f.alert_notice ? `<label class="q-lab">${m.flag} instruction</label>
               <input class="form-control" type="text" name="notice_${c}"
                      value="${esc((blob[c] && blob[c].alertNotice) || '')}"
-                     placeholder="(tomt = svenska visas)">` : ''}`;
+                     placeholder="(empty = Swedish is shown)">` : ''}`;
               }).join('')}
             </div>
           </div>
@@ -417,13 +433,13 @@ function fieldRow(form, f, isFirst, isLast) {
           <input class="form-control grow" type="text" name="label" value="${esc(f.label)}" required>
           ${select('kind', KIND_OPTIONS, f.kind)}
           <input class="form-control" type="text" name="section" value="${esc(f.section)}"
-                 placeholder="Avsnitt" style="width:190px">
+                 placeholder="Section" style="width:190px">
           ${select('role', ROLE_OPTIONS, f.role)}
-          <label class="check"><input type="checkbox" name="required" value="1"${f.required ? ' checked' : ''}> Obligatorisk</label>
+          <label class="check"><input type="checkbox" name="required" value="1"${f.required ? ' checked' : ''}> Required</label>
           <span class="q-kind mono">${esc(f.name)}</span>
-          <button class="btn btn-primary btn-sm" type="submit">Spara</button>
+          <button class="btn btn-primary btn-sm" type="submit">Save</button>
           <button class="btn btn-danger btn-sm" type="submit"
-                  formaction="/admin/forms/${esc(form.id)}/fields/${esc(f.id)}/delete">Ta bort</button>
+                  formaction="/admin/forms/${esc(form.id)}/fields/${esc(f.id)}/delete">Delete</button>
         </div>
 ${extras}
       </form>
@@ -437,74 +453,74 @@ function adminFormEditorPage({ form, usedBy, message }) {
 
   const sections = [...new Set(form.fields.map(f => f.section).filter(Boolean))];
   const sectionList = sections.length
-    ? `<p class="lede">Avsnitt i tur och ordning: ${sections.map(s => `<strong>${esc(s)}</strong>`).join(' · ')}.
-       Frågor som står efter varandra med samma avsnittsnamn hamnar i samma kort.</p>`
+    ? `<p class="lede">Sections in order: ${sections.map(s => `<strong>${esc(s)}</strong>`).join(' · ')}.
+       Consecutive questions with the same section name end up in the same card.</p>`
     : '';
 
   const users = usedBy.length
     ? usedBy.map(v => `<a href="/v/${esc(v.plate)}">${esc(v.plate)}</a>`).join(', ')
-    : (form.is_default ? 'alla fordon utan eget formulär' : '<span class="muted">inga fordon ännu</span>');
+    : (form.is_default ? 'every vehicle without a form of its own' : '<span class="muted">no vehicles yet</span>');
 
   const html = `  <div class="page-head">
     <h1>${esc(form.title)}</h1>
-    <div class="muted">${form.fields.length} frågor</div>
+    <div class="muted">${form.fields.length} questions</div>
   </div>
 ${nav('forms')}
 ${flash(message)}
 
-  <p class="lede">Används av: ${users}.
-     Förhandsgranska: ${i18n.LANGS.map(l =>
+  <p class="lede">Used by: ${users}.
+     Preview: ${i18n.LANGS.map(l =>
        `<a href="/admin/forms/${esc(form.id)}/preview?lang=${l.code}" title="${esc(l.label)}">${l.flag}</a>`).join(' ')}</p>
 
   <div class="card">
-    <div class="card-header">Formulärets namn</div>
+    <div class="card-header">Name of the form</div>
     <div class="card-body">
       <form class="row-form" method="post" action="/admin/forms/${esc(form.id)}">
         <input class="form-control grow" type="text" name="title" value="${esc(form.title)}" required>
-        <button class="btn btn-primary" type="submit">Spara namn</button>
+        <button class="btn btn-primary" type="submit">Save name</button>
       </form>
     </div>
   </div>
 
   <div class="card">
-    <div class="card-header">Frågor
-      <span class="step-tag">Ordningen här är ordningen föraren ser. ▲▼ flyttar en fråga.</span></div>
+    <div class="card-header">Questions
+      <span class="step-tag">The order here is the order the driver sees. ▲▼ moves a question.</span></div>
     <table class="table"><tbody>
-${rows || '<tr><td class="muted" style="padding:20px">Inga frågor ännu – lägg till den första nedan.</td></tr>'}
+${rows || '<tr><td class="muted" style="padding:20px">No questions yet – add the first one below.</td></tr>'}
     </tbody></table>
   </div>
   ${sectionList}
 
   <div class="card">
-    <div class="card-header">Ny fråga
+    <div class="card-header">New question
       <span class="step-tag">${esc(KINDS.map(k => k.label + ': ' + k.hint).join('  ·  '))}</span></div>
     <div class="card-body">
       <form method="post" action="/admin/forms/${esc(form.id)}/fields">
         <div class="row-form">
-          <input class="form-control grow" type="text" name="label" placeholder="Frågans text" required>
+          <input class="form-control grow" type="text" name="label" placeholder="Question text (Swedish)" required>
           ${select('kind', KIND_OPTIONS, 'yesno')}
           <input class="form-control" type="text" name="section"
-                 placeholder="Avsnitt" style="width:190px"
+                 placeholder="Section" style="width:190px"
                  value="${esc(form.fields.length ? form.fields[form.fields.length - 1].section : '')}">
           ${select('role', ROLE_OPTIONS, '')}
-          <label class="check"><input type="checkbox" name="required" value="1" checked> Obligatorisk</label>
-          <button class="btn btn-primary" type="submit">Lägg till fråga</button>
+          <label class="check"><input type="checkbox" name="required" value="1" checked> Required</label>
+          <button class="btn btn-primary" type="submit">Add question</button>
         </div>
         <div class="row-form" style="margin-top:8px">
           <input class="form-control grow" type="text" name="optionsLine"
-                 placeholder="Rullgardin: alternativ separerade med komma (t.ex. 100%, 95%, 90%)">
+                 placeholder="Dropdown: options separated by commas (e.g. 100%, 95%, 90%)">
           ${select('source', SOURCES.map(o => ({ value: o.value, label: o.label })), '')}
-          <span class="q-hint">Larm och översättningar sätts efteråt på raden ovan.</span>
+          <span class="q-hint">Alerts and translations are set afterwards on the row above.</span>
         </div>
       </form>
     </div>
   </div>
 
   <div class="actions no-print">
-    <a class="btn btn-ghost" href="/admin/forms">Tillbaka till formulären</a>
+    <a class="btn btn-ghost" href="/admin/forms">Back to the forms</a>
   </div>`;
 
-  return page({ title: `${form.title} – formulär`, body: html, links: LINKS });
+  return page({ title: `${form.title} – form`, body: html, links: LINKS, lang: 'en', admin: true });
 }
 
 /**
@@ -513,30 +529,30 @@ ${rows || '<tr><td class="muted" style="padding:20px">Inga frågor ännu – lä
  */
 function adminDeletePage({ s }) {
   const html = `  <div class="page-head">
-    <h1>Ta bort kontroll #${esc(s.id)}?</h1>
+    <h1>Delete check #${esc(s.id)}?</h1>
     <div class="plate">${esc(s.plate)}</div>
   </div>
 ${nav('checks')}
 
   <div class="card">
-    <div class="card-header">Det här försvinner</div>
+    <div class="card-header">This will be removed</div>
     <div class="card-body">
       <table class="kv">
-        <tr><td>Fordon</td><td>${esc(s.plate)}</td></tr>
-        <tr><td>Förare</td><td>${esc(s.driver_name || '—')}</td></tr>
-        <tr><td>Rutt</td><td>${esc(s.route || '—')}</td></tr>
-        <tr><td>Tidpunkt</td><td>${esc(fmtDateTime(s.submitted_at))}</td></tr>
-        <tr><td>Foton</td><td>${esc((s.photos || []).length)}</td></tr>
+        <tr><td>Vehicle</td><td>${esc(s.plate)}</td></tr>
+        <tr><td>Driver</td><td>${esc(s.driver_name || '—')}</td></tr>
+        <tr><td>Route</td><td>${esc(s.route || '—')}</td></tr>
+        <tr><td>Time</td><td>${esc(fmtDateTime(s.submitted_at))}</td></tr>
+        <tr><td>Photos</td><td>${esc((s.photos || []).length)}</td></tr>
       </table>
-      <p class="lede" style="margin-top:14px">Kontrollen och dess foton raderas permanent.
-         Det går inte att ångra, och statistiken räknas om utan den.</p>
+      <p class="lede" style="margin-top:14px">The check and its photos are deleted permanently.
+         This cannot be undone, and the statistics are recalculated without it.</p>
       <form method="post" action="/admin/s/${esc(s.id)}/delete" class="actions" style="justify-content:flex-start">
-        <button class="btn btn-danger" type="submit">Ja, ta bort</button>
-        <a class="btn btn-ghost" href="/admin/s/${esc(s.id)}">Avbryt</a>
+        <button class="btn btn-danger" type="submit">Yes, delete</button>
+        <a class="btn btn-ghost" href="/admin/s/${esc(s.id)}">Cancel</a>
       </form>
     </div>
   </div>`;
-  return page({ title: `Ta bort kontroll ${s.id}`, body: html, links: LINKS });
+  return page({ title: `Delete check ${s.id}`, body: html, links: LINKS, lang: 'en', admin: true });
 }
 
 function adminDriversPage({ drivers, message, lastSync }) {
@@ -544,36 +560,36 @@ function adminDriversPage({ drivers, message, lastSync }) {
       <td>${esc(d.name)}</td>
       <td><span class="chip">${esc(d.type || '—')}</span></td>
       <td>${esc(d.fleet || '—')}</td>
-      <td>${d.active ? 'Aktiv' : '<span class="muted">Inaktiv</span>'}</td>
+      <td>${d.active ? 'Active' : '<span class="muted">Inactive</span>'}</td>
       <td class="mono muted">${esc(fmtDateTime(d.updated_at))}</td>
     </tr>`).join('\n')
     : `<tr><td colspan="5" class="muted" style="padding:20px">
-         Inga förare synkade ännu. Kör synken på din dator, eller posta listan till
+         No drivers synced yet. Run the sync on your computer, or post the list to
          <span class="mono">/api/drivers</span>.</td></tr>`;
 
   const html = `  <div class="page-head">
-    <h1>Förare</h1>
-    <div class="muted">${drivers.filter(d => d.active).length} aktiva av ${drivers.length}</div>
+    <h1>Drivers</h1>
+    <div class="muted">${drivers.filter(d => d.active).length} active of ${drivers.length}</div>
   </div>
 ${nav('drivers')}
 ${flash(message)}
 
-  <p class="lede">Listan ägs av Route Suite och skrivs över av synken – den redigeras inte här.
-     Namnen fyller rullgardinen <em>Namn och efternamn</em> i formuläret, i bokstavsordning.
-     En förare som försvinner ur suiten markeras inaktiv i stället för att raderas, så att en
-     kontroll som redan är signerad fortfarande går att läsa.
-     ${lastSync ? `Senaste synk: <strong>${esc(fmtDateTime(lastSync))}</strong>.` : ''}</p>
+  <p class="lede">The list belongs to Route Suite and is overwritten by the sync – it is not edited here.
+     The names fill the <em>Namn och efternamn</em> dropdown in the form, in alphabetical order.
+     A driver who disappears from the suite is marked inactive instead of deleted, so that a
+     check already signed can still be read.
+     ${lastSync ? `Last sync: <strong>${esc(fmtDateTime(lastSync))}</strong>.` : ''}</p>
 
   <div class="card">
     <table class="table">
-      <thead><tr><th>Namn</th><th>Typ</th><th>Flotta</th><th>Status</th><th>Uppdaterad</th></tr></thead>
+      <thead><tr><th>Name</th><th>Type</th><th>Fleet</th><th>Status</th><th>Updated</th></tr></thead>
       <tbody>
 ${rows}
       </tbody>
     </table>
   </div>`;
 
-  return page({ title: 'Förare – administration', body: html, links: LINKS });
+  return page({ title: 'Drivers – admin', body: html, links: LINKS, lang: 'en', admin: true });
 }
 
 module.exports = {

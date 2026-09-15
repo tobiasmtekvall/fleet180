@@ -29,7 +29,7 @@ function isConfigured() {
 
 async function send({ subject, html, text }) {
   const { key, to, from } = config();
-  if (!key) return { sent: false, reason: 'RESEND_API_KEY saknas' };
+  if (!key) return { sent: false, reason: 'RESEND_API_KEY is missing' };
 
   const res = await fetch(ENDPOINT, {
     method: 'POST',

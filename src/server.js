@@ -24,12 +24,13 @@ const {
 } = require('./views/admin');
 const { qrPage } = require('./views/qr');
 const { statsPage, statsResetPage } = require('./views/stats');
-const { incidentsPage, incidentDeletePage } = require('./views/incidents');
+const { incidentsPage, expensesPage, incidentDeletePage, EXPENSE_LABEL, HANDLER_LABEL } = require('./views/incidents');
 const statsLib = require('./stats');
 const { buildDriverStats } = statsLib;
 const { badgeText } = require('./badges');
 const summaryLib = require('./summary');
 const assignmentLib = require('./assignment');
+const mask = require('./mask');
 const odo = require('./odometer');
 const calendarAssets = require('./calendar/assets');
 const { calendarRouter } = require('./calendar/routes');
@@ -111,9 +112,9 @@ function wantsJson(req) {
  * `back` is the only way out of an error page, and it is deliberately
  * absent for a driver: an error must not become a door to the fleet list.
  */
-function errorPage(res, status, heading, text, back = null) {
+function errorPage(res, status, heading, text, back = null, lang = 'sv') {
   res.status(status).send(page({
-    title: heading,
+    title: heading, lang, admin: lang === 'en',
     links: back ? [{ href: back.href, text: back.text }] : [],
     body: `<div class="page-head"><h1>${esc(heading)}</h1></div>
            <p class="lede">${esc(text)}</p>` +
@@ -122,7 +123,7 @@ function errorPage(res, status, heading, text, back = null) {
   }));
 }
 
-const TO_ADMIN = { href: '/admin', text: 'Till administrationen' };
+const TO_ADMIN = { href: '/admin', text: 'Back to Admin' };
 
 /**
  * Live lists a dropdown can be built from. Only fetched when a question
@@ -323,7 +324,12 @@ app.get('/v/:plate', async (req, res, next) => {
       // behaviour worth rewarding, and it happens before the first tap.
       openedAt: Date.now(),
       lang: i18n.langOf(req.query.lang),
-      lastCheck: l ? `${fmtDateTime(l.submitted_at)}${l.driver_name ? ' – ' + l.driver_name : ''}` : null,
+      // "Senaste kontroll ... – Simon B****": the line under the plate is read
+      // at the van, so the name in it is masked like every other name on this
+      // page. The fleet list in /admin shows the same fact unmasked.
+      lastCheck: l
+        ? `${fmtDateTime(l.submitted_at)}${l.driver_name ? ' – ' + mask.maskName(l.driver_name) : ''}`
+        : null,
       // Who has this van today (pre-filled), and who has had it this week.
       assignment: assignmentLib.todaysAssignment(todayRows),
       week: assignmentLib.buildWeek({
@@ -408,7 +414,9 @@ app.post('/v/:plate', upload, async (req, res, next) => {
             // can put the question on screen instead of repeating an error the
             // driver has no way to answer.
             assigned: {
-              driver: assignment.list.map(a => a.driver).join(', '),
+              // `driver` is read by the driver, so it is masked; `drivers` is
+              // what the page compares the picked name against and stays whole.
+              driver: assignment.list.map(a => mask.maskName(a.driver)).join(', '),
               drivers: assignment.list.map(a => a.driver),
               route: assignment.one ? (assignment.one.route || '') : '',
               plate: vehicle.plate
@@ -543,7 +551,7 @@ app.get('/qr', adminAuth, async (req, res, next) => {
 app.get('/qr/:plate.png', adminAuth, async (req, res, next) => {
   try {
     const vehicle = await db.getVehicle(req.params.plate);
-    if (!vehicle) return errorPage(res, 404, 'Okänt fordon', 'Reg.nr finns inte i appen.');
+    if (!vehicle) return errorPage(res, 404, 'Unknown vehicle', 'That registration number is not in the app.', null, 'en');
     const png = await QRCode.toBuffer(`${baseUrl(req)}/v/${vehicle.plate}`, { ...QR_OPTS, type: 'png' });
     res.type('image/png')
       .set('Content-Disposition', `inline; filename="qr-${vehicle.plate}.png"`)
@@ -740,15 +748,15 @@ app.get('/api/photo/:id', apiAuth, async (req, res, next) => {
 function adminAuth(req, res, next) {
   const password = process.env.ADMIN_PASSWORD;
   if (!password) {
-    return errorPage(res, 503, 'Administrationen är inte konfigurerad',
-      'Sätt miljövariabeln ADMIN_PASSWORD i Railway för att låsa upp den här sidan.');
+    return errorPage(res, 503, 'Admin is not configured',
+      'Set the ADMIN_PASSWORD environment variable in Railway to unlock this page.', null, 'en');
   }
   // The browser resends Basic credentials on any request, so a POST that
   // arrived from somewhere else is refused before it can change anything.
   if (req.method === 'POST') {
     const origin = req.get('origin');
     if (origin && origin !== requestOrigin(req)) {
-      return res.status(403).type('text/plain').send('Fel ursprung.');
+      return res.status(403).type('text/plain').send('Wrong origin.');
     }
   }
   const header = req.get('authorization') || '';
@@ -763,7 +771,7 @@ function adminAuth(req, res, next) {
     }
   }
   res.set('WWW-Authenticate', 'Basic realm="Fleet 180 admin", charset="UTF-8"')
-     .status(401).type('text/plain').send('Behörighet krävs.');
+     .status(401).type('text/plain').send('Authentication required.');
 }
 
 app.use('/admin', adminAuth);
@@ -846,7 +854,7 @@ app.get('/admin', async (req, res, next) => {
 app.get('/admin/s/:id', async (req, res, next) => {
   try {
     const s = await db.getSubmission(req.params.id);
-    if (!s) return errorPage(res, 404, 'Kontrollen finns inte', 'Ingen kontroll med det numret.', TO_ADMIN);
+    if (!s) return errorPage(res, 404, 'Check not found', 'There is no check with that number.', TO_ADMIN, 'en');
     res.send(adminDetailPage({ s, fallbackFields: await fallbackFields() }));
   } catch (err) { next(err); }
 });
@@ -854,7 +862,7 @@ app.get('/admin/s/:id', async (req, res, next) => {
 app.get('/admin/s/:id/delete', async (req, res, next) => {
   try {
     const s = await db.getSubmission(req.params.id);
-    if (!s) return errorPage(res, 404, 'Kontrollen finns inte', 'Ingen kontroll med det numret.', TO_ADMIN);
+    if (!s) return errorPage(res, 404, 'Check not found', 'There is no check with that number.', TO_ADMIN, 'en');
     res.send(adminDeletePage({ s }));
   } catch (err) { next(err); }
 });
@@ -862,17 +870,17 @@ app.get('/admin/s/:id/delete', async (req, res, next) => {
 app.post('/admin/s/:id/delete', async (req, res, next) => {
   try {
     const gone = await db.deleteSubmission(req.params.id);
-    if (!gone) return back(res, '/admin', 'Kontrollen fanns inte.');
+    if (!gone) return back(res, '/admin', 'That check no longer exists.');
     console.log(`[admin] raderade kontroll ${gone.id} (${gone.plate}, ${gone.driver_name || 'okänd förare'})`);
     back(res, `/admin?plate=${encodeURIComponent(gone.plate)}`,
-      `Kontrollen från ${fmtDateTime(gone.submitted_at)} för ${gone.plate} är borttagen.`);
+      `The check from ${fmtDateTime(gone.submitted_at)} for ${gone.plate} was deleted.`);
   } catch (err) { next(err); }
 });
 
 app.get('/admin/photo/:id', async (req, res, next) => {
   try {
     const p = await db.getPhoto(req.params.id);
-    if (!p) return res.status(404).type('text/plain').send('Fotot finns inte.');
+    if (!p) return res.status(404).type('text/plain').send('Photo not found.');
     res.type(p.mime).set('Cache-Control', 'private, max-age=3600').send(p.bytes);
   } catch (err) { next(err); }
 });
@@ -901,7 +909,8 @@ app.get('/admin/export.csv', async (req, res, next) => {
       }
     }
 
-    const header = ['Id', 'Tidpunkt', 'Regnr', 'Formulär', 'Foton'].concat(columns.map(q => q.label));
+    // The question columns keep their Swedish labels: they are the drivers' questions.
+    const header = ['Id', 'Time', 'Reg. no.', 'Form', 'Photos'].concat(columns.map(q => q.label));
     const lines = [header.map(csvCell).join(';')];
     for (const r of rows) {
       const questions = (r.questions && r.questions.length ? r.questions : fallback);
@@ -911,7 +920,7 @@ app.get('/admin/export.csv', async (req, res, next) => {
         const q = byLabel.get(col.label);
         if (!q) return '';                       // this form never asked it
         const value = answers[q.name];
-        return value === undefined || value === null ? '' : formatAnswer(q, value);
+        return value === undefined || value === null ? '' : formatAnswer(q, value, 'en');
       });
       lines.push([r.id, new Date(r.submitted_at).toISOString(), r.plate,
         r.form_title || '', r.photo_count].concat(cells).map(csvCell).join(';'));
@@ -937,7 +946,8 @@ async function summaryFor(date) {
     fallbackFields(),
     db.assignmentsBetween(date, date)
   ]);
-  return summaryLib.buildDay({ date, submissions, vehicles, fallback, assignments });
+  // English answers (Yes/No/Other): this feeds the mail and its preview only.
+  return summaryLib.buildDay({ date, submissions, vehicles, fallback, assignments, lang: 'en' });
 }
 
 async function sendDailySummary(date, { force = false } = {}) {
@@ -946,7 +956,7 @@ async function sendDailySummary(date, { force = false } = {}) {
   // cannot produce two mails for the same day, because only the first
   // caller with this key gets true back.
   if (!force && !(await db.claimJob('daily-summary', date))) {
-    return { skipped: true, reason: 'redan skickad för ' + date, day };
+    return { skipped: true, reason: 'already sent for ' + date, day };
   }
   const result = await mail.send({
     subject: summaryLib.subject(day),
@@ -999,16 +1009,17 @@ app.get('/admin/daily-summary', async (req, res, next) => {
       <form method="get" action="/admin/daily-summary" style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
         <a href="/admin" style="color:#1b6ec2">← Admin</a>
         <input type="date" name="date" value="${esc(date)}" style="padding:5px 8px;border:1px solid #dee2e6;border-radius:4px">
-        <button type="submit" style="padding:6px 12px;border:0;border-radius:4px;background:#1b6ec2;color:#fff;cursor:pointer">Visa</button>
+        <button type="submit" style="padding:6px 12px;border:0;border-radius:4px;background:#1b6ec2;color:#fff;cursor:pointer">Show</button>
         <span style="flex:1"></span>
         <span style="font-size:13px;color:#6c757d">${mail.isConfigured()
-          ? 'Skickas kl ' + String(Number(process.env.SUMMARY_HOUR || 17)).padStart(2, '0') + ':00 till ' + esc(mail.config().to)
-          : 'RESEND_API_KEY saknas – inget mejl skickas ännu'}</span>
+          ? 'Sent at ' + String(Number(process.env.SUMMARY_HOUR || 17)).padStart(2, '0') + ':00 to ' + esc(mail.config().to)
+          : 'RESEND_API_KEY is missing – no email is sent yet'}</span>
       </form>
       <form method="post" action="/admin/daily-summary/send" style="margin:10px 0 0">
         <input type="hidden" name="date" value="${esc(date)}">
-        <button type="submit" style="padding:6px 12px;border:1px solid #dee2e6;border-radius:4px;background:#fff;cursor:pointer">Skicka det här mejlet nu</button>
-      </form>
+        <button type="submit" style="padding:6px 12px;border:1px solid #dee2e6;border-radius:4px;background:#fff;cursor:pointer">Send this email now</button>
+      </form>${flashOf(req) ? `
+      <p style="margin:10px 0 0;padding:8px 12px;border-radius:4px;background:#e8f5ec;color:#256b38;font-size:14px">${esc(flashOf(req))}</p>` : ''}
     </div>`;
     res.send(html.replace('<div style="max-width:680px', bar + '<div style="max-width:680px'));
   } catch (err) { next(err); }
@@ -1020,7 +1031,7 @@ app.post('/admin/daily-summary/send', async (req, res, next) => {
       ? String(req.body.date) : summaryLib.dayKey();
     const result = await sendDailySummary(date, { force: true });
     back(res, `/admin/daily-summary?date=${date}`,
-      result.sent ? `Mejlet skickat till ${result.to}.` : `Inte skickat: ${result.reason}`);
+      result.sent ? `Email sent to ${result.to}.` : `Not sent: ${result.reason}`);
   } catch (err) { next(err); }
 });
 
@@ -1088,16 +1099,16 @@ app.post('/admin/stats/reset', async (req, res, next) => {
   try {
     const date = String(req.body.date || '').trim();
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-      return back(res, '/admin/stats', 'Ange ett datum att räkna från (ÅÅÅÅ-MM-DD).');
+      return back(res, '/admin/stats', 'Give a date to count from (YYYY-MM-DD).');
     }
-    if (String(req.body.confirm || '').trim().toLowerCase() !== 'nollställ') {
+    if (String(req.body.confirm || '').trim().toLowerCase() !== 'reset') {
       return back(res, `/admin/stats/reset?date=${encodeURIComponent(date)}`,
-        'Skriv ordet NOLLSTÄLL för att bekräfta.');
+        'Type the word RESET to confirm.');
     }
     await db.setStatsEpoch(date);
     dropBoardCache();
     back(res, '/admin/stats',
-      `Statistiken räknas nu från ${date}. Kontrollerna själva är kvar – inget är borttaget.`);
+      `Statistics now count from ${date}. The checks themselves are kept – nothing was deleted.`);
   } catch (err) { next(err); }
 });
 
@@ -1105,27 +1116,27 @@ app.post('/admin/stats/reset/clear', async (req, res, next) => {
   try {
     await db.setStatsEpoch(null);
     dropBoardCache();
-    back(res, '/admin/stats', 'Nollställningen borttagen – all historik räknas igen.');
+    back(res, '/admin/stats', 'Reset removed – all history counts again.');
   } catch (err) { next(err); }
 });
 
 app.get('/admin/stats.csv', async (req, res, next) => {
   try {
     const { from, to, stats } = await statsFor(req);
-    const header = ['Förare', 'Tilldelade', 'Gjorda', 'Missade', 'Extra', 'Genomförande',
-      'Omsorg', 'Kommentarsandel', 'Medianord', 'Mediantid (s)', 'Mätta kontroller',
-      'Märken', 'Rapporterade brister', 'Foton', 'Poäng', 'Not'];
+    const header = ['Driver', 'Assigned', 'Done', 'Missed', 'Extra', 'Completion',
+      'Care', 'Comment rate', 'Median words', 'Median time (s)', 'Timed checks',
+      'Badges', 'Reported faults', 'Photos', 'Score', 'Note'];
     const num = x => (x === null || x === undefined ? '' : String(Math.round(x * 1000) / 10).replace('.', ','));
     const lines = [header.map(csvCell).join(';')];
     for (const r of stats.rows) {
       lines.push([r.name, r.expected, r.done, r.missed, r.extra, num(r.completion),
         num(r.care), num(r.commentRate), r.medianWords ?? '',
         r.medianFill === null ? '' : Math.round(r.medianFill), r.fillCount,
-        (r.badges || []).map(k => badgeText(k, 'sv').name).join(', '),
+        (r.badges || []).map(k => badgeText(k, 'en').name).join(', '),
         r.flags, r.photos, num(r.score), r.note].map(csvCell).join(';'));
     }
     res.type('text/csv; charset=utf-8')
-      .set('Content-Disposition', `attachment; filename="forarstatistik-${from}_${to}.csv"`)
+      .set('Content-Disposition', `attachment; filename="driver-statistics-${from}_${to}.csv"`)
       .send('\ufeff' + lines.join('\r\n'));
   } catch (err) { next(err); }
 });
@@ -1157,17 +1168,40 @@ function parseCost(raw) {
   return Math.round(n * 100) / 100;
 }
 
+/** What a row is. Spare parts have no workshop visit, so no shop dates. */
+const EXPENSE_CATEGORIES = new Set(['damage', 'parts']);
+/** Who did the work. '' = nobody has said; never guessed from the owner. */
+const HANDLERS = new Set(['', 'okq8', 'inhouse']);
+
 function readIncidentBody(body) {
   const day = s => (/^\d{4}-\d{2}-\d{2}$/.test(String(s || '')) ? String(s) : null);
+  const category = EXPENSE_CATEGORIES.has(body.category) ? body.category : 'damage';
+  const parts = category === 'parts';
   return {
     plate: normalisePlate(body.plate),
     occurredOn: day(body.occurredOn),
     description: String(body.description || '').trim().slice(0, 600),
     driverName: String(body.driverName || '').trim().slice(0, 120),
-    shopIn: day(body.shopIn),
-    shopOut: day(body.shopOut),
+    category,
+    handledBy: HANDLERS.has(body.handledBy) ? body.handledBy : '',
+    // Enforced here and not only by the disabled inputs: a row switched to
+    // Spare parts drops any dates it had, or "at the workshop now" would
+    // keep counting a part that never went anywhere.
+    shopIn: parts ? null : day(body.shopIn),
+    shopOut: parts ? null : day(body.shopOut),
     cost: parseCost(body.cost)
   };
+}
+
+/**
+ * Where a row action lands afterwards. The Expenses page posts its own URL
+ * (filters included) so a save does not throw the filter away; anything that
+ * is not one of our two pages falls back to Expenses -- never an open redirect.
+ */
+function returnTo(req) {
+  const r = String((req.body && req.body.ret) || '');
+  if (/^\/admin\/(expenses|incidents)(\?[\w=&%.+-]*)?$/.test(r)) return r;
+  return '/admin/expenses';
 }
 
 /** Photos and invoices off a multipart post, by the field they came from. */
@@ -1228,7 +1262,7 @@ async function pendingDamage() {
       if (!isDamageQuestion(q, names)) continue;
       const value = (s.answers || {})[q.name];
       if (!isAlerting(q, value)) continue;
-      said.push(formatAnswer(q, value));
+      said.push(formatAnswer(q, value, 'en'));
     }
     if (said.length) {
       hits.push({
@@ -1254,9 +1288,13 @@ function incidentFilters(req) {
     plate: normalisePlate(req.query.plate || ''),
     from: day(req.query.from),
     to: day(req.query.to),
-    sm
+    sm,
+    category: EXPENSE_CATEGORIES.has(req.query.category) ? req.query.category : '',
+    handledBy: HANDLERS.has(req.query.by) && req.query.by ? req.query.by
+      : req.query.by === 'none' ? 'none' : ''
   };
-  f.query = qsOf({ plate: f.plate, from: f.from, to: f.to, sm: f.sm });
+  f.query = qsOf({ plate: f.plate, from: f.from, to: f.to, sm: f.sm,
+    category: f.category, by: f.handledBy });
   return f;
 }
 
@@ -1269,32 +1307,62 @@ function qsOf(params) {
 
 async function incidentsFor(req) {
   const filters = incidentFilters(req);
-  const incidents = await db.listIncidents({
+  let incidents = await db.listIncidents({
     plate: filters.plate, from: filters.from, to: filters.to,
-    smOk: filters.sm === 'yes' ? true : filters.sm === 'no' ? false : null
+    smOk: filters.sm === 'yes' ? true : filters.sm === 'no' ? false : null,
+    category: filters.category,
+    handledBy: filters.handledBy === 'none' ? '' : filters.handledBy
   });
+  // "Not set" is the empty string, which the query treats as "any".
+  if (filters.handledBy === 'none') incidents = incidents.filter(i => !i.handled_by);
   const withCost = incidents.filter(i => i.cost_sek !== null);
+  const sum = list => list.reduce((n, i) => n + i.cost_sek, 0);
   const totals = {
     withCost: withCost.length,
-    cost: withCost.reduce((n, i) => n + i.cost_sek, 0),
+    cost: sum(withCost),
+    damageCost: sum(withCost.filter(i => i.category !== 'parts')),
+    partsCost: sum(withCost.filter(i => i.category === 'parts')),
     waiting: incidents.filter(i => !i.sm_ok).length,
-    atShop: incidents.filter(i => i.shop_in && !i.shop_out).length
+    atShop: incidents.filter(i => i.category !== 'parts' && i.shop_in && !i.shop_out).length
   };
   return { filters, incidents, totals };
 }
 
+function fileNote(files) {
+  return (files.added ? ` ${files.added} file(s) attached.` : '') +
+    (files.skipped ? ` ${files.skipped} file(s) skipped – images and PDF only.` : '');
+}
+
+/* Incidents: the intake. What drivers reported, and the form for a new case. */
 app.get('/admin/incidents', async (req, res, next) => {
   try {
-    const [{ filters, incidents, totals }, vehicles, pendingChecks] = await Promise.all([
-      incidentsFor(req),
+    const [vehicles, pendingChecks, counts] = await Promise.all([
       db.listVehicles({ includeInactive: true }),
-      pendingDamage()
+      pendingDamage(),
+      db.incidentCounts()
     ]);
     res.send(incidentsPage({
-      incidents, totals, filters, pendingChecks,
+      pendingChecks,
       plates: vehicles.map(v => v.plate),
+      counts,
       today: summaryLib.dayKey(),
       message: flashOf(req), nav: adminNav('incidents')
+    }));
+  } catch (err) { next(err); }
+});
+
+/* Expenses: the ledger, the SM check and the CSV. */
+app.get('/admin/expenses', async (req, res, next) => {
+  try {
+    const [{ filters, incidents, totals }, vehicles] = await Promise.all([
+      incidentsFor(req),
+      db.listVehicles({ includeInactive: true })
+    ]);
+    res.send(expensesPage({
+      incidents, totals, filters,
+      plates: vehicles.map(v => v.plate),
+      today: summaryLib.dayKey(),
+      message: flashOf(req), nav: adminNav('expenses')
     }));
   } catch (err) { next(err); }
 });
@@ -1302,30 +1370,33 @@ app.get('/admin/incidents', async (req, res, next) => {
 app.post('/admin/incidents', upload, async (req, res, next) => {
   try {
     const data = readIncidentBody(req.body);
-    if (!data.plate) return back(res, '/admin/incidents', 'Välj vilken bil det gäller.');
-    if (!data.occurredOn) return back(res, '/admin/incidents', 'Händelsen behöver ett datum.');
+    const from = returnTo(req);
+    if (!data.plate) return back(res, from, 'Choose which vehicle it concerns.');
+    if (!data.occurredOn) return back(res, from, 'The entry needs a date.');
     const id = await db.createIncident(data);
     const files = await saveIncidentFiles(id, req.files);
-    back(res, '/admin/incidents',
-      `Händelsen för ${data.plate} är tillagd.${files.added ? ` ${files.added} fil(er) bifogade.` : ''}` +
-      (files.skipped ? ` ${files.skipped} fil(er) hoppades över – bara bilder och PDF.` : ''));
+    // Wherever it was entered, it now lives on Expenses: land there.
+    back(res, '/admin/expenses',
+      `${data.category === 'parts' ? 'Spare part' : 'Incident'} for ${data.plate} added.` +
+      fileNote(files));
   } catch (err) { next(err); }
 });
 
 app.post('/admin/incidents/:id', upload, async (req, res, next) => {
   try {
+    const to = returnTo(req);
     const inc = await db.getIncident(req.params.id);
-    if (!inc) return back(res, '/admin/incidents', 'Händelsen finns inte.');
+    if (!inc) return back(res, to, 'That entry no longer exists.');
     const data = readIncidentBody(req.body);
-    if (!data.plate) return back(res, '/admin/incidents', 'Välj vilken bil det gäller.');
-    if (!data.occurredOn) return back(res, '/admin/incidents', 'Händelsen behöver ett datum.');
+    if (!data.plate) return back(res, to, 'Choose which vehicle it concerns.');
+    if (!data.occurredOn) return back(res, to, 'The entry needs a date.');
     const result = await db.updateIncident(inc.id, data);
     const files = await saveIncidentFiles(inc.id, req.files);
-    back(res, '/admin/incidents',
-      `Sparat.${files.added ? ` ${files.added} fil(er) bifogade.` : ''}` +
-      (files.skipped ? ` ${files.skipped} fil(er) hoppades över – bara bilder och PDF.` : '') +
+    back(res, to, 'Saved.' + fileNote(files) +
+      (data.category === 'parts' && (inc.shop_in || inc.shop_out)
+        ? ' Spare parts have no workshop dates, so those were cleared.' : '') +
       (result && result.costChanged
-        ? ' Kostnaden ändrades, så SM-checken är nollställd och behöver ges om.' : ''));
+        ? ' The cost changed, so the SM check was reset and needs to be given again.' : ''));
   } catch (err) { next(err); }
 });
 
@@ -1339,32 +1410,33 @@ app.post('/admin/incidents/:id', upload, async (req, res, next) => {
  */
 app.post('/admin/incidents/:id/sm', upload, async (req, res, next) => {
   try {
+    const to = returnTo(req);
     const inc = await db.getIncident(req.params.id);
-    if (!inc) return back(res, '/admin/incidents', 'Händelsen finns inte.');
+    if (!inc) return back(res, to, 'That entry no longer exists.');
     const who = String(req.body.smBy || '').trim().slice(0, 120);
     if (who.length < 2) {
-      return back(res, '/admin/incidents',
-        'Skriv ditt namn i SM-rutan innan du godkänner – godkännandet sparas på namnet.');
+      return back(res, to,
+        'Type your name in the SM box before approving – the approval is saved under that name.');
     }
     if (inc.cost_sek === null) {
-      return back(res, '/admin/incidents',
-        'Fyll i kostnaden först. Ett OK på ett okänt belopp är inget godkännande.');
+      return back(res, to,
+        'Fill in the cost first. An OK on an unknown amount is not an approval.');
     }
     const after = await db.signOffIncident(inc.id, { ok: true, who });
-    console.log(`[admin] SM-check ${inc.plate} ${inc.occurred_on} av ${who} (${inc.cost_sek} kr)`);
-    back(res, '/admin/incidents',
-      `Godkänt av ${who} ${fmtDateTime(after.sm_at)}.`);
+    console.log(`[admin] SM check ${inc.plate} ${inc.occurred_on} by ${who} (${inc.cost_sek} kr)`);
+    back(res, to, `Approved by ${who} ${fmtDateTime(after.sm_at)}.`);
   } catch (err) { next(err); }
 });
 
 app.post('/admin/incidents/:id/sm/withdraw', upload, async (req, res, next) => {
   try {
+    const to = returnTo(req);
     const inc = await db.getIncident(req.params.id);
-    if (!inc) return back(res, '/admin/incidents', 'Händelsen finns inte.');
+    if (!inc) return back(res, to, 'That entry no longer exists.');
     const who = String(req.body.smBy || '').trim().slice(0, 120);
     await db.signOffIncident(inc.id, { ok: false, who });
-    back(res, '/admin/incidents',
-      `Godkännandet för ${inc.plate} ${inc.occurred_on} är borttaget. Historiken finns kvar.`);
+    back(res, to,
+      `The approval for ${inc.plate} ${inc.occurred_on} was withdrawn. The history is kept.`);
   } catch (err) { next(err); }
 });
 
@@ -1372,35 +1444,36 @@ app.post('/admin/incidents/:id/sm/withdraw', upload, async (req, res, next) => {
 app.post('/admin/incidents/from-check/:id', async (req, res, next) => {
   try {
     const s = await db.getSubmission(req.params.id);
-    if (!s) return back(res, '/admin/incidents', 'Kontrollen finns inte.');
+    if (!s) return back(res, '/admin/incidents', 'That check no longer exists.');
     const [fallback, names] = await Promise.all([fallbackFields(), damageNames()]);
     const questions = (s.questions && s.questions.length) ? s.questions : fallback;
     const said = [];
     for (const q of questions) {
       if (!isDamageQuestion(q, names)) continue;
       const value = (s.answers || {})[q.name];
-      if (isAlerting(q, value)) said.push(formatAnswer(q, value));
+      if (isAlerting(q, value)) said.push(formatAnswer(q, value, 'en'));
     }
-    const id = await db.createIncident({
+    await db.createIncident({
       plate: s.plate,
       occurredOn: summaryLib.dayKey(s.submitted_at),
       description: said.join(' · ').slice(0, 600),
       driverName: s.driver_name || '',
+      category: 'damage',
       submissionId: Number(s.id)
     });
-    back(res, '/admin/incidents',
-      `Händelse skapad för ${s.plate}. Fyll i verkstadsdatum och kostnad när du har dem.`);
+    back(res, '/admin/expenses',
+      `Incident created for ${s.plate}. Fill in the workshop dates and the cost when you have them.`);
   } catch (err) { next(err); }
 });
 
 app.get('/admin/incidents/file/:id', async (req, res, next) => {
   try {
     const f = await db.getIncidentFile(req.params.id);
-    if (!f) return res.status(404).type('text/plain').send('Filen finns inte.');
+    if (!f) return res.status(404).type('text/plain').send('File not found.');
     // inline: an invoice is something you glance at, not something you collect
     // in a downloads folder. The filename still travels for a save-as.
     res.type(f.mime)
-      .set('Content-Disposition', `inline; filename="${encodeURIComponent(f.filename || 'fil')}"`)
+      .set('Content-Disposition', `inline; filename="${encodeURIComponent(f.filename || 'file')}"`)
       .set('Cache-Control', 'private, max-age=3600')
       .send(f.bytes);
   } catch (err) { next(err); }
@@ -1409,46 +1482,56 @@ app.get('/admin/incidents/file/:id', async (req, res, next) => {
 app.post('/admin/incidents/file/:id/delete', upload, async (req, res, next) => {
   try {
     const gone = await db.deleteIncidentFile(req.params.id);
-    back(res, '/admin/incidents', gone ? 'Filen är borttagen.' : 'Filen fanns inte.');
+    back(res, returnTo(req), gone ? 'File removed.' : 'That file no longer exists.');
   } catch (err) { next(err); }
 });
 
 app.post('/admin/incidents/:id/delete', upload, async (req, res, next) => {
   try {
+    const to = returnTo(req);
     const inc = await db.getIncident(req.params.id);
-    if (!inc) return back(res, '/admin/incidents', 'Händelsen finns inte.');
+    if (!inc) return back(res, to, 'That entry no longer exists.');
     // A row with an invoice and a signature on it does not disappear on one
     // stray click, the same rule the check delete follows.
     if (req.query.confirm !== '1') {
-      return res.send(incidentDeletePage({ inc, nav: adminNav('incidents') }));
+      return res.send(incidentDeletePage({ inc, ret: to, nav: adminNav('expenses') }));
     }
     await db.deleteIncident(inc.id);
-    console.log(`[admin] raderade händelse ${inc.id} (${inc.plate} ${inc.occurred_on})`);
-    back(res, '/admin/incidents', `Händelsen för ${inc.plate} ${inc.occurred_on} är borttagen.`);
+    console.log(`[admin] deleted expense ${inc.id} (${inc.plate} ${inc.occurred_on})`);
+    back(res, to, `The entry for ${inc.plate} ${inc.occurred_on} was deleted.`);
   } catch (err) { next(err); }
 });
 
-app.get('/admin/incidents.csv', async (req, res, next) => {
+/* The old address, kept so a bookmark or a saved link still downloads. */
+app.get('/admin/incidents.csv', (req, res) => {
+  const i = req.originalUrl.indexOf('?');
+  res.redirect(301, '/admin/expenses.csv' + (i >= 0 ? req.originalUrl.slice(i) : ''));
+});
+
+app.get('/admin/expenses.csv', async (req, res, next) => {
   try {
     const { incidents } = await incidentsFor(req);
-    const header = ['Id', 'Bil', 'Datum', 'Beskrivning', 'Förare', 'Verkstad in', 'Verkstad ut',
-      'Dagar', 'Kostnad (kr)', 'Foton', 'Fakturor', 'SM-check', 'SM av', 'SM tid', 'Kontroll'];
+    const header = ['Id', 'Category', 'Vehicle', 'Date', 'Description', 'Driver',
+      'Workshop in', 'Workshop out', 'Days', 'Handled by', 'Cost (SEK)', 'Photos', 'Invoices',
+      'SM check', 'SM by', 'SM time', 'Check'];
     const lines = [header.map(csvCell).join(';')];
     for (const i of incidents) {
       const dayCount = i.shop_in && i.shop_out
         ? Math.round((Date.parse(i.shop_out) - Date.parse(i.shop_in)) / 86400000) + 1 : '';
       lines.push([
-        i.id, i.plate, i.occurred_on, i.description, i.driver_name,
-        i.shop_in, i.shop_out, dayCount,
+        i.id, EXPENSE_LABEL[i.category] || i.category, i.plate, i.occurred_on,
+        i.description, i.driver_name,
+        i.shop_in, i.shop_out, dayCount, HANDLER_LABEL[i.handled_by] || '',
+        // Decimal comma: the file is ;-separated for a Swedish Excel.
         i.cost_sek === null ? '' : String(i.cost_sek).replace('.', ','),
         i.files.filter(f => f.kind !== 'invoice').length,
         i.files.filter(f => f.kind === 'invoice').length,
-        i.sm_ok ? 'JA' : 'NEJ', i.sm_by, i.sm_at ? fmtDateTime(i.sm_at) : '',
+        i.sm_ok ? 'YES' : 'NO', i.sm_by, i.sm_at ? fmtDateTime(i.sm_at) : '',
         i.submission_id || ''
       ].map(csvCell).join(';'));
     }
     res.type('text/csv; charset=utf-8')
-      .set('Content-Disposition', 'attachment; filename="handelser.csv"')
+      .set('Content-Disposition', 'attachment; filename="expenses.csv"')
       .send('﻿' + lines.join('\r\n'));
   } catch (err) { next(err); }
 });
@@ -1488,47 +1571,47 @@ app.get('/admin/vehicles', async (req, res, next) => {
 app.post('/admin/vehicles', async (req, res, next) => {
   try {
     const data = readVehicleBody(req.body);
-    if (!data.plate) return back(res, '/admin/vehicles', 'Reg.nr saknas.');
+    if (!data.plate) return back(res, '/admin/vehicles', 'The registration number is missing.');
     const existing = await db.getVehicle(data.plate);
-    if (existing) return back(res, '/admin/vehicles', `${data.plate} finns redan.`);
+    if (existing) return back(res, '/admin/vehicles', `${data.plate} already exists.`);
     await db.createVehicle(data);
-    back(res, '/admin/vehicles', `${data.plate} tillagt. QR-koden finns på QR-sidan.`);
+    back(res, '/admin/vehicles', `${data.plate} added. Its QR code is on the QR page.`);
   } catch (err) { next(err); }
 });
 
 app.post('/admin/vehicles/:id', async (req, res, next) => {
   try {
     const vehicle = await db.getVehicleById(req.params.id);
-    if (!vehicle) return back(res, '/admin/vehicles', 'Fordonet finns inte.');
+    if (!vehicle) return back(res, '/admin/vehicles', 'That vehicle no longer exists.');
     const data = readVehicleBody(req.body);
-    if (!data.plate) return back(res, '/admin/vehicles', 'Reg.nr saknas.');
+    if (!data.plate) return back(res, '/admin/vehicles', 'The registration number is missing.');
     if (data.plate !== vehicle.plate) {
       const clash = await db.getVehicle(data.plate);
-      if (clash) return back(res, '/admin/vehicles', `${data.plate} finns redan.`);
+      if (clash) return back(res, '/admin/vehicles', `${data.plate} already exists.`);
       const used = await db.countSubmissionsForPlate(vehicle.plate);
       if (used) {
         return back(res, '/admin/vehicles',
-          `${vehicle.plate} har ${used} registrerade kontroller och kan inte byta reg.nr – ` +
-          'lägg upp det nya fordonet i stället.');
+          `${vehicle.plate} has ${used} recorded checks and cannot change its registration number – ` +
+          'add the new vehicle instead.');
       }
     }
     await db.updateVehicle(vehicle.id, data);
-    back(res, '/admin/vehicles', `${data.plate} sparat.`);
+    back(res, '/admin/vehicles', `${data.plate} saved.`);
   } catch (err) { next(err); }
 });
 
 app.post('/admin/vehicles/:id/delete', async (req, res, next) => {
   try {
     const vehicle = await db.getVehicleById(req.params.id);
-    if (!vehicle) return back(res, '/admin/vehicles', 'Fordonet finns inte.');
+    if (!vehicle) return back(res, '/admin/vehicles', 'That vehicle no longer exists.');
     const used = await db.countSubmissionsForPlate(vehicle.plate);
     if (used) {
       return back(res, '/admin/vehicles',
-        `${vehicle.plate} har ${used} registrerade kontroller och tas därför inte bort. ` +
-        'Bocka ur Aktiv i stället – historiken finns kvar.');
+        `${vehicle.plate} has ${used} recorded checks and is therefore not deleted. ` +
+        'Untick Active instead – the history is kept.');
     }
     await db.deleteVehicle(vehicle.id);
-    back(res, '/admin/vehicles', `${vehicle.plate} borttaget.`);
+    back(res, '/admin/vehicles', `${vehicle.plate} deleted.`);
   } catch (err) { next(err); }
 });
 
@@ -1636,17 +1719,17 @@ app.get('/admin/forms', async (req, res, next) => {
 app.post('/admin/forms', async (req, res, next) => {
   try {
     const title = String(req.body.title || '').trim().slice(0, 200);
-    if (!title) return back(res, '/admin/forms', 'Formuläret behöver ett namn.');
+    if (!title) return back(res, '/admin/forms', 'The form needs a name.');
     const copyFromId = /^\d+$/.test(String(req.body.copyFromId || '')) ? Number(req.body.copyFromId) : null;
     const id = await db.createForm({ title, copyFromId });
-    back(res, `/admin/forms/${id}`, 'Formuläret skapat.');
+    back(res, `/admin/forms/${id}`, 'Form created.');
   } catch (err) { next(err); }
 });
 
 app.get('/admin/forms/:id', async (req, res, next) => {
   try {
     const form = await db.getForm(req.params.id);
-    if (!form) return errorPage(res, 404, 'Formuläret finns inte', 'Inget formulär med det numret.', { href: '/admin/forms', text: 'Till formulären' });
+    if (!form) return errorPage(res, 404, 'Form not found', 'There is no form with that number.', { href: '/admin/forms', text: 'To the forms' }, 'en');
     const vehicles = await db.listVehicles({ includeInactive: true });
     res.send(adminFormEditorPage({
       form,
@@ -1659,7 +1742,7 @@ app.get('/admin/forms/:id', async (req, res, next) => {
 app.get('/admin/forms/:id/preview', async (req, res, next) => {
   try {
     const form = await db.getForm(req.params.id);
-    if (!form) return errorPage(res, 404, 'Formuläret finns inte', 'Inget formulär med det numret.', { href: '/admin/forms', text: 'Till formulären' });
+    if (!form) return errorPage(res, 404, 'Form not found', 'There is no form with that number.', { href: '/admin/forms', text: 'To the forms' }, 'en');
     res.send(formPage({
       vehicle: { plate: 'EXEMPEL' }, form, preview: true,
       lang: i18n.langOf(req.query.lang), sources: await formSources(form)
@@ -1670,48 +1753,48 @@ app.get('/admin/forms/:id/preview', async (req, res, next) => {
 app.post('/admin/forms/:id', async (req, res, next) => {
   try {
     const form = await db.getForm(req.params.id);
-    if (!form) return back(res, '/admin/forms', 'Formuläret finns inte.');
+    if (!form) return back(res, '/admin/forms', 'That form no longer exists.');
     const title = String(req.body.title || '').trim().slice(0, 200);
-    if (!title) return back(res, `/admin/forms/${form.id}`, 'Namnet får inte vara tomt.');
+    if (!title) return back(res, `/admin/forms/${form.id}`, 'The name cannot be empty.');
     await db.updateForm(form.id, { title });
-    back(res, `/admin/forms/${form.id}`, 'Namnet sparat.');
+    back(res, `/admin/forms/${form.id}`, 'Name saved.');
   } catch (err) { next(err); }
 });
 
 app.post('/admin/forms/:id/duplicate', async (req, res, next) => {
   try {
     const form = await db.getForm(req.params.id);
-    if (!form) return back(res, '/admin/forms', 'Formuläret finns inte.');
+    if (!form) return back(res, '/admin/forms', 'That form no longer exists.');
     const id = await db.createForm({ title: `${form.title} (kopia)`, copyFromId: form.id });
-    back(res, `/admin/forms/${id}`, 'Kopian skapad – ändra frågorna här.');
+    back(res, `/admin/forms/${id}`, 'Copy created – change the questions here.');
   } catch (err) { next(err); }
 });
 
 app.post('/admin/forms/:id/delete', async (req, res, next) => {
   try {
     const form = await db.getForm(req.params.id);
-    if (!form) return back(res, '/admin/forms', 'Formuläret finns inte.');
-    if (form.is_default) return back(res, '/admin/forms', 'Standardformuläret kan inte tas bort.');
+    if (!form) return back(res, '/admin/forms', 'That form no longer exists.');
+    if (form.is_default) return back(res, '/admin/forms', 'The default form cannot be deleted.');
     const vehicles = await db.listVehicles({ includeInactive: true });
     const using = vehicles.filter(v => String(v.form_id) === String(form.id));
     if (using.length) {
       return back(res, '/admin/forms',
-        `${form.title} används av ${using.map(v => v.plate).join(', ')} – flytta dem till ett ` +
-        'annat formulär först.');
+        `${form.title} is used by ${using.map(v => v.plate).join(', ')} – move them to ` +
+        'another form first.');
     }
     await db.deleteForm(form.id);
-    back(res, '/admin/forms', `${form.title} borttaget.`);
+    back(res, '/admin/forms', `${form.title} deleted.`);
   } catch (err) { next(err); }
 });
 
 app.post('/admin/forms/:id/fields', async (req, res, next) => {
   try {
     const form = await db.getForm(req.params.id);
-    if (!form) return back(res, '/admin/forms', 'Formuläret finns inte.');
+    if (!form) return back(res, '/admin/forms', 'That form no longer exists.');
     const data = readFieldBody(req.body);
-    if (!data.label) return back(res, `/admin/forms/${form.id}`, 'Frågan behöver en text.');
+    if (!data.label) return back(res, `/admin/forms/${form.id}`, 'The question needs a text.');
     await db.addField(form.id, data);
-    back(res, `/admin/forms/${form.id}`, 'Frågan tillagd.');
+    back(res, `/admin/forms/${form.id}`, 'Question added.');
   } catch (err) { next(err); }
 });
 
@@ -1719,12 +1802,12 @@ app.post('/admin/forms/:id/fields/:fieldId', async (req, res, next) => {
   try {
     const field = await db.getField(req.params.fieldId);
     if (!field || String(field.form_id) !== String(req.params.id)) {
-      return back(res, `/admin/forms/${req.params.id}`, 'Frågan finns inte.');
+      return back(res, `/admin/forms/${req.params.id}`, 'That question no longer exists.');
     }
     const data = readFieldBody(req.body);
-    if (!data.label) return back(res, `/admin/forms/${field.form_id}`, 'Frågan behöver en text.');
+    if (!data.label) return back(res, `/admin/forms/${field.form_id}`, 'The question needs a text.');
     await db.updateField(field.id, keepUneditedI18n(data, field));
-    back(res, `/admin/forms/${field.form_id}`, 'Frågan sparad.');
+    back(res, `/admin/forms/${field.form_id}`, 'Question saved.');
   } catch (err) { next(err); }
 });
 
@@ -1732,12 +1815,12 @@ app.post('/admin/forms/:id/fields/:fieldId/delete', async (req, res, next) => {
   try {
     const field = await db.getField(req.params.fieldId);
     if (!field || String(field.form_id) !== String(req.params.id)) {
-      return back(res, `/admin/forms/${req.params.id}`, 'Frågan finns inte.');
+      return back(res, `/admin/forms/${req.params.id}`, 'That question no longer exists.');
     }
     await db.deleteField(field.id);
     // Answers already stored keep their snapshot, so old checks still read right.
     back(res, `/admin/forms/${field.form_id}`,
-      'Frågan borttagen. Redan inskickade kontroller påverkas inte.');
+      'Question deleted. Checks already submitted are not affected.');
   } catch (err) { next(err); }
 });
 
@@ -1745,7 +1828,7 @@ app.post('/admin/forms/:id/fields/:fieldId/move', async (req, res, next) => {
   try {
     const field = await db.getField(req.params.fieldId);
     if (!field || String(field.form_id) !== String(req.params.id)) {
-      return back(res, `/admin/forms/${req.params.id}`, 'Frågan finns inte.');
+      return back(res, `/admin/forms/${req.params.id}`, 'That question no longer exists.');
     }
     await db.moveField(field.id, req.body.dir === 'up' ? 'up' : 'down');
     res.redirect(303, `/admin/forms/${field.form_id}`);

@@ -295,63 +295,6 @@ CREATE TABLE IF NOT EXISTS settings (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- The incident ledger: one row per damage to a vehicle, from what happened to
--- what it cost and who signed it off. Deliberately separate from submissions --
--- a safety check is a driver saying what they saw on one morning, an incident
--- is a case that stays open for weeks while the van is at the body shop and an
--- invoice makes its way over. They are linked (submission_id) but not merged.
-CREATE TABLE IF NOT EXISTS incidents (
-  id            BIGSERIAL PRIMARY KEY,
-  plate         TEXT        NOT NULL,
-  occurred_on   DATE        NOT NULL,
-  description   TEXT        NOT NULL DEFAULT '',
-  driver_name   TEXT        NOT NULL DEFAULT '',
-  shop_in       DATE,
-  shop_out      DATE,
-  -- Kronor and ore. NUMERIC, never a float: money that is out by a rounding
-  -- error is money somebody has to explain.
-  cost_sek      NUMERIC(12,2),
-  sm_ok         BOOLEAN     NOT NULL DEFAULT false,
-  sm_by         TEXT        NOT NULL DEFAULT '',
-  sm_at         TIMESTAMPTZ,
-  submission_id BIGINT      REFERENCES submissions(id) ON DELETE SET NULL,
-  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-CREATE INDEX IF NOT EXISTS incidents_plate_idx ON incidents (plate, occurred_on DESC);
-CREATE INDEX IF NOT EXISTS incidents_date_idx ON incidents (occurred_on DESC, id DESC);
--- One incident per damage report, so the "not yet handled" list above the
--- table cannot show the same report twice and two people cannot both file it.
-CREATE UNIQUE INDEX IF NOT EXISTS incidents_submission_idx
-  ON incidents (submission_id) WHERE submission_id IS NOT NULL;
-
--- Photos of the damage and invoices from the workshop, in the database beside
--- everything else so a backup is a backup of the whole case.
-CREATE TABLE IF NOT EXISTS incident_files (
-  id          BIGSERIAL PRIMARY KEY,
-  incident_id BIGINT      NOT NULL REFERENCES incidents(id) ON DELETE CASCADE,
-  kind        TEXT        NOT NULL DEFAULT 'photo',
-  filename    TEXT,
-  mime        TEXT        NOT NULL,
-  bytes       BYTEA       NOT NULL,
-  byte_size   INTEGER     NOT NULL DEFAULT 0,
-  uploaded_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-CREATE INDEX IF NOT EXISTS incident_files_idx ON incident_files (incident_id, id);
-
--- Every time the Site Manager signs off or takes it back. The incident row
--- carries the current state; this carries how it got there, because an
--- approval that was withdrawn is exactly the thing somebody will ask about.
-CREATE TABLE IF NOT EXISTS incident_sm_events (
-  id          BIGSERIAL PRIMARY KEY,
-  incident_id BIGINT      NOT NULL REFERENCES incidents(id) ON DELETE CASCADE,
-  action      TEXT        NOT NULL,
-  who         TEXT        NOT NULL DEFAULT '',
-  cost_sek    NUMERIC(12,2),
-  happened_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-CREATE INDEX IF NOT EXISTS incident_sm_events_idx ON incident_sm_events (incident_id, id);
-
 -- One row per background job, so a restart cannot send the daily mail twice.
 CREATE TABLE IF NOT EXISTS jobs (
   name      TEXT PRIMARY KEY,
@@ -463,6 +406,73 @@ CREATE INDEX IF NOT EXISTS photos_submission_idx ON photos (submission_id);
 -- stay separable; appended here so they are created by the same idempotent
 -- pass as everything else. See src/calendar/store.js.
 ${calendarSchema}
+
+-- Placed last: incidents references submissions, and on an empty database
+-- the table must exist before the foreign key can point at it.
+-- The incident ledger: one row per damage to a vehicle, from what happened to
+-- what it cost and who signed it off. Deliberately separate from submissions --
+-- a safety check is a driver saying what they saw on one morning, an incident
+-- is a case that stays open for weeks while the van is at the body shop and an
+-- invoice makes its way over. They are linked (submission_id) but not merged.
+CREATE TABLE IF NOT EXISTS incidents (
+  id            BIGSERIAL PRIMARY KEY,
+  plate         TEXT        NOT NULL,
+  occurred_on   DATE        NOT NULL,
+  description   TEXT        NOT NULL DEFAULT '',
+  driver_name   TEXT        NOT NULL DEFAULT '',
+  shop_in       DATE,
+  shop_out      DATE,
+  -- Kronor and ore. NUMERIC, never a float: money that is out by a rounding
+  -- error is money somebody has to explain.
+  cost_sek      NUMERIC(12,2),
+  sm_ok         BOOLEAN     NOT NULL DEFAULT false,
+  sm_by         TEXT        NOT NULL DEFAULT '',
+  sm_at         TIMESTAMPTZ,
+  submission_id BIGINT      REFERENCES submissions(id) ON DELETE SET NULL,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS incidents_plate_idx ON incidents (plate, occurred_on DESC);
+CREATE INDEX IF NOT EXISTS incidents_date_idx ON incidents (occurred_on DESC, id DESC);
+-- One incident per damage report, so the "not yet handled" list above the
+-- table cannot show the same report twice and two people cannot both file it.
+CREATE UNIQUE INDEX IF NOT EXISTS incidents_submission_idx
+  ON incidents (submission_id) WHERE submission_id IS NOT NULL;
+-- 2026-09-15: the ledger became Expenses. A row is either a damage case or a
+-- spare-part purchase (no workshop dates), and says who did the work. Both
+-- ADD COLUMN IF NOT EXISTS, because this whole block runs on every boot.
+-- handled_by is '' until somebody picks: it is never derived from the van's
+-- owner, a rented van can still be fixed in-house.
+ALTER TABLE incidents ADD COLUMN IF NOT EXISTS category   TEXT NOT NULL DEFAULT 'damage';
+ALTER TABLE incidents ADD COLUMN IF NOT EXISTS handled_by TEXT NOT NULL DEFAULT '';
+
+-- Photos of the damage and invoices from the workshop, in the database beside
+-- everything else so a backup is a backup of the whole case.
+CREATE TABLE IF NOT EXISTS incident_files (
+  id          BIGSERIAL PRIMARY KEY,
+  incident_id BIGINT      NOT NULL REFERENCES incidents(id) ON DELETE CASCADE,
+  kind        TEXT        NOT NULL DEFAULT 'photo',
+  filename    TEXT,
+  mime        TEXT        NOT NULL,
+  bytes       BYTEA       NOT NULL,
+  byte_size   INTEGER     NOT NULL DEFAULT 0,
+  uploaded_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS incident_files_idx ON incident_files (incident_id, id);
+
+-- Every time the Site Manager signs off or takes it back. The incident row
+-- carries the current state; this carries how it got there, because an
+-- approval that was withdrawn is exactly the thing somebody will ask about.
+CREATE TABLE IF NOT EXISTS incident_sm_events (
+  id          BIGSERIAL PRIMARY KEY,
+  incident_id BIGINT      NOT NULL REFERENCES incidents(id) ON DELETE CASCADE,
+  action      TEXT        NOT NULL,
+  who         TEXT        NOT NULL DEFAULT '',
+  cost_sek    NUMERIC(12,2),
+  happened_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS incident_sm_events_idx ON incident_sm_events (incident_id, id);
+
 `;
 
 /* ------------------------------------------------------------------ *
@@ -1013,7 +1023,7 @@ async function countsBefore(date) {
  * ------------------------------------------------------------------ */
 
 const INCIDENT_COLS = `id, plate, occurred_on, description, driver_name,
-  shop_in, shop_out, cost_sek, sm_ok, sm_by, sm_at, submission_id,
+  category, handled_by, shop_in, shop_out, cost_sek, sm_ok, sm_by, sm_at, submission_id,
   created_at, updated_at`;
 
 /** Dates come back as Date objects; the page wants 2026-09-14. */
@@ -1035,10 +1045,13 @@ function shapeIncident(row, files = [], events = []) {
   };
 }
 
-async function listIncidents({ plate = '', from = '', to = '', smOk = null } = {}) {
+async function listIncidents({ plate = '', from = '', to = '', smOk = null,
+                               category = '', handledBy = '' } = {}) {
   const where = [];
   const args = [];
   if (plate) { args.push(plate); where.push(`plate = $${args.length}`); }
+  if (category) { args.push(category); where.push(`category = $${args.length}`); }
+  if (handledBy) { args.push(handledBy); where.push(`handled_by = $${args.length}`); }
   if (from) { args.push(from); where.push(`occurred_on >= $${args.length}`); }
   if (to) { args.push(to); where.push(`occurred_on <= $${args.length}`); }
   if (smOk !== null) { args.push(smOk); where.push(`sm_ok = $${args.length}`); }
@@ -1080,12 +1093,14 @@ async function getIncident(id) {
 async function createIncident(data) {
   const r = await pool.query(
     `INSERT INTO incidents
-       (plate, occurred_on, description, driver_name, shop_in, shop_out, cost_sek, submission_id)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
+       (plate, occurred_on, description, driver_name, shop_in, shop_out, cost_sek, submission_id,
+        category, handled_by)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
     [data.plate, data.occurredOn, data.description || '', data.driverName || '',
      data.shopIn || null, data.shopOut || null,
      data.cost === null || data.cost === undefined ? null : data.cost,
-     data.submissionId || null]);
+     data.submissionId || null,
+     data.category || 'damage', data.handledBy || '']);
   return String(r.rows[0].id);
 }
 
@@ -1106,10 +1121,12 @@ async function updateIncident(id, data) {
 
   await pool.query(
     `UPDATE incidents SET plate = $2, occurred_on = $3, description = $4, driver_name = $5,
-            shop_in = $6, shop_out = $7, cost_sek = $8, updated_at = now()
+            shop_in = $6, shop_out = $7, cost_sek = $8, category = $9, handled_by = $10,
+            updated_at = now()
       WHERE id = $1`,
     [id, data.plate, data.occurredOn, data.description || '', data.driverName || '',
-     data.shopIn || null, data.shopOut || null, newCost]);
+     data.shopIn || null, data.shopOut || null, newCost,
+     data.category || 'damage', data.handledBy || '']);
 
   if (costChanged) {
     await pool.query(
@@ -1119,6 +1136,17 @@ async function updateIncident(id, data) {
        VALUES ($1, 'cleared-by-cost-change', '', $2)`, [id, newCost]);
   }
   return { costChanged };
+}
+
+/** The three figures the Incidents tab shows, without loading every row. */
+async function incidentCounts() {
+  const r = await pool.query(
+    `SELECT count(*)::int AS total,
+            count(*) FILTER (WHERE NOT sm_ok)::int AS waiting,
+            count(*) FILTER (WHERE category <> 'parts' AND shop_in IS NOT NULL
+                               AND shop_out IS NULL)::int AS "atShop"
+       FROM incidents`);
+  return r.rows[0];
 }
 
 async function deleteIncident(id) {
@@ -1726,7 +1754,7 @@ module.exports = {
   replaceAssignments, assignmentsBetween, assignmentRange,
   assignmentsForPlate, plateHistory, lastOdometer, deleteSubmission,
   getSetting, setSetting, getStatsEpoch, setStatsEpoch, countsBefore,
-  listIncidents, getIncident, createIncident, updateIncident, deleteIncident,
+  listIncidents, getIncident, createIncident, updateIncident, deleteIncident, incidentCounts,
   signOffIncident, addIncidentFile, getIncidentFile, deleteIncidentFile,
   submissionsWithIncident,
   get pool() { return pool; }

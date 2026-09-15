@@ -2,8 +2,9 @@
 
 const { page, esc, fmtDateTime } = require('./layout');
 
-const OWNER_LABEL = { own: 'Egen', okq8: 'OKQ8' };
-const FLEET_LABEL = { box: 'Boxbilar', home: 'Hemleverans' };
+// Admin-facing (the fleet list sits behind the admin login), so English.
+const OWNER_LABEL = { own: 'Own', okq8: 'OKQ8' };
+const FLEET_LABEL = { box: 'Box vans', home: 'Home delivery' };
 
 function ownerChip(owner) {
   if (!owner) return '<span class="muted">—</span>';
@@ -20,15 +21,15 @@ function fleetTable(title, vehicles, latest) {
       <td>${ownerChip(v.owner)}</td>
       <td>${l ? esc(fmtDateTime(l.submitted_at)) : '<span class="muted">—</span>'}</td>
       <td>${l && l.driver_name ? esc(l.driver_name) : '<span class="muted">—</span>'}</td>
-      <td><a class="btn btn-primary" href="/v/${esc(v.plate)}">Öppna kontroll</a></td>
+      <td><a class="btn btn-primary" href="/v/${esc(v.plate)}">Open check</a></td>
     </tr>`;
   }).join('\n');
 
   return `  <div class="card">
     <div class="card-header">${esc(title)}
-      <span class="step-tag">${vehicles.length} fordon · senaste registrerade kontroll</span></div>
+      <span class="step-tag">${vehicles.length} ${vehicles.length === 1 ? 'vehicle' : 'vehicles'} · latest recorded check</span></div>
     <table class="table">
-      <thead><tr><th>Reg.nr</th><th>Ägare</th><th>Senaste kontroll</th><th>Förare</th><th></th></tr></thead>
+      <thead><tr><th>Reg. no.</th><th>Owner</th><th>Latest check</th><th>Driver</th><th></th></tr></thead>
       <tbody>
 ${rows}
       </tbody>
@@ -48,24 +49,24 @@ function indexPage({ vehicles, latest }) {
     .join('\n');
 
   const empty = vehicles.length ? '' :
-    `<div class="warn">Inga fordon är upplagda ännu. Lägg till dem under
-      <a href="/admin/vehicles">Admin → Fordon</a>.</div>`;
+    `<div class="warn">No vehicles have been added yet. Add them under
+      <a href="/admin/vehicles">Admin → Vehicles</a>.</div>`;
 
   const body = `  <div class="page-head">
-    <h1>Säkerhetskontroll</h1>
+    <h1>Safety check</h1>
   </div>
-  <p class="lede">${vehicles.length} fordon. Skanna fordonets QR-kod, eller välj det i listan.</p>
+  <p class="lede">${vehicles.length} ${vehicles.length === 1 ? 'vehicle' : 'vehicles'}. Scan the vehicle's QR code, or pick it from the list.</p>
   ${empty}
 
 ${tables}
 
   <div class="actions" style="justify-content:flex-start">
-    <a class="btn btn-secondary" href="/qr">QR-koder för utskrift</a>
-    <a class="btn btn-ghost" href="/admin">Administration</a>
+    <a class="btn btn-secondary" href="/qr">QR codes for printing</a>
+    <a class="btn btn-ghost" href="/admin">Admin</a>
   </div>`;
 
-  return page({ title: 'Säkerhetskontroll – fordon', body, links: [
-    { href: '/qr', text: 'QR-koder' }, { href: '/admin', text: 'Admin' }
+  return page({ title: 'Safety check – vehicles', body, lang: 'en', admin: true, links: [
+    { href: '/qr', text: 'QR codes' }, { href: '/admin', text: 'Admin' }
   ]});
 }
 

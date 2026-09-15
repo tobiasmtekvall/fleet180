@@ -8,17 +8,18 @@
  */
 
 const KINDS = [
-  { value: 'text',   label: 'Fritext',           hint: 'En rad text.' },
-  { value: 'select', label: 'Rullgardin',        hint: 'Föraren väljer ur en lista. Skriv alternativen ett per rad, eller välj förarlistan som källa.' },
-  { value: 'yesno',  label: 'Ja / Nej / Annat',  hint: 'Tre knappar. Kommentar krävs vid "Annat" och kan fyllas i vid "Nej".' },
-  { value: 'photo',  label: 'Foto',              hint: 'Öppnar kameran. Flera bilder tillåtna.' },
-  { value: 'info',   label: 'Informationstext',  hint: 'Bara text till föraren, inget svar.' }
+  // Labels and hints are admin-facing (the form editor), so English.
+  { value: 'text',   label: 'Free text',          hint: 'One line of text.' },
+  { value: 'select', label: 'Dropdown',           hint: 'The driver picks from a list. Write the options one per line, or choose the driver list as the source.' },
+  { value: 'yesno',  label: 'Yes / No / Other',   hint: 'Three buttons. A comment is required on "Other" and can be given on "No".' },
+  { value: 'photo',  label: 'Photo',              hint: 'Opens the camera. Several pictures allowed.' },
+  { value: 'info',   label: 'Information text',   hint: 'Only text for the driver, no answer.' }
 ];
 
 /** Where a dropdown's options come from. */
 const SOURCES = [
-  { value: '',        label: 'Egna alternativ' },
-  { value: 'drivers', label: 'Förarlistan (synkas från Route Suite)' }
+  { value: '',        label: 'Own options' },
+  { value: 'drivers', label: 'The driver list (synced from Route Suite)' }
 ];
 
 const KIND_VALUES = KINDS.map(k => k.value);
@@ -30,6 +31,9 @@ const CHOICES = [
   { value: 'annat', label: 'Annat' }
 ];
 const CHOICE_LABEL = Object.fromEntries(CHOICES.map(c => [c.value, c.label]));
+/* The same three words for the admin side. The stored values and the
+   driver's receipt stay Swedish; see formatAnswer's `lang`. */
+const CHOICE_LABEL_EN = { ja: 'Yes', nej: 'No', annat: 'Other' };
 
 /** Fallback for questions with no alert polarity of their own. */
 const COMMENT_CHOICES = new Set(['nej', 'annat']);
@@ -74,10 +78,10 @@ function commentOptionsFor(field) {
  */
 const ROLES = [
   { value: '',         label: '—' },
-  { value: 'driver',   label: 'Förarens namn' },
-  { value: 'route',    label: 'Rutt' },
-  { value: 'odometer', label: 'Mätarställning' },
-  { value: 'damage',   label: 'Skada (visas på Händelser)' }
+  { value: 'driver',   label: "Driver's name" },
+  { value: 'route',    label: 'Route' },
+  { value: 'odometer', label: 'Odometer' },
+  { value: 'damage',   label: 'Damage (shown on Incidents)' }
 ];
 
 /** Answers as posted -> the shape stored in the answers JSONB column. */
@@ -145,7 +149,7 @@ function answerProblem(field, value, allowed) {
  * a string where an object is expected is shown as the string, and vice
  * versa -- never as an empty cell.
  */
-function formatAnswer(field, value) {
+function formatAnswer(field, value, lang = 'sv') {
   if (value === null || value === undefined) return '—';
 
   if (typeof value === 'string') return value.trim() || '—';
@@ -156,7 +160,7 @@ function formatAnswer(field, value) {
     const detail = [String(value.pick || '').trim(), String(value.comment || '').trim()]
       .filter(Boolean).join(' – ');
     if (!value.choice) return detail || '—';
-    const label = CHOICE_LABEL[value.choice] || value.choice;
+    const label = (lang === 'en' ? CHOICE_LABEL_EN : CHOICE_LABEL)[value.choice] || value.choice;
     return detail ? `${label}: ${detail}` : label;
   }
 
@@ -200,7 +204,7 @@ function optionsFor(field, sources) {
 }
 
 module.exports = {
-  KINDS, KIND_VALUES, KIND_LABEL, SOURCES, CHOICES, CHOICE_LABEL, COMMENT_CHOICES, commentChoices,
+  KINDS, KIND_VALUES, KIND_LABEL, SOURCES, CHOICES, CHOICE_LABEL, CHOICE_LABEL_EN, COMMENT_CHOICES, commentChoices,
   ROLES, readAnswer, answerProblem, formatAnswer, isAnswerable, isAlerting, optionsFor,
   commentOptionsFor
 };

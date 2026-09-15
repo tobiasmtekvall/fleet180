@@ -9,6 +9,7 @@ const odo = require('../odometer');
 const { icon } = require('../telltales');
 const { icon: badgeIcon, badgeText } = require('../badges');
 const { driverKey } = require('../stats');
+const { maskName } = require('../mask');
 
 /* Consecutive questions that name the same section share one card, which
    is how the original four-part page is reproduced without the section
@@ -57,6 +58,19 @@ function filledText(lang, key, vars) {
   return i18n.fill(i18n.t(lang, key), vars);
 }
 
+/**
+ * A driver's name as it goes on a page a driver reads: masked, and fenced off
+ * as one phrase.
+ *
+ * The fence is what `fill` already puts round a name it substitutes into a
+ * sentence; a name written straight into a list needs it too, or on the Arabic
+ * page the two halves are laid out right-to-left and "Simon B****" comes out
+ * as "**** B Simon". See i18n.isolate.
+ */
+function who(name) {
+  return i18n.isolate(maskName(name));
+}
+
 function renderField(f, lang, sources, ctx = {}) {
   const labels = i18n.allFieldText(f, 'label');
   const star = f.required ? '<span class="star">*</span>' : '';
@@ -90,10 +104,20 @@ function renderField(f, lang, sources, ctx = {}) {
     /* The driver's own options carry the standings key, so picking your name
        can light up your row without the page listing who is who. */
     const keyed = f.role === 'driver';
+    /* The driver reads "Simon B****" and the page posts "Simon Bergman": the
+       label is masked, the value is not. The server resolves the name against
+       the roster, the assignment and the standings key, none of which can work
+       on a mask -- see src/mask.js for why that is a curtain and not a lock.
+       The admin's preview of the form shows the roster unmasked.
+
+       Masked on the ROLE or the SOURCE, the same pair the receipt tests: the
+       roles are younger than the form, and a question re-saved without one
+       would otherwise put the whole roster on a page with no login. */
+    const masked = (keyed || f.source === 'drivers') && !ctx.preview;
     const options = [`<option value="" ${uiAttrs('choose')}>${esc(i18n.t(lang, 'choose'))}</option>`]
       .concat(opts.map(o =>
         `<option value="${esc(o)}"${keyed ? ` data-key="${esc(driverKey(o))}"` : ''}${
-          pre && sameName(o, pre) ? ' selected' : ''}>${esc(o)}</option>`))
+          pre && sameName(o, pre) ? ' selected' : ''}>${esc(masked ? who(o) : o)}</option>`))
       .join('\n            ');
     const emptyNote = opts.length ? '' :
       `<div class="err show">Listan är tom – ${f.source === 'drivers'
@@ -240,6 +264,12 @@ function odometerBits(lang, ctx) {
  * fill in -- see todaysAssignment(). The route travels with the driver,
  * because it is that driver's route, not the vehicle's.
  */
+/* NOT masked, and it cannot be: what this returns becomes the field's value,
+   which is what the page posts and what the server resolves the driver by.
+   For the driver dropdown that is invisible -- the label beside it is masked.
+   A driver question saved as a TEXT field instead would show the assigned
+   name in full in the box; the seeded form uses the dropdown, and a text
+   driver field would need the mask somewhere it cannot go. */
 function prefillFor(f, ctx) {
   const one = ctx && ctx.assignment && ctx.assignment.one;
   if (!one || ctx.preview) return '';
@@ -273,7 +303,10 @@ function changeBox(f, lang, ctx) {
      filled in by the page when that happens (form.js). */
   const list = (ctx.assignment && ctx.assignment.list) || [];
   const one = ctx.assignment && ctx.assignment.one;
-  const assigned = one ? one.driver : list.map(a => a.driver).join(', ');
+  /* Masked, because this sentence is read on a phone at the van. The real
+     names stay on `data-assigned` below: that attribute is what the page
+     compares the picked driver against, and a mask cannot be compared. */
+  const assigned = one ? maskName(one.driver) : list.map(a => maskName(a.driver)).join(', ');
   const route = one ? (one.route || '') : '';
   const vars = { assigned, plate: ctx.plate, route };
   const key = route ? 'changeQuestionRoute' : 'changeQuestion';
@@ -343,10 +376,11 @@ function assignedBanner(lang, ctx) {
   if (!list.length) return '';
   const one = ctx.assignment.one;
   const lineKey = one && one.route ? 'assignedLineRoute' : 'assignedLine';
-  const vars = one ? { driver: one.driver, plate: ctx.plate, route: one.route || '' } : {};
+  const vars = one ? { driver: maskName(one.driver), plate: ctx.plate, route: one.route || '' } : {};
   const line = one
     ? `<p class="assign-line" ${filledAttrs(lineKey, vars)}>${esc(filledText(lang, lineKey, vars))}</p>`
-    : `<p class="assign-line">${esc(list.map(a => a.route ? `${a.driver} (${a.route})` : a.driver).join(' · '))}</p>`;
+    : `<p class="assign-line">${esc(list.map(a => a.route
+        ? `${who(a.driver)} (${a.route})` : who(a.driver)).join(' · '))}</p>`;
   const hint = one ? 'assignedPrefilled' : 'assignedSeveral';
   return `<div class="assign-box">
     <span class="assign-tag" ${uiAttrs('assignedToday')}>${esc(i18n.t(lang, 'assignedToday'))}</span>
@@ -367,9 +401,10 @@ function weekPanel(lang, ctx) {
   const week = ctx.week;
   if (!week) return '';
   const rows = (week.days || []).map(d => {
-    const assigned = d.assigned.map(a => a.route ? `${a.driver} (${a.route})` : a.driver).join(', ');
+    const assigned = d.assigned.map(a => a.route
+      ? `${who(a.driver)} (${a.route})` : who(a.driver)).join(', ');
     const checks = d.checks.map(c =>
-      `${esc(c.driver || '—')}${c.swapped ? ` <span class="swapped" ${uiAttrs('weekSwapped')}>${esc(i18n.t(lang, 'weekSwapped'))}</span>` : ''}`).join(' · ');
+      `${esc(who(c.driver) || '—')}${c.swapped ? ` <span class="swapped" ${uiAttrs('weekSwapped')}>${esc(i18n.t(lang, 'weekSwapped'))}</span>` : ''}`).join(' · ');
     const isToday = d.date === week.to;
     return `      <li>
         <span class="wd">${esc(d.date)}${isToday ? ` <em ${uiAttrs('weekToday')}>${esc(i18n.t(lang, 'weekToday'))}</em>` : ''}</span>
@@ -551,7 +586,7 @@ ${cards}
     body,
     // No navigation: a driver reached this page from a QR code on one
     // vehicle and should see that vehicle's form and nothing else.
-    links: preview ? [{ href: '/admin/forms', text: 'Formulär' }] : [],
+    links: preview ? [{ href: '/admin/forms', text: 'Forms' }] : [],
     lang: code,
     // FLEET180_ASSIGNED is what the page needs to raise the driver-change
     // question by itself if the assignment lands after the page did.

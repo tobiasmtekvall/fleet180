@@ -38,7 +38,7 @@ function localHour(d = new Date()) {
  * `fallback` is the default form's questions, used for checks submitted
  * before the form editor existed and therefore carrying no snapshot.
  */
-function buildDay({ date, submissions, vehicles, fallback = [], assignments = [] }) {
+function buildDay({ date, submissions, vehicles, fallback = [], assignments = [], lang = 'sv' }) {
   const checks = [];
   const issues = [];
 
@@ -59,7 +59,10 @@ function buildDay({ date, submissions, vehicles, fallback = [], assignments = []
       if (!isAnswerable(q)) continue;
       const value = answers[q.name];
       if (!isAlerting(q, value)) continue;
-      flags.push({ question: q.label, answer: formatAnswer(q, value) });
+      // The English translation when the question has one; the extension's
+      // day view (lang 'sv') keeps the Swedish wording it always had.
+      const label = (lang !== 'sv' && q.i18n && q.i18n[lang] && q.i18n[lang].label) || q.label;
+      flags.push({ question: label, answer: formatAnswer(q, value, lang) });
     }
 
     const check = {
@@ -150,7 +153,12 @@ function esc(s) {
     .replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 }
 
-/** The email body. Deliberately plain: it is read on a phone at 6am. */
+/**
+ * The email body. Deliberately plain: it is read on a phone at 6am.
+ * English since 2026-09-15, like the rest of the admin side. A question is
+ * shown in its English translation when the form has one; the drivers' own
+ * words and the pick lists are quoted as written, in Swedish.
+ */
 function renderHtml(day, baseUrl) {
   const link = (path, text) => `<a href="${esc(baseUrl)}${esc(path)}" style="color:#1b6ec2">${esc(text)}</a>`;
 
@@ -161,7 +169,7 @@ function renderHtml(day, baseUrl) {
         <td style="padding:6px 10px;border-bottom:1px solid #e6e6e6"><strong>${esc(i.answer)}</strong></td>
         <td style="padding:6px 10px;border-bottom:1px solid #e6e6e6;white-space:nowrap">${esc(i.driver)} ${esc(i.time)}</td>
       </tr>`).join('')
-    : `<tr><td colspan="4" style="padding:10px;color:#6c757d">Inget att åtgärda rapporterat.</td></tr>`;
+    : `<tr><td colspan="4" style="padding:10px;color:#6c757d">Nothing reported that needs action.</td></tr>`;
 
   const checkRows = day.checks.length
     ? day.checks.map(c => `<tr>
@@ -171,7 +179,7 @@ function renderHtml(day, baseUrl) {
         <td style="padding:5px 10px;border-bottom:1px solid #eee;white-space:nowrap">${esc(c.time)}</td>
         <td style="padding:5px 10px;border-bottom:1px solid #eee;white-space:nowrap">${c.flags.length ? esc(c.flags.length) + ' ⚠' : ''}${c.photos ? ' ' + esc(c.photos) + ' 📷' : ''}</td>
       </tr>`).join('')
-    : `<tr><td colspan="5" style="padding:10px;color:#6c757d">Ingen kontroll inskickad.</td></tr>`;
+    : `<tr><td colspan="5" style="padding:10px;color:#6c757d">No check submitted.</td></tr>`;
 
   const assignedRows = (day.assigned || []).length
     ? day.assigned.map(a => `<tr>
@@ -181,7 +189,7 @@ function renderHtml(day, baseUrl) {
         <td style="padding:5px 10px;border-bottom:1px solid #eee;white-space:nowrap">${a.done
           ? `<span style="color:#256b38">✓ ${esc(a.time)}</span>` +
             (a.checkedPlate && a.checkedPlate !== a.plate ? ` <span style="color:#6c757d">(${esc(a.checkedPlate)})</span>` : '')
-          : '<span style="color:#a33">ingen kontroll</span>'}</td>
+          : '<span style="color:#a33">no check</span>'}</td>
       </tr>`).join('')
     : '';
 
@@ -193,52 +201,52 @@ function renderHtml(day, baseUrl) {
       </tr>`).join('');
 
   const changeBlock = (day.changes || []).length ? `
-  <h2 style="font-size:16px;margin:22px 0 8px">Bilbyten
+  <h2 style="font-size:16px;margin:22px 0 8px">Vehicle changes
     <span style="font-weight:400;color:#6c757d;font-size:13px">
-      – ${esc((day.changes || []).length)} kontroll(er) gjordes av någon annan än den tilldelade föraren</span></h2>
+      – ${esc((day.changes || []).length)} check(s) were done by someone other than the assigned driver</span></h2>
   <table style="width:100%;border-collapse:collapse;font-size:14px;background:#fff;border:1px solid #e6e6e6">
     ${changeRows}
   </table>` : '';
 
   const assignedBlock = (day.assigned || []).length ? `
-  <h2 style="font-size:16px;margin:22px 0 8px">Dagens tilldelning
+  <h2 style="font-size:16px;margin:22px 0 8px">Today's assignments
     <span style="font-weight:400;color:#6c757d;font-size:13px">
-      – ${esc(day.counts.assignedDone)} av ${esc(day.counts.assigned)} har gjort sin kontroll</span></h2>
+      – ${esc(day.counts.assignedDone)} of ${esc(day.counts.assigned)} have done their check</span></h2>
   <table style="width:100%;border-collapse:collapse;font-size:14px;background:#fff;border:1px solid #e6e6e6">
     ${assignedRows}
   </table>` : '';
 
-  return `<!DOCTYPE html><html lang="sv"><body style="margin:0;padding:0;background:#f4f5f7">
+  return `<!DOCTYPE html><html lang="en"><body style="margin:0;padding:0;background:#f4f5f7">
 <div style="max-width:680px;margin:0 auto;padding:20px;font-family:Helvetica,Arial,sans-serif;color:#212529">
-  <p style="margin:0 0 4px;font-size:13px;color:#6c757d">Fleet 180 · säkerhetskontroll</p>
+  <p style="margin:0 0 4px;font-size:13px;color:#6c757d">Fleet 180 · safety check</p>
   <h1 style="margin:0 0 14px;font-size:22px;font-weight:600">${esc(day.date)}</h1>
 
   <p style="margin:0 0 18px;font-size:15px;line-height:1.6">
-    <strong>${esc(day.counts.checks)}</strong> kontroller från
-    <strong>${esc(day.counts.checked)}</strong> av ${esc(day.counts.vehicles)} fordon.
+    <strong>${esc(day.counts.checks)}</strong> ${day.counts.checks === 1 ? 'check' : 'checks'} from
+    <strong>${esc(day.counts.checked)}</strong> of ${esc(day.counts.vehicles)} vehicles.
     ${day.counts.issues
-      ? `<strong style="color:#a33">${esc(day.counts.issues)} punkter att åtgärda.</strong>`
-      : 'Inget rapporterat att åtgärda.'}
-    ${day.counts.missing ? `<br>Utan kontroll: <strong>${esc(day.missing.join(', '))}</strong>.` : ''}
-    ${day.doubled.length ? `<br>Flera kontroller samma dag: ${esc(day.doubled.join(', '))}.` : ''}
+      ? `<strong style="color:#a33">${esc(day.counts.issues)} ${day.counts.issues === 1 ? 'item needs' : 'items need'} action.</strong>`
+      : 'Nothing reported that needs action.'}
+    ${day.counts.missing ? `<br>Without a check: <strong>${esc(day.missing.join(', '))}</strong>.` : ''}
+    ${day.doubled.length ? `<br>Several checks on the same day: ${esc(day.doubled.join(', '))}.` : ''}
   </p>
 
   ${assignedBlock}
   ${changeBlock}
 
-  <h2 style="font-size:16px;margin:22px 0 8px">Att åtgärda</h2>
+  <h2 style="font-size:16px;margin:22px 0 8px">Needs action</h2>
   <table style="width:100%;border-collapse:collapse;font-size:14px;background:#fff;border:1px solid #e6e6e6">
     ${issueRows}
   </table>
 
-  <h2 style="font-size:16px;margin:22px 0 8px">Inskickade kontroller</h2>
+  <h2 style="font-size:16px;margin:22px 0 8px">Submitted checks</h2>
   <table style="width:100%;border-collapse:collapse;font-size:14px;background:#fff;border:1px solid #e6e6e6">
     ${checkRows}
   </table>
 
   <p style="margin:22px 0 0;font-size:13px;color:#6c757d">
-    ${link('/admin', 'Öppna administrationen')} ·
-    ${link('/admin/export.csv?from=' + day.date + '&to=' + day.date, 'Dagens CSV')}
+    ${link('/admin', 'Open Fleet 180 admin')} ·
+    ${link('/admin/export.csv?from=' + day.date + '&to=' + day.date, "Today's CSV")}
   </p>
 </div></body></html>`;
 }
@@ -246,47 +254,47 @@ function renderHtml(day, baseUrl) {
 /** Plain-text alternative, for mail clients that prefer it. */
 function renderText(day) {
   const lines = [
-    `Fleet 180 – säkerhetskontroll ${day.date}`,
-    `${day.counts.checks} kontroller från ${day.counts.checked} av ${day.counts.vehicles} fordon.`,
+    `Fleet 180 – safety check ${day.date}`,
+    `${day.counts.checks} ${day.counts.checks === 1 ? 'check' : 'checks'} from ${day.counts.checked} of ${day.counts.vehicles} vehicles.`,
     ''
   ];
   if ((day.assigned || []).length) {
-    lines.push(`TILLDELNING (${day.counts.assignedDone}/${day.counts.assigned} inlämnade):`);
+    lines.push(`ASSIGNMENT (${day.counts.assignedDone}/${day.counts.assigned} submitted):`);
     for (const a of day.assigned) {
       lines.push(`  ${a.plate}  ${a.driver}  ${a.route || '—'}  ` +
-        (a.done ? `OK ${a.time}` : 'INGEN KONTROLL'));
+        (a.done ? `OK ${a.time}` : 'NO CHECK'));
     }
     lines.push('');
   }
   if ((day.changes || []).length) {
-    lines.push('BILBYTEN (annan förare än den tilldelade):');
+    lines.push('VEHICLE CHANGES (a driver other than the assigned one):');
     for (const c of day.changes) {
       lines.push(`  ${c.plate}  ${c.assignedDriver || '—'} -> ${c.driver || '—'}  ` +
-        `godkänt av ${c.approver || '—'}  ${c.time}`);
+        `approved by ${c.approver || '—'}  ${c.time}`);
     }
     lines.push('');
   }
-  lines.push('ATT ÅTGÄRDA:');
+  lines.push('NEEDS ACTION:');
   if (day.issues.length) {
     for (const i of day.issues) lines.push(`  ${i.plate}  ${i.question} -> ${i.answer}  (${i.driver} ${i.time})`);
-  } else lines.push('  inget rapporterat');
-  lines.push('', 'INSKICKADE:');
+  } else lines.push('  nothing reported');
+  lines.push('', 'SUBMITTED:');
   if (day.checks.length) {
     for (const c of day.checks) {
       lines.push(`  ${c.plate}  ${c.driver || '—'}  ${c.route || '—'}  ${c.time}` +
-        (c.flags.length ? `  (${c.flags.length} att åtgärda)` : ''));
+        (c.flags.length ? `  (${c.flags.length} ${c.flags.length === 1 ? 'needs' : 'need'} action)` : ''));
     }
-  } else lines.push('  ingen');
-  if (day.missing.length) lines.push('', `UTAN KONTROLL: ${day.missing.join(', ')}`);
+  } else lines.push('  none');
+  if (day.missing.length) lines.push('', `WITHOUT A CHECK: ${day.missing.join(', ')}`);
   return lines.join('\n');
 }
 
 function subject(day) {
-  const parts = [`Fleet 180 ${day.date}: ${day.counts.checks} kontroller` +
-    (day.counts.assigned ? ` (${day.counts.assignedDone}/${day.counts.assigned} tilldelade)` : '')];
-  if (day.counts.changes) parts.push(`${day.counts.changes} bilbyte${day.counts.changes === 1 ? '' : 'n'}`);
-  if (day.counts.issues) parts.push(`${day.counts.issues} att åtgärda`);
-  if (day.counts.missing) parts.push(`${day.counts.missing} utan kontroll`);
+  const parts = [`Fleet 180 ${day.date}: ${day.counts.checks} check${day.counts.checks === 1 ? '' : 's'}` +
+    (day.counts.assigned ? ` (${day.counts.assignedDone}/${day.counts.assigned} assigned)` : '')];
+  if (day.counts.changes) parts.push(`${day.counts.changes} vehicle change${day.counts.changes === 1 ? '' : 's'}`);
+  if (day.counts.issues) parts.push(`${day.counts.issues} need${day.counts.issues === 1 ? 's' : ''} action`);
+  if (day.counts.missing) parts.push(`${day.counts.missing} without a check`);
   return parts.join(', ');
 }
 

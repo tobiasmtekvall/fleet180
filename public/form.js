@@ -181,7 +181,11 @@
      again instead of meeting an error they cannot act on. */
   function raiseChange(assigned) {
     if (!changeBox || !assigned) return;
-    changeBox.dataset.assigned = (assigned.drivers || [assigned.driver || '']).join('|');
+    /* `drivers` and ONLY `drivers`: this attribute is what the picked name is
+       compared against, and `assigned.driver` is the masked sentence version
+       ("Simon B****"), which can never equal what the dropdown posts. An empty
+       list leaves the box hidden, which is the same state the page was in. */
+    changeBox.dataset.assigned = (assigned.drivers || []).join('|');
     var q = document.getElementById('changeQ');
     var key = assigned.route ? 'changeQuestionRoute' : 'changeQuestion';
     var vars = { assigned: assigned.driver || '', plate: assigned.plate || '', route: assigned.route || '' };

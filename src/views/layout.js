@@ -50,7 +50,7 @@ function navbar(links) {
 </div>`;
 }
 
-function page({ title, body, links, bodyClass = '', head = '', scripts = '', lang = 'sv' }) {
+function page({ title, body, links, bodyClass = '', head = '', scripts = '', lang = 'sv', admin = false }) {
   const meta = LANG_META[lang] || LANG_META.sv;
   return `<!DOCTYPE html>
 <html lang="${meta.htmlLang}" dir="${meta.dir}">
@@ -68,7 +68,7 @@ ${navbar(links)}
 <div class="wrap">
 ${body}
 </div>
-<footer>© ${new Date().getFullYear()} - Fleet 180 · Säkerhetskontroll</footer>
+<footer>© ${new Date().getFullYear()} - Fleet 180 · ${admin ? 'Safety check' : 'Säkerhetskontroll'}</footer>
 ${scripts}
 </body>
 </html>`;
