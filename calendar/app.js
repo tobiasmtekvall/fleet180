@@ -569,7 +569,7 @@ async function saveEditor(event) {
   event?.preventDefault();
   syncEditorIntoActive();
   const checklist = state.activeChecklist;
-  checklist.title ||= `${scopeName(checklist.scope)} Substitute Checklist`;
+  checklist.title ||= defaultTitle(checklist.scope);
   checklist.revision ||= new Date().toISOString().slice(0, 10);
   checklist.primaryRole ||= "SUBSTITUTE'S DUTIES IN RED";
   checklist.secondaryRole ||= 'SUPPORT DUTIES IN BLACK';
@@ -660,7 +660,7 @@ function createTemplate(scope, key) {
     id: `${scope}:${key}`,
     scope,
     key,
-    title: `Approved ${scopeName(scope)} Substitute Checklist`,
+    title: defaultTitle(scope),
     revision: new Date().toISOString().slice(0, 10),
     mode: 'DO-CONFIRM',
     primaryRole: "SUBSTITUTE'S DUTIES IN RED",
@@ -803,6 +803,12 @@ function dateKey(date) { return `${date.getFullYear()}-${String(date.getMonth() 
 function monthKey(year, month) { return `${year}-${String(month + 1).padStart(2, '0')}`; }
 function mondayIndex(date) { return (date.getDay() + 6) % 7; }
 function addDays(date, days) { const result = new Date(date); result.setDate(result.getDate() + days); return result; }
+// The daily checklist was renamed 2026-09-16 (was "Approved Daily Substitute
+// Checklist"); weekly and monthly keep their old names.
+function defaultTitle(scope) {
+  return scope === 'day' ? 'Fleet/Machine/Home Checklist' : `Approved ${scopeName(scope)} Substitute Checklist`;
+}
+
 function scopeName(scope) { return ({ day: 'Daily', week: 'Weekly', month: 'Monthly' })[scope] || scope; }
 function isoWeek(date) {
   const target = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));

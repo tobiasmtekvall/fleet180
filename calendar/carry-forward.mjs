@@ -214,7 +214,7 @@ function createDayFrom(source, targetKey) {
     id: `day:${targetKey}`,
     scope: 'day',
     key: targetKey,
-    title: source.title || 'Approved Daily Substitute Checklist',
+    title: source.title || 'Fleet/Machine/Home Checklist',
     revision: targetKey,
     mode: source.mode || 'DO-CONFIRM',
     primaryRole: source.primaryRole || "SUBSTITUTE'S DUTIES IN RED",
