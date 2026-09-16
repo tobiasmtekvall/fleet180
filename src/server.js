@@ -130,11 +130,56 @@ const TO_ADMIN = { href: '/admin', text: 'Back to Admin' };
  * actually asks for one, so a form without a driver dropdown never queries
  * the roster.
  */
-async function formSources(form) {
-  const needsDrivers = form.fields.some(f => f.kind === 'select' && f.source === 'drivers');
-  if (!needsDrivers) return {};
-  const drivers = await db.listDrivers();
-  return { drivers: drivers.map(d => d.name) };
+async function formSources(form, vehicle = null, today = null) {
+  const wants = name => form.fields.some(f => f.kind === 'select' && f.source === name);
+  const out = {};
+  if (wants('drivers')) {
+    const drivers = await db.listDrivers();
+    out.drivers = drivers.map(d => d.name);
+  }
+  if (wants('routes')) out.routes = await routeOptions(vehicle, today || summaryLib.dayKey());
+  return out;
+}
+
+/**
+ * The routes to offer on the scanned vehicle's form.
+ *
+ * Read from the assignments rather than typed into the form, because a fixed
+ * list cannot be right for both fleets: the box routes are JKP-EM-n and
+ * JKP-EM-n-RR, and the home routes are Budbee's numeric ids, which are
+ * different numbers every day. The seeded list was neither -- it said
+ * JK-EM-n -- so no route has ever pre-selected itself and a home driver could
+ * not pick their route at all.
+ *
+ * Ordered by how likely it is to be the right one: this van today, anything
+ * today, this van lately, anything lately. The window is deliberately wider
+ * than today so that a page opened at 05:40, before the assigner has run, is
+ * not an empty required dropdown -- and so that a form rendered before the
+ * morning push still validates after it, since the list a submit is checked
+ * against is built the same way and only grows during the day.
+ */
+const ROUTE_WINDOW_DAYS = 14;
+
+function naturalCompare(a, b) {
+  return String(a).localeCompare(String(b), 'sv', { numeric: true, sensitivity: 'base' });
+}
+
+async function routeOptions(vehicle, today) {
+  const plate = vehicle && vehicle.plate ? vehicle.plate : '';
+  const from = assignmentLib.shiftDay(today, -(ROUTE_WINDOW_DAYS - 1));
+  const rows = await db.routeChoices(plate, from, today);
+
+  const rank = r => (r.mine && r.date === today ? 0 : r.date === today ? 1 : r.mine ? 2 : 3);
+  const best = new Map();
+  for (const r of rows) {
+    const route = String(r.route || '').trim();
+    if (!route) continue;
+    const k = rank(r);
+    if (!best.has(route) || k < best.get(route)) best.set(route, k);
+  }
+  return [...best.entries()]
+    .sort((a, b) => a[1] - b[1] || naturalCompare(a[0], b[0]))
+    .map(([route]) => route);
 }
 
 /** Questions to fall back on when a submission predates the form editor. */
@@ -310,7 +355,7 @@ app.get('/v/:plate', async (req, res, next) => {
     const today = summaryLib.dayKey();
     const weekFrom = assignmentLib.shiftDay(today, -6);
     const [latest, sources, todayRows, history, meter, board] = await Promise.all([
-      db.latestPerVehicle(), formSources(form),
+      db.latestPerVehicle(), formSources(form, vehicle, today),
       db.assignmentsForPlate(vehicle.plate, today),
       db.plateHistory(vehicle.plate, weekFrom, today),
       db.lastOdometer(vehicle.plate),
@@ -361,7 +406,10 @@ app.post('/v/:plate', upload, async (req, res, next) => {
 
     const lang = i18n.langOf(req.body.__lang);
     expandForm(form, vehicle);
-    const sources = await formSources(form);
+    // Same vehicle, same day, same lists as the page was drawn with: the two
+    // sides have to agree about what is offerable, or a driver is refused an
+    // answer the page just gave them.
+    const sources = await formSources(form, vehicle, summaryLib.dayKey());
 
     // Only questions this form defines are read; anything else is dropped.
     const answers = {};

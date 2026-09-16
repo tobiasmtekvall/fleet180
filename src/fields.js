@@ -19,7 +19,8 @@ const KINDS = [
 /** Where a dropdown's options come from. */
 const SOURCES = [
   { value: '',        label: 'Own options' },
-  { value: 'drivers', label: 'The driver list (synced from Route Suite)' }
+  { value: 'drivers', label: 'The driver list (synced from Route Suite)' },
+  { value: 'routes',  label: "Today's routes (from the assignment)" }
 ];
 
 const KIND_VALUES = KINDS.map(k => k.value);
@@ -197,10 +198,22 @@ function isAlerting(field, value) {
   return !!v && on.includes(v);
 }
 
-/** Options a dropdown offers: its own list, or a live source. */
+/**
+ * Options a dropdown offers: a live source, or its own list.
+ *
+ * A live source that comes back empty falls back to the question's own
+ * options rather than leaving the driver with nothing to pick. That matters
+ * for the route list: it is built from the assignments, and the morning the
+ * assigner has not run yet it would otherwise be empty on a required
+ * question, which is a form nobody can submit.
+ */
 function optionsFor(field, sources) {
-  if (field.source === 'drivers') return (sources && sources.drivers) || [];
-  return Array.isArray(field.options) ? field.options : [];
+  const own = Array.isArray(field.options) ? field.options : [];
+  if (field.source) {
+    const live = sources && sources[field.source];
+    return (Array.isArray(live) && live.length) ? live : own;
+  }
+  return own;
 }
 
 module.exports = {

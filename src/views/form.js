@@ -121,7 +121,10 @@ function renderField(f, lang, sources, ctx = {}) {
       .join('\n            ');
     const emptyNote = opts.length ? '' :
       `<div class="err show">Listan är tom – ${f.source === 'drivers'
-        ? 'inga förare har synkats ännu.' : 'lägg till alternativ i formulärredigeraren.'}</div>`;
+        ? 'inga förare har synkats ännu.'
+        : f.source === 'routes'
+          ? 'inga rutter är tilldelade ännu.'
+          : 'lägg till alternativ i formulärredigeraren.'}</div>`;
     return `        <div class="field" data-kind="select" data-name="${esc(f.name)}" data-role="${esc(f.role || '')}">
           <label for="${esc(f.name)}" ${labelAttrs}>${show(labels, lang)}${star}</label>
           <select class="${cls}" id="${esc(f.name)}" name="${esc(f.name)}"${f.required ? ' required' : ''}>

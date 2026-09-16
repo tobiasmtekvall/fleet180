@@ -865,6 +865,41 @@ async function addDamageRole(client) {
   return { marked };
 }
 
+/**
+ * Point the route question at the live list.
+ *
+ * The seeded dropdown said JK-EM-1…20. The assigner produces JKP-EM-n and
+ * JKP-EM-n-RR for the box fleet and Budbee's numeric ids for the home fleet,
+ * so the list matched nothing in either: the route never pre-selected itself
+ * from the assignment, and a home driver could not pick their route at all,
+ * because a dropdown refuses a value that is not one of its own options.
+ *
+ * Timid like the rest: only the question that still carries the route role and
+ * has no source of its own. The old list is replaced at the same time, since
+ * it is the fallback for a day with no assignment and a wrong fallback is
+ * worse than a short one.
+ */
+const ROUTE_SOURCE_KEY = 'seed-2026-09-16-route-source';
+
+async function addRouteSource(client) {
+  const done = await client.query('SELECT 1 FROM jobs WHERE name = $1', [ROUTE_SOURCE_KEY]);
+  if (done.rowCount) return null;
+
+  const route = seed.DEFAULT_FIELDS.find(f => f.role === 'route');
+  const r = await client.query(
+    `UPDATE form_fields
+        SET source = 'routes', options = $1::jsonb
+      WHERE role = 'route' AND kind = 'select' AND source = ''`,
+    [JSON.stringify(route ? route.options || [] : [])]);
+
+  await client.query(
+    `INSERT INTO jobs (name, last_run, note) VALUES ($1, now(), $2)
+     ON CONFLICT (name) DO NOTHING`,
+    [ROUTE_SOURCE_KEY, `${r.rowCount} ruttfrågor kopplade till tilldelningen`]);
+
+  return { routes: r.rowCount };
+}
+
 async function init() {
   pool = await connectWithRetry();
   await pool.query(SCHEMA);
@@ -878,7 +913,11 @@ async function init() {
     const lists = await addQuestionLists(client);
     const clean = await addCleanQuestion(client);
     const damage = await addDamageRole(client);
+    const routes = await addRouteSource(client);
     await client.query('COMMIT');
+    if (routes && routes.routes) {
+      console.log(`[db] ${routes.routes} ruttfrågor hämtar nu listan från tilldelningen`);
+    }
     if (damage && damage.marked) {
       console.log(`[db] ${damage.marked} skadefrågor märkta för händelseloggen`);
     }
@@ -1220,6 +1259,31 @@ async function deleteIncidentFile(id) {
   const r = await pool.query(
     'DELETE FROM incident_files WHERE id = $1 RETURNING incident_id, filename', [id]);
   return r.rows[0] || null;
+}
+
+/**
+ * The routes the assigner has actually handed out, for the route dropdown.
+ *
+ * The form used to offer a fixed list typed into the seed, which was wrong in
+ * both fleets at once: the box routes are JKP-EM-n(-RR) and the list said
+ * JK-EM-n, and the home routes are Budbee's numeric ids, which change every
+ * day and can never be a fixed list at all. So the list is read from the
+ * assignments instead.
+ *
+ * `mine` marks the rows for this vehicle, and the date comes back as text so
+ * the caller can rank "this van today" above "anything today" without a
+ * timezone getting involved.
+ */
+async function routeChoices(plate, fromDate, toDate) {
+  const r = await pool.query(
+    `SELECT DISTINCT route,
+            to_char(date, 'YYYY-MM-DD') AS date,
+            (plate = $1) AS mine
+       FROM assignments
+      WHERE date BETWEEN $2::date AND $3::date
+        AND route <> ''`,
+    [plate || '', fromDate, toDate]);
+  return r.rows;
 }
 
 /** Which submissions already have an incident, so the list above the table
@@ -1777,7 +1841,7 @@ module.exports = {
   saveSubmission, listSubmissions, getSubmission, getPhoto, latestPerVehicle,
   listDrivers, replaceDrivers, claimJob, jobState, submissionsBetween, photoIdsFor,
   replaceAssignments, assignmentsBetween, assignmentRange,
-  assignmentsForPlate, plateHistory, lastOdometer, deleteSubmission,
+  assignmentsForPlate, plateHistory, lastOdometer, deleteSubmission, routeChoices,
   getSetting, setSetting, getStatsEpoch, setStatsEpoch, countsBefore,
   listIncidents, getIncident, createIncident, updateIncident, deleteIncident, incidentCounts, expenseSections,
   signOffIncident, addIncidentFile, getIncidentFile, deleteIncidentFile,

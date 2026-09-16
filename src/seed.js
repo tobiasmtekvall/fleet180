@@ -301,8 +301,19 @@ const TAKEN = {
        ar: 'ماذا أخذت؟', hi: 'आपने क्या लिया?' }
 };
 
-/** Din rutt: JK-EM-1 … JK-EM-20. */
-const ROUTES = Array.from({ length: 20 }, (_, i) => `JK-EM-${i + 1}`);
+/**
+ * The route question's fallback list.
+ *
+ * The real list comes from the assignments (source: 'routes'); this is only
+ * what a brand new database offers before the assigner has ever run. It says
+ * JKP-EM-n and JKP-EM-n-RR because that is what the assigner actually
+ * produces -- the list here used to say JK-EM-n, which matched nothing, so no
+ * route ever pre-selected itself and every driver picked a route they had not
+ * driven. The home fleet's routes are Budbee's numeric ids, different every
+ * day; they cannot be listed here at all and only the live source has them.
+ */
+const ROUTES = Array.from({ length: 16 }, (_, i) => `JKP-EM-${i + 1}`)
+  .flatMap(r => [r, `${r}-RR`]);
 
 /** AdBlue: 100 % down to 30 % in steps of five. */
 const ADBLUE = Array.from({ length: 15 }, (_, i) => `${100 - i * 5}%`);
@@ -329,7 +340,11 @@ const DEFAULT_FIELDS = [
     label: 'Namn och efternamn:',
     i18n: tr(S1, 'First and last name:', 'الاسم واسم العائلة:', 'नाम और उपनाम:') },
 
+  /* The live list of routes the assigner has handed out -- both fleets, the
+     box ones and the home fleet's numeric Budbee ids. ROUTES stays as the
+     fallback for a database that has never seen an assignment. */
   { name: 'f1', kind: 'select', section: S1, required: true, role: 'route',
+    source: 'routes',
     options: ROUTES,
     label: 'Din rutt:',
     i18n: tr(S1, 'Your route:', 'مسارك:', 'आपका रूट:') },
