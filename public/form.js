@@ -187,7 +187,7 @@
        list leaves the box hidden, which is the same state the page was in. */
     changeBox.dataset.assigned = (assigned.drivers || []).join('|');
     var q = document.getElementById('changeQ');
-    var key = assigned.route ? 'changeQuestionRoute' : 'changeQuestion';
+    var key = (assigned.route ? 'changeQuestionRoute' : 'changeQuestion') + (assigned.tomorrow ? 'Tomorrow' : '');
     var vars = { assigned: assigned.driver || '', plate: assigned.plate || '', route: assigned.route || '' };
     for (var i = 0; i < LANGS.length; i++) {
       var code = LANGS[i].code;

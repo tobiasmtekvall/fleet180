@@ -312,7 +312,8 @@ function changeBox(f, lang, ctx) {
   const assigned = one ? maskName(one.driver) : list.map(a => maskName(a.driver)).join(', ');
   const route = one ? (one.route || '') : '';
   const vars = { assigned, plate: ctx.plate, route };
-  const key = route ? 'changeQuestionRoute' : 'changeQuestion';
+  const key = (route ? 'changeQuestionRoute' : 'changeQuestion') +
+    (ctx.assignment && ctx.assignment.tomorrow ? 'Tomorrow' : '');
   const yes = {}, no = {};
   for (const c of i18n.CODES) { yes[c] = i18n.t(c, 'yes'); no[c] = i18n.t(c, 'no'); }
   const question = list.length
@@ -378,15 +379,18 @@ function assignedBanner(lang, ctx) {
   const list = (ctx.assignment && ctx.assignment.list) || [];
   if (!list.length) return '';
   const one = ctx.assignment.one;
-  const lineKey = one && one.route ? 'assignedLineRoute' : 'assignedLine';
+  // Tomorrow's assignment, shown when today has none, says so in every line.
+  const when = ctx.assignment.tomorrow ? 'Tomorrow' : '';
+  const lineKey = (one && one.route ? 'assignedLineRoute' : 'assignedLine') + when;
   const vars = one ? { driver: maskName(one.driver), plate: ctx.plate, route: one.route || '' } : {};
   const line = one
     ? `<p class="assign-line" ${filledAttrs(lineKey, vars)}>${esc(filledText(lang, lineKey, vars))}</p>`
     : `<p class="assign-line">${esc(list.map(a => a.route
         ? `${who(a.driver)} (${a.route})` : who(a.driver)).join(' · '))}</p>`;
-  const hint = one ? 'assignedPrefilled' : 'assignedSeveral';
-  return `<div class="assign-box">
-    <span class="assign-tag" ${uiAttrs('assignedToday')}>${esc(i18n.t(lang, 'assignedToday'))}</span>
+  const hint = one ? 'assignedPrefilled' : 'assignedSeveral' + when;
+  const tag = when ? 'assignedTomorrow' : 'assignedToday';
+  return `<div class="assign-box${when ? ' assign-tomorrow' : ''}">
+    <span class="assign-tag" ${uiAttrs(tag)}>${esc(i18n.t(lang, tag))}</span>
     ${line}
     <p class="assign-hint" ${uiAttrs(hint)}>${esc(i18n.t(lang, hint))}</p>
   </div>`;

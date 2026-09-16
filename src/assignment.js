@@ -39,6 +39,23 @@ function todaysAssignment(rows) {
   return { list, one: list.length === 1 ? list[0] : null };
 }
 
+/**
+ * The assignment a scan should use: today's, and when today has none,
+ * tomorrow's.
+ *
+ * The assigner is run the evening before, and a van checked that evening is
+ * checked for the driver who takes it in the morning. Only when today is
+ * empty: a van that has a driver today keeps that driver until midnight.
+ * Never further ahead than tomorrow -- Friday's check is not Monday's.
+ * `tomorrow` tells the page to say "tomorrow" instead of "today".
+ */
+function currentAssignment(todayRows, tomorrowRows) {
+  const today = todaysAssignment(todayRows);
+  if (today.list.length) return { ...today, tomorrow: false };
+  const next = todaysAssignment(tomorrowRows);
+  return { ...next, tomorrow: next.list.length > 0 };
+}
+
 /** Is this vehicle's check being filed by somebody it was not given to? */
 function isDriverChange(assignment, chosenDriver) {
   const list = (assignment && assignment.list) || [];
@@ -112,4 +129,4 @@ function shiftDay(date, delta) {
   return dt.toISOString().slice(0, 10);
 }
 
-module.exports = { normName, sameName, todaysAssignment, isDriverChange, buildWeek, shiftDay };
+module.exports = { normName, sameName, todaysAssignment, currentAssignment, isDriverChange, buildWeek, shiftDay };

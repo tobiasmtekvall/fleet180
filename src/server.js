@@ -167,9 +167,14 @@ function naturalCompare(a, b) {
 async function routeOptions(vehicle, today) {
   const plate = vehicle && vehicle.plate ? vehicle.plate : '';
   const from = assignmentLib.shiftDay(today, -(ROUTE_WINDOW_DAYS - 1));
-  const rows = await db.routeChoices(plate, from, today);
+  // Up to and including tomorrow: a van checked the evening before is
+  // pre-filled from tomorrow's assignment, and its route has to be a value
+  // the list -- and the server's check of the posted answer -- contains.
+  const tomorrow = assignmentLib.shiftDay(today, 1);
+  const rows = await db.routeChoices(plate, from, tomorrow);
 
-  const rank = r => (r.mine && r.date === today ? 0 : r.date === today ? 1 : r.mine ? 2 : 3);
+  const rank = r => (r.mine && (r.date === today || r.date === tomorrow) ? 0
+    : r.date === today ? 1 : r.date === tomorrow ? 2 : r.mine ? 3 : 4);
   const best = new Map();
   for (const r of rows) {
     const route = String(r.route || '').trim();
@@ -354,9 +359,10 @@ app.get('/v/:plate', async (req, res, next) => {
     expandForm(form, vehicle);
     const today = summaryLib.dayKey();
     const weekFrom = assignmentLib.shiftDay(today, -6);
-    const [latest, sources, todayRows, history, meter, board] = await Promise.all([
+    const [latest, sources, todayRows, tomorrowRows, history, meter, board] = await Promise.all([
       db.latestPerVehicle(), formSources(form, vehicle, today),
       db.assignmentsForPlate(vehicle.plate, today),
+      db.assignmentsForPlate(vehicle.plate, assignmentLib.shiftDay(today, 1)),
       db.plateHistory(vehicle.plate, weekFrom, today),
       db.lastOdometer(vehicle.plate),
       boardNow()
@@ -376,7 +382,8 @@ app.get('/v/:plate', async (req, res, next) => {
         ? `${fmtDateTime(l.submitted_at)}${l.driver_name ? ' – ' + mask.maskName(l.driver_name) : ''}`
         : null,
       // Who has this van today (pre-filled), and who has had it this week.
-      assignment: assignmentLib.todaysAssignment(todayRows),
+      // Tomorrow's when today has none: the assigner runs the evening before.
+      assignment: assignmentLib.currentAssignment(todayRows, tomorrowRows),
       week: assignmentLib.buildWeek({
         assignments: history.assignments, checks: history.checks, today
       }),
@@ -441,8 +448,13 @@ app.post('/v/:plate', upload, async (req, res, next) => {
        own phone: a stale tab opened before today's assignment arrived, or a
        posted request, must not be able to slip past it. */
     const today = summaryLib.dayKey();
-    const assignment = assignmentLib.todaysAssignment(
-      await db.assignmentsForPlate(vehicle.plate, today));
+    // Must pick the same assignment the page did, or a check filed in the
+    // evening would be judged against a different day than it was shown.
+    const [todayRows, tomorrowRows] = await Promise.all([
+      db.assignmentsForPlate(vehicle.plate, today),
+      db.assignmentsForPlate(vehicle.plate, assignmentLib.shiftDay(today, 1))
+    ]);
+    const assignment = assignmentLib.currentAssignment(todayRows, tomorrowRows);
     const chosenDriver = String(roles.driver || '').trim();
     const changed = assignmentLib.isDriverChange(assignment, chosenDriver);
     const confirmed = String(req.body.__driver_change || '').trim().toLowerCase();
@@ -467,6 +479,7 @@ app.post('/v/:plate', upload, async (req, res, next) => {
               driver: assignment.list.map(a => mask.maskName(a.driver)).join(', '),
               drivers: assignment.list.map(a => a.driver),
               route: assignment.one ? (assignment.one.route || '') : '',
+              tomorrow: !!assignment.tomorrow,
               plate: vehicle.plate
             }
           });
