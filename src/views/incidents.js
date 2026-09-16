@@ -44,7 +44,15 @@ const LINKS = [
 ];
 
 const EXPENSE_LABEL = { damage: 'Damage', parts: 'Spare parts' };
-const HANDLER_LABEL = { okq8: 'OKQ8', inhouse: 'In-house' };
+// Who did the work on a van. 'inhouse' was renamed 'own' on 2026-09-16.
+const HANDLER_LABEL = { okq8: 'OKQ8', own: 'Own' };
+// The three sections of Expenses. Only Vehicles has plates and workshops.
+const SCOPE_LABEL = { vehicle: 'Vehicles', tool: 'Tools', misc: 'Misc' };
+const SCOPES = Object.keys(SCOPE_LABEL);
+const DESC_HINT = {
+  damage: 'What happened?', parts: 'Which part?',
+  tool: 'Which tool? e.g. torque wrench, repaired', misc: 'What was it for?'
+};
 
 /** 12400 -> "12 400 kr". Space as the thousands separator; the money is SEK. */
 function kr(n) {
@@ -150,75 +158,148 @@ function categorySelect(current) {
   }</select>`;
 }
 
-/* Blank until somebody picks. Deliberately not filled from the van's owner:
-   a van rented from OKQ8 can still be repaired in-house, and a guessed value
-   next to an invoice is worse than an empty one. */
-function handlerSelect(current) {
+/* OKQ8 or Own. Blank until somebody picks, and deliberately not filled from
+   the van's owner: a guessed value next to an invoice is worse than none. */
+function handlerSelect(current, id = '') {
   const opts = [['', '—'], ...Object.entries(HANDLER_LABEL)];
-  return `<select class="form-control inc-by" name="handledBy" title="Who did the work">${
+  return `<select class="form-control inc-by" name="handledBy"${id ? ` id="${id}"` : ''} title="OKQ8 or Own">${
     opts.map(([v, l]) =>
       `<option value="${v}"${v === (current || '') ? ' selected' : ''}>${esc(l)}</option>`).join('')
   }</select>`;
 }
 
 /** The two workshop dates, switched off for spare parts. */
-function shopDates(inc) {
+function shopDates(inc, ids = ['', '']) {
   const parts = inc.category === 'parts';
   const off = parts ? ' disabled' : '';
-  return `<input class="form-control inc-date inc-shop" type="date" name="shopIn" value="${esc(parts ? '' : inc.shop_in)}"
-               title="${parts ? 'Spare parts have no workshop dates' : 'In at the workshop'}"${off}>
-        <input class="form-control inc-date inc-shop" type="date" name="shopOut" value="${esc(parts ? '' : inc.shop_out)}"
-               title="${parts ? 'Spare parts have no workshop dates' : 'Out of the workshop'}"${off}>`;
+  const id = i => (ids[i] ? ` id="${ids[i]}"` : '');
+  return [
+    `<input class="form-control inc-date inc-shop" type="date" name="shopIn"${id(0)} value="${esc(parts ? '' : inc.shop_in)}"
+               title="${parts ? 'Spare parts have no workshop dates' : 'In at the workshop'}"${off}>`,
+    `<input class="form-control inc-date inc-shop" type="date" name="shopOut"${id(1)} value="${esc(parts ? '' : inc.shop_out)}"
+               title="${parts ? 'Spare parts have no workshop dates' : 'Out of the workshop'}"${off}>`
+  ];
 }
 
-function row(inc, plates, today, ret) {
-  const parts = inc.category === 'parts';
-  const d = parts ? { text: '', open: false } : days(inc.shop_in, inc.shop_out, today);
+function filesCell(inc) {
   const photos = inc.files.filter(f => f.kind !== 'invoice');
   const invoices = inc.files.filter(f => f.kind === 'invoice');
-
-  return `<div class="inc-line${inc.sm_ok ? ' inc-done' : ''}${parts ? ' inc-parts' : ''}">
-      <form class="inc-row" method="post" enctype="multipart/form-data"
-            action="/admin/incidents/${esc(inc.id)}">
-        <input type="hidden" name="ret" value="${esc(ret)}">
-        ${plateSelect('plate', plates, inc.plate)}
-        ${categorySelect(inc.category)}
-        <input class="form-control inc-date" type="date" name="occurredOn" value="${esc(inc.occurred_on)}" required>
-        <input class="form-control inc-desc" type="text" name="description" maxlength="600"
-               value="${esc(inc.description)}" placeholder="${parts ? 'Which part?' : 'What happened?'}" title="${esc(inc.description)}">
-        <input class="form-control inc-driver" type="text" name="driverName" maxlength="120"
-               value="${esc(inc.driver_name)}" placeholder="Driver" title="${esc(inc.driver_name)}">
-        ${shopDates(inc)}
-        <span class="inc-days${d.open ? ' open' : ''}" title="${parts ? 'Not applicable to spare parts' : d.open ? 'Still at the workshop' : 'Days off the road'}">${esc(d.text || '–')}</span>
-        ${handlerSelect(inc.handled_by)}
-        <input class="form-control inc-cost" type="number" name="cost" step="0.01" min="0"
-               value="${esc(numValue(inc.cost_sek))}" placeholder="kr" title="Cost in SEK">
-        <span class="inc-files">
+  return `<span class="inc-files">
           ${photos.map(fileChip).join('')}${invoices.map(fileChip).join('')}
           <label class="addfile" title="Add photo – choose a file, then press Save">${ICON.camera}<input type="file" name="photos" accept="image/*" multiple hidden></label>
           <label class="addfile" title="Add invoice – choose a file, then press Save">${ICON.invoice}<input type="file" name="invoices" accept="application/pdf,image/*" multiple hidden></label>
-        </span>
-        <span class="inc-sm">${smCell(inc)}</span>
-        <span class="inc-actions">
+        </span>`;
+}
+
+function actionsCell(inc) {
+  return `<span class="inc-actions">
           ${inc.submission_id ? `<a class="btn btn-ghost btn-sm" title="The check the damage was reported in"
              href="/admin/s/${esc(inc.submission_id)}" target="_blank" rel="noopener">Check</a>` : ''}
           <button class="btn btn-primary btn-sm" type="submit">Save</button>
           <button class="btn btn-danger btn-sm" type="submit"
                   formaction="/admin/incidents/${esc(inc.id)}/delete">Delete</button>
-        </span>
+        </span>`;
+}
+
+/**
+ * The fold-out under a line: what does not fit on it. It posts with the
+ * line's own Save. The summary says what is filled in, so a line with an
+ * invoice number does not look like one without.
+ */
+function moreCell(inc, withSupplier) {
+  const filled = [];
+  if (withSupplier && inc.supplier) filled.push(inc.supplier);
+  if (withSupplier && inc.invoice_no) filled.push('inv. ' + inc.invoice_no);
+  if (inc.note) filled.push('note');
+  const label = withSupplier ? 'Supplier, invoice no. and note' : 'Note';
+  return `<details class="inc-more">
+        <summary>${esc(label)}${filled.length ? ` <span class="muted">· ${esc(filled.join(' · '))}</span>` : ''}</summary>
+        <div class="inc-more-body">
+          ${withSupplier ? `<label class="nf-field"><span>Supplier / workshop</span>
+            <input class="form-control" type="text" name="supplier" maxlength="160" value="${esc(inc.supplier)}"></label>
+          <label class="nf-field"><span>Invoice no.</span>
+            <input class="form-control" type="text" name="invoiceNo" maxlength="80" value="${esc(inc.invoice_no)}"></label>` : ''}
+          <label class="nf-field nf-grow"><span>Note</span>
+            <textarea class="form-control" name="note" rows="2" maxlength="2000">${esc(inc.note)}</textarea></label>
+        </div>
+      </details>`;
+}
+
+function vehicleRow(inc, plates, today, ret) {
+  const parts = inc.category === 'parts';
+  const d = parts ? { text: '', open: false } : days(inc.shop_in, inc.shop_out, today);
+  const [shopIn, shopOut] = shopDates(inc);
+  return `<div class="inc-line${inc.sm_ok ? ' inc-done' : ''}${parts ? ' inc-parts' : ''}">
+      <form class="inc-form" method="post" enctype="multipart/form-data"
+            action="/admin/incidents/${esc(inc.id)}">
+        <input type="hidden" name="ret" value="${esc(ret)}">
+        <div class="inc-row">
+        ${plateSelect('plate', plates, inc.plate)}
+        ${categorySelect(inc.category)}
+        <input class="form-control inc-date" type="date" name="occurredOn" value="${esc(inc.occurred_on)}" required>
+        <input class="form-control inc-desc" type="text" name="description" maxlength="600"
+               value="${esc(inc.description)}" placeholder="${DESC_HINT[parts ? 'parts' : 'damage']}" title="${esc(inc.description)}">
+        <input class="form-control inc-driver" type="text" name="driverName" maxlength="120"
+               value="${esc(inc.driver_name)}" placeholder="Driver" title="${esc(inc.driver_name)}">
+        ${shopIn}
+        ${shopOut}
+        <span class="inc-days${d.open ? ' open' : ''}" title="${parts ? 'Not applicable to spare parts' : d.open ? 'Still at the workshop' : 'Days off the road'}">${esc(d.text || '–')}</span>
+        ${handlerSelect(inc.handled_by)}
+        <input class="form-control inc-cost" type="number" name="cost" step="0.01" min="0"
+               value="${esc(numValue(inc.cost_sek))}" placeholder="kr" title="Cost in SEK">
+        ${filesCell(inc)}
+        <span class="inc-sm">${smCell(inc)}</span>
+        ${actionsCell(inc)}
+        </div>
+        ${moreCell(inc, true)}
+      </form>
+  </div>`;
+}
+
+function otherRow(inc, scope, ret) {
+  return `<div class="inc-line${inc.sm_ok ? ' inc-done' : ''}">
+      <form class="inc-form" method="post" enctype="multipart/form-data"
+            action="/admin/incidents/${esc(inc.id)}">
+        <input type="hidden" name="ret" value="${esc(ret)}">
+        <div class="inc-row">
+        <input class="form-control inc-date" type="date" name="occurredOn" value="${esc(inc.occurred_on)}" required>
+        <input class="form-control inc-desc" type="text" name="description" maxlength="600" required
+               value="${esc(inc.description)}" placeholder="${DESC_HINT[scope]}" title="${esc(inc.description)}">
+        <input class="form-control inc-supplier" type="text" name="supplier" maxlength="160"
+               value="${esc(inc.supplier)}" placeholder="Supplier" title="${esc(inc.supplier)}">
+        <input class="form-control inc-inv" type="text" name="invoiceNo" maxlength="80"
+               value="${esc(inc.invoice_no)}" placeholder="Invoice no." title="${esc(inc.invoice_no)}">
+        <input class="form-control inc-cost" type="number" name="cost" step="0.01" min="0"
+               value="${esc(numValue(inc.cost_sek))}" placeholder="kr" title="Cost in SEK">
+        ${filesCell(inc)}
+        <span class="inc-sm">${smCell(inc)}</span>
+        ${actionsCell(inc)}
+        </div>
+        ${moreCell(inc, false)}
       </form>
   </div>`;
 }
 
 /**
- * The column headings.
+ * The column headings, one set per section.
  *
- * Built from the same widths as the line rather than as a table header, which
- * is what they were at first: a <thead> over a flex row lines up for about a
- * week, and then somebody widens the cost field and "Files" is sitting over
- * the SM check. Same classes, same order, one place to change.
+ * Built from the same widths as the line rather than as a table header: a
+ * <thead> over a flex row lines up for about a week. Same classes, same
+ * order, one place to change.
  */
-function head() {
+function head(scope) {
+  if (scope !== 'vehicle') {
+    return `<div class="inc-row inc-head">
+      <span class="inc-date">Date</span>
+      <span class="inc-desc">${scope === 'tool' ? 'Tool' : 'Expense'}</span>
+      <span class="inc-supplier">Supplier</span>
+      <span class="inc-inv">Invoice no.</span>
+      <span class="inc-cost">Cost</span>
+      <span class="inc-files">Files</span>
+      <span class="inc-sm">SM check</span>
+      <span class="inc-actions"></span>
+    </div>`;
+  }
   return `<div class="inc-row inc-head">
       <span class="inc-plate">Vehicle</span>
       <span class="inc-cat">Category</span>
@@ -228,7 +309,7 @@ function head() {
       <span class="inc-date">Workshop in</span>
       <span class="inc-date">Out</span>
       <span class="inc-days">Days</span>
-      <span class="inc-by">Handled by</span>
+      <span class="inc-by">OKQ8 / Own</span>
       <span class="inc-cost">Cost</span>
       <span class="inc-files">Files</span>
       <span class="inc-sm">SM check</span>
@@ -236,29 +317,56 @@ function head() {
     </div>`;
 }
 
-/** The form for a new entry, used on both tabs. */
-function newEntry(plates, today, ret) {
-  return `<div class="card">
-    <div class="card-header">New entry
-      <span class="step-tag">Damage or spare parts · lands on Expenses</span></div>
+const field = (label, control, cls = '') =>
+  `<label class="nf-field${cls ? ' ' + cls : ''}"><span>${label}</span>${control}</label>`;
+
+/**
+ * The form for a new entry: a proper card with a label on every field,
+ * rather than one cramped line. Vehicles ask for the van, the category, the
+ * driver, the workshop visit and OKQ8/Own; Tools and Misc do not.
+ */
+function newEntry(scope, plates, today, ret) {
+  const vehicle = scope === 'vehicle';
+  const u = scope;   // keeps ids unique if two forms ever share a page
+  const [shopIn, shopOut] = shopDates({ category: 'damage', shop_in: '', shop_out: '' },
+    [`nf-in-${u}`, `nf-out-${u}`]);
+  const title = vehicle ? 'New vehicle entry' : scope === 'tool' ? 'New tool expense' : 'New misc expense';
+  const tag = vehicle ? 'Damage or spare parts · fields marked * are required'
+    : scope === 'tool' ? 'A tool bought, repaired or replaced · fields marked * are required'
+    : 'Anything that is neither a vehicle nor a tool · fields marked * are required';
+
+  const vehicleFields = vehicle ? `
+          ${field('Vehicle *', plateSelect('plate', plates, ''))}
+          ${field('Category', categorySelect('damage'))}` : '';
+  const vehicleFields2 = vehicle ? `
+          ${field('Driver', `<input class="form-control" type="text" name="driverName" maxlength="120" placeholder="Who had the van">`)}
+          ${field('OKQ8 / Own', handlerSelect(''))}
+          ${field('In at the workshop', shopIn)}
+          ${field('Out of the workshop', shopOut)}` : '';
+
+  return `<div class="card nf-card">
+    <div class="card-header">${title}
+      <span class="step-tag">${tag}</span></div>
     <div class="card-body">
-      <form class="inc-row" method="post" action="/admin/incidents" enctype="multipart/form-data">
+      <form class="nf" method="post" action="/admin/incidents" enctype="multipart/form-data">
         <input type="hidden" name="ret" value="${esc(ret)}">
-        ${plateSelect('plate', plates, '')}
-        ${categorySelect('damage')}
-        <input class="form-control inc-date" type="date" name="occurredOn" value="${esc(today)}" required>
-        <input class="form-control inc-desc" type="text" name="description" maxlength="600"
-               placeholder="What happened?">
-        <input class="form-control inc-driver" type="text" name="driverName" maxlength="120"
-               placeholder="Driver">
-        ${shopDates({ category: 'damage', shop_in: '', shop_out: '' })}
-        ${handlerSelect('')}
-        <input class="form-control inc-cost" type="number" name="cost" step="0.01" min="0" placeholder="kr">
-        <span class="inc-files">
-          <label class="addfile" title="Photos">${ICON.camera}<input type="file" name="photos" accept="image/*" multiple hidden></label>
-          <label class="addfile" title="Invoices">${ICON.invoice}<input type="file" name="invoices" accept="application/pdf,image/*" multiple hidden></label>
-        </span>
-        <button class="btn btn-primary" type="submit">Add</button>
+        <input type="hidden" name="scope" value="${esc(scope)}">
+        <div class="nf-grid">${vehicleFields}
+          ${field('Date *', `<input class="form-control" type="date" name="occurredOn" value="${esc(today)}" required>`)}${vehicleFields2}
+          ${field('Supplier / workshop', `<input class="form-control" type="text" name="supplier" maxlength="160" placeholder="${vehicle ? 'e.g. the body shop' : 'e.g. the store'}">`)}
+          ${field('Invoice no.', `<input class="form-control" type="text" name="invoiceNo" maxlength="80">`)}
+          ${field('Cost (SEK)', `<input class="form-control" type="number" name="cost" step="0.01" min="0" placeholder="kr">`)}
+          ${field('Photos', `<input class="form-control nf-file" type="file" name="photos" accept="image/*" multiple>`)}
+          ${field('Invoices (PDF or image)', `<input class="form-control nf-file" type="file" name="invoices" accept="application/pdf,image/*" multiple>`)}
+          ${field(vehicle ? 'Description' : 'What was it? *',
+            `<textarea class="form-control nf-desc" name="description" rows="3" maxlength="600"
+                      placeholder="${DESC_HINT[vehicle ? 'damage' : scope]}"${vehicle ? '' : ' required'}></textarea>`, 'nf-half')}
+          ${field('Note', `<textarea class="form-control" name="note" rows="3" maxlength="2000"
+                      placeholder="Anything else worth keeping – who approved it, warranty, follow-up"></textarea>`, 'nf-half')}
+        </div>
+        <div class="actions" style="justify-content:flex-start;margin-top:14px">
+          <button class="btn btn-primary" type="submit">Add ${vehicle ? 'entry' : scope === 'tool' ? 'tool expense' : 'misc expense'}</button>
+        </div>
       </form>
     </div>
   </div>`;
@@ -325,7 +433,7 @@ const SCRIPT = `<script>
         el.title = parts ? 'Spare parts have no workshop dates'
           : el.name === 'shopIn' ? 'In at the workshop' : 'Out of the workshop';
       });
-      var desc = form.querySelector('.inc-desc');
+      var desc = form.querySelector('.inc-desc, .nf-desc');
       if (desc) desc.placeholder = parts ? 'Which part?' : 'What happened?';
     });
   });
@@ -347,10 +455,10 @@ ${message ? `<div class="ok-msg no-print">${esc(message)}</div>` : ''}
 
 ${pending(pendingChecks)}
 
-${newEntry(plates, today, '/admin/incidents')}
+${newEntry('vehicle', plates, today, '/admin/incidents')}
 
   <div class="card">
-    <div class="card-header">On Expenses
+    <div class="card-header">Vehicle expenses
       <span class="step-tag">${esc(counts.total)} ${counts.total === 1 ? 'entry' : 'entries'} ·
         ${esc(counts.waiting)} waiting for the SM check${counts.atShop ? ` · ${esc(counts.atShop)} at the workshop now` : ''}</span></div>
     <div class="card-body">
@@ -364,23 +472,28 @@ ${newEntry(plates, today, '/admin/incidents')}
   });
 }
 
-function expensesPage({ incidents, plates, filters, totals, today, message, nav }) {
+/** Vehicles · Tools · Misc, each with its count and total. */
+function sectionTabs(active, sections, filters) {
+  // The period and the SM filter follow you between sections; the vehicle
+  // filters do not, they mean nothing on Tools and Misc.
+  const keep = ['from', 'to', 'sm'].filter(k => filters[k])
+    .map(k => `&${k}=${encodeURIComponent(filters[k])}`).join('');
+  return `<div class="exp-tabs no-print">${SCOPES.map(s => {
+    const x = sections[s] || { n: 0, cost: 0, waiting: 0 };
+    return `<a href="/admin/expenses?scope=${s}${esc(keep)}"${s === active ? ' class="on"' : ''}>
+      <strong>${esc(SCOPE_LABEL[s])}</strong>
+      <span>${esc(x.n)} · ${esc(kr(x.cost) || '0 kr')}${x.waiting ? ` · <em>${esc(x.waiting)} to approve</em>` : ''}</span></a>`;
+  }).join('')}</div>`;
+}
+
+function expensesPage({ incidents, plates, filters, totals, sections = {}, today, message, nav }) {
+  const scope = filters.scope;
+  const vehicle = scope === 'vehicle';
   const ret = '/admin/expenses' + (filters.query || '');
-  const rows = incidents.map(i => row(i, plates, today, ret)).join('\n');
+  const rows = incidents.map(i => vehicle ? vehicleRow(i, plates, today, ret) : otherRow(i, scope, ret)).join('\n');
   const opt = (v, l, cur) => `<option value="${esc(v)}"${cur === v ? ' selected' : ''}>${esc(l)}</option>`;
 
-  const html = `  <div class="page-head">
-    <h1>Expenses</h1>
-    <div class="muted">${esc(incidents.length)} ${incidents.length === 1 ? 'entry' : 'entries'}</div>
-  </div>
-${nav}
-${message ? `<div class="ok-msg no-print">${esc(message)}</div>` : ''}
-
-  <p class="lede">What the vans cost, one line each: damage with its workshop visit, and spare
-     parts bought for them. Every line can be edited at any time – a case lives for weeks, and
-     the invoice comes last of all. New damage reports arrive on <a href="/admin/incidents">Incidents</a>.</p>
-
-  <form class="filters no-print" method="get" action="/admin/expenses">
+  const vehicleFilters = vehicle ? `
     <div class="f"><label for="plate">Vehicle</label>
       <select class="form-control" id="plate" name="plate">
         <option value="">All</option>
@@ -390,10 +503,38 @@ ${message ? `<div class="ok-msg no-print">${esc(message)}</div>` : ''}
       <select class="form-control" id="category" name="category">
         ${opt('', 'All', filters.category)}${Object.entries(EXPENSE_LABEL).map(([v, l]) => opt(v, l, filters.category)).join('')}
       </select></div>
-    <div class="f"><label for="by">Handled by</label>
+    <div class="f"><label for="by">OKQ8 / Own</label>
       <select class="form-control" id="by" name="by">
         ${opt('', 'All', filters.handledBy)}${Object.entries(HANDLER_LABEL).map(([v, l]) => opt(v, l, filters.handledBy)).join('')}${opt('none', 'Not set', filters.handledBy)}
-      </select></div>
+      </select></div>` : '';
+
+  const summary = vehicle
+    ? `${esc(totals.withCost)} with cost · ${esc(kr(totals.cost) || '0 kr')} total
+        (damage ${esc(kr(totals.damageCost) || '0 kr')} · spare parts ${esc(kr(totals.partsCost) || '0 kr')}) ·
+        ${esc(totals.waiting)} waiting for the SM check${totals.atShop ? ` · ${esc(totals.atShop)} at the workshop now` : ''}`
+    : `${esc(totals.withCost)} with cost · ${esc(kr(totals.cost) || '0 kr')} total ·
+        ${esc(totals.waiting)} waiting for the SM check`;
+
+  const lede = {
+    vehicle: `What the vans cost, one line each: damage with its workshop visit, and spare parts
+     bought for them. New damage reports arrive on <a href="/admin/incidents">Incidents</a>.`,
+    tool: "Tools bought, repaired or replaced – one line each, with the supplier, the invoice and the Site Manager's approval.",
+    misc: 'Everything else the site pays for that is neither a vehicle nor a tool.'
+  }[scope];
+
+  const html = `  <div class="page-head">
+    <h1>Expenses</h1>
+    <div class="muted">${esc(SCOPE_LABEL[scope])} · ${esc(incidents.length)} ${incidents.length === 1 ? 'entry' : 'entries'}</div>
+  </div>
+${nav}
+${message ? `<div class="ok-msg no-print">${esc(message)}</div>` : ''}
+${sectionTabs(scope, sections, filters)}
+
+  <p class="lede">${lede} Every line can be edited at any time – the invoice often comes last
+     of all. Click the small link under a line to add ${vehicle ? 'the supplier, invoice number or a note' : 'a note'}.</p>
+
+  <form class="filters no-print" method="get" action="/admin/expenses">
+    <input type="hidden" name="scope" value="${esc(scope)}">${vehicleFilters}
     <div class="f"><label for="from">From</label>
       <input class="form-control" type="date" id="from" name="from" value="${esc(filters.from)}"></div>
     <div class="f"><label for="to">To</label>
@@ -403,24 +544,23 @@ ${message ? `<div class="ok-msg no-print">${esc(message)}</div>` : ''}
         ${opt('', 'All', filters.sm)}${opt('no', 'Waiting for OK', filters.sm)}${opt('yes', 'Approved', filters.sm)}
       </select></div>
     <button class="btn btn-primary" type="submit">Show</button>
-    <a class="btn btn-ghost" href="/admin/expenses">Everything</a>
+    <a class="btn btn-ghost" href="/admin/expenses?scope=${esc(scope)}">Everything</a>
     <a class="btn btn-secondary" href="/admin/expenses.csv${esc(filters.query)}">Download CSV</a>
+    <a class="btn btn-ghost" href="/admin/expenses.csv?scope=all" title="Vehicles, tools and misc in one file">CSV, all sections</a>
   </form>
 
+${newEntry(scope, plates, today, ret)}
+
   <div class="card">
-    <div class="card-header">All expenses
-      <span class="step-tag">${esc(totals.withCost)} with cost · ${esc(kr(totals.cost))} total
-        (damage ${esc(kr(totals.damageCost) || '0 kr')} · spare parts ${esc(kr(totals.partsCost) || '0 kr')}) ·
-        ${esc(totals.waiting)} waiting for the SM check${totals.atShop ? ` · ${esc(totals.atShop)} at the workshop now` : ''}</span></div>
+    <div class="card-header">All ${({ vehicle: 'vehicle', tool: 'tool', misc: 'misc' })[scope]} expenses
+      <span class="step-tag">${summary}</span></div>
     <div class="inc-scroll">
-      <div class="inc-list">
-${head()}
-${rows || '<p class="muted" style="padding:20px">No entries match. Add one below – or create one from a reported damage on Incidents.</p>'}
+      <div class="inc-list${vehicle ? '' : ' inc-list-other'}">
+${head(scope)}
+${rows || `<p class="muted" style="padding:20px">No entries match. Add one above${vehicle ? ' – or create one from a reported damage on Incidents' : ''}.</p>`}
       </div>
     </div>
   </div>
-
-${newEntry(plates, today, ret)}
 
   <div class="card">
     <div class="card-header">About the SM check</div>
@@ -432,16 +572,17 @@ ${newEntry(plates, today, ret)}
       <p><strong>No cost, no approval.</strong> An OK on an unknown amount is not an approval.
          And if the cost is changed afterwards, the check is reset automatically – an approval
          holds for the amount that stood there when it was given.</p>
-      <p><strong>Spare parts</strong> have no workshop visit, so their workshop dates are
-         switched off and they never count as "at the workshop". <strong>Handled by</strong>
-         says who did the work, OKQ8 or in-house; it stays blank until somebody picks.</p>
+      <p><strong>Vehicles</strong> carry the registration number, the driver, the workshop visit and
+         <strong>OKQ8 / Own</strong>, which stays blank until somebody picks. <strong>Spare
+         parts</strong> have no workshop visit, so their dates are switched off.
+         <strong>Tools</strong> and <strong>Misc</strong> belong to no van and have none of that.</p>
       <p class="muted">Both OKs and withdrawn OKs are kept with their time. Hover over the
          SM box to see the history.</p>
     </div>
   </div>`;
 
   return page({
-    title: 'Expenses – admin', body: html, links: LINKS,
+    title: `Expenses – ${SCOPE_LABEL[scope]} – admin`, body: html, links: LINKS,
     // Wider than the rest of the app: see body.wide in app.css.
     bodyClass: 'wide', scripts: SCRIPT, lang: 'en', admin: true
   });
@@ -452,7 +593,7 @@ function incidentDeletePage({ inc, ret, nav }) {
   const back = ret || '/admin/expenses';
   const html = `  <div class="page-head">
     <h1>Delete this entry?</h1>
-    <div class="muted mono">${esc(inc.plate)} · ${esc(EXPENSE_LABEL[inc.category] || inc.category)} · ${esc(inc.occurred_on)}</div>
+    <div class="muted mono">${esc([({ vehicle: 'Vehicle', tool: 'Tool', misc: 'Misc' })[inc.scope], inc.plate, EXPENSE_LABEL[inc.category], inc.occurred_on].filter(Boolean).join(' · '))}</div>
   </div>
 ${nav}
 
@@ -463,7 +604,7 @@ ${nav}
       <p>${esc(inc.files.length)} ${inc.files.length === 1 ? 'file' : 'files'} (photos and invoices)
          are deleted with the entry, as is the approval history.
          ${inc.sm_ok ? `<strong>This entry was approved by ${esc(inc.sm_by)} ${esc(fmtDateTime(inc.sm_at))}.</strong>` : ''}</p>
-      <p>The check the damage was reported in is not affected – only this line.</p>
+      ${inc.submission_id ? '<p>The check the damage was reported in is not affected – only this line.</p>' : ''}
     </div>
   </div>
 
@@ -478,4 +619,4 @@ ${nav}
   return page({ title: 'Delete entry', body: html, links: LINKS, lang: 'en', admin: true });
 }
 
-module.exports = { incidentsPage, expensesPage, incidentDeletePage, kr, EXPENSE_LABEL, HANDLER_LABEL };
+module.exports = { incidentsPage, expensesPage, incidentDeletePage, kr, EXPENSE_LABEL, HANDLER_LABEL, SCOPE_LABEL };

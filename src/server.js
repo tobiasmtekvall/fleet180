@@ -24,7 +24,7 @@ const {
 } = require('./views/admin');
 const { qrPage } = require('./views/qr');
 const { statsPage, statsResetPage } = require('./views/stats');
-const { incidentsPage, expensesPage, incidentDeletePage, EXPENSE_LABEL, HANDLER_LABEL } = require('./views/incidents');
+const { incidentsPage, expensesPage, incidentDeletePage, EXPENSE_LABEL, HANDLER_LABEL, SCOPE_LABEL } = require('./views/incidents');
 const statsLib = require('./stats');
 const { buildDriverStats } = statsLib;
 const { badgeText } = require('./badges');
@@ -1171,26 +1171,60 @@ function parseCost(raw) {
 /** What a row is. Spare parts have no workshop visit, so no shop dates. */
 const EXPENSE_CATEGORIES = new Set(['damage', 'parts']);
 /** Who did the work. '' = nobody has said; never guessed from the owner. */
-const HANDLERS = new Set(['', 'okq8', 'inhouse']);
+const HANDLERS = new Set(['', 'okq8', 'own']);
+/** Vehicles, Tools, Misc: the three sections of Expenses. */
+const SCOPES = new Set(['vehicle', 'tool', 'misc']);
 
 function readIncidentBody(body) {
   const day = s => (/^\d{4}-\d{2}-\d{2}$/.test(String(s || '')) ? String(s) : null);
+  const text = (s, n) => String(s || '').trim().slice(0, n);
+  const scope = SCOPES.has(body.scope) ? body.scope : 'vehicle';
+  const common = {
+    scope,
+    occurredOn: day(body.occurredOn),
+    description: text(body.description, 600),
+    supplier: text(body.supplier, 160),
+    invoiceNo: text(body.invoiceNo, 80),
+    note: text(body.note, 2000),
+    cost: parseCost(body.cost)
+  };
+  // Tools and misc belong to no van: no plate, driver, category, OKQ8/Own
+  // or workshop dates, whatever the form happened to send.
+  if (scope !== 'vehicle') {
+    return { ...common, plate: '', driverName: '', category: '', handledBy: '',
+      shopIn: null, shopOut: null };
+  }
   const category = EXPENSE_CATEGORIES.has(body.category) ? body.category : 'damage';
   const parts = category === 'parts';
+  // 'inhouse' is what a page loaded before the rename still posts.
+  const by = body.handledBy === 'inhouse' ? 'own' : body.handledBy;
   return {
+    ...common,
     plate: normalisePlate(body.plate),
-    occurredOn: day(body.occurredOn),
-    description: String(body.description || '').trim().slice(0, 600),
-    driverName: String(body.driverName || '').trim().slice(0, 120),
+    driverName: text(body.driverName, 120),
     category,
-    handledBy: HANDLERS.has(body.handledBy) ? body.handledBy : '',
+    handledBy: HANDLERS.has(by) ? by : '',
     // Enforced here and not only by the disabled inputs: a row switched to
     // Spare parts drops any dates it had, or "at the workshop now" would
     // keep counting a part that never went anywhere.
     shopIn: parts ? null : day(body.shopIn),
-    shopOut: parts ? null : day(body.shopOut),
-    cost: parseCost(body.cost)
+    shopOut: parts ? null : day(body.shopOut)
   };
+}
+
+/** What a scope calls one of its rows, for the messages. */
+function entryName(data) {
+  if (data.scope === 'tool') return 'Tool expense';
+  if (data.scope === 'misc') return 'Misc expense';
+  return data.category === 'parts' ? 'Spare part' : 'Incident';
+}
+
+/** The problem with a posted row, or null. */
+function entryProblem(data) {
+  if (data.scope === 'vehicle' && !data.plate) return 'Choose which vehicle it concerns.';
+  if (!data.occurredOn) return 'The entry needs a date.';
+  if (data.scope !== 'vehicle' && !data.description) return 'Say what the expense was for.';
+  return null;
 }
 
 /**
@@ -1289,11 +1323,16 @@ function incidentFilters(req) {
     from: day(req.query.from),
     to: day(req.query.to),
     sm,
+    // The section; "all" only exists for the CSV.
+    scope: SCOPES.has(req.query.scope) ? req.query.scope
+      : req.query.scope === 'all' ? 'all' : 'vehicle',
     category: EXPENSE_CATEGORIES.has(req.query.category) ? req.query.category : '',
-    handledBy: HANDLERS.has(req.query.by) && req.query.by ? req.query.by
-      : req.query.by === 'none' ? 'none' : ''
+    handledBy: (req.query.by === 'inhouse' ? 'own' : HANDLERS.has(req.query.by) && req.query.by ? req.query.by : '')
+      || (req.query.by === 'none' ? 'none' : '')
   };
-  f.query = qsOf({ plate: f.plate, from: f.from, to: f.to, sm: f.sm,
+  // Vehicle-only filters mean nothing on Tools and Misc.
+  if (f.scope === 'tool' || f.scope === 'misc') { f.plate = ''; f.category = ''; f.handledBy = ''; }
+  f.query = qsOf({ scope: f.scope, plate: f.plate, from: f.from, to: f.to, sm: f.sm,
     category: f.category, by: f.handledBy });
   return f;
 }
@@ -1311,7 +1350,8 @@ async function incidentsFor(req) {
     plate: filters.plate, from: filters.from, to: filters.to,
     smOk: filters.sm === 'yes' ? true : filters.sm === 'no' ? false : null,
     category: filters.category,
-    handledBy: filters.handledBy === 'none' ? '' : filters.handledBy
+    handledBy: filters.handledBy === 'none' ? '' : filters.handledBy,
+    scope: filters.scope === 'all' ? '' : filters.scope
   });
   // "Not set" is the empty string, which the query treats as "any".
   if (filters.handledBy === 'none') incidents = incidents.filter(i => !i.handled_by);
@@ -1323,7 +1363,7 @@ async function incidentsFor(req) {
     damageCost: sum(withCost.filter(i => i.category !== 'parts')),
     partsCost: sum(withCost.filter(i => i.category === 'parts')),
     waiting: incidents.filter(i => !i.sm_ok).length,
-    atShop: incidents.filter(i => i.category !== 'parts' && i.shop_in && !i.shop_out).length
+    atShop: incidents.filter(i => i.scope === 'vehicle' && i.category !== 'parts' && i.shop_in && !i.shop_out).length
   };
   return { filters, incidents, totals };
 }
@@ -1354,12 +1394,14 @@ app.get('/admin/incidents', async (req, res, next) => {
 /* Expenses: the ledger, the SM check and the CSV. */
 app.get('/admin/expenses', async (req, res, next) => {
   try {
-    const [{ filters, incidents, totals }, vehicles] = await Promise.all([
+    if (req.query.scope === 'all') return res.redirect(303, '/admin/expenses');
+    const [{ filters, incidents, totals }, vehicles, sections] = await Promise.all([
       incidentsFor(req),
-      db.listVehicles({ includeInactive: true })
+      db.listVehicles({ includeInactive: true }),
+      db.expenseSections()
     ]);
     res.send(expensesPage({
-      incidents, totals, filters,
+      incidents, totals, filters, sections,
       plates: vehicles.map(v => v.plate),
       today: summaryLib.dayKey(),
       message: flashOf(req), nav: adminNav('expenses')
@@ -1371,14 +1413,13 @@ app.post('/admin/incidents', upload, async (req, res, next) => {
   try {
     const data = readIncidentBody(req.body);
     const from = returnTo(req);
-    if (!data.plate) return back(res, from, 'Choose which vehicle it concerns.');
-    if (!data.occurredOn) return back(res, from, 'The entry needs a date.');
+    const problem = entryProblem(data);
+    if (problem) return back(res, from, problem);
     const id = await db.createIncident(data);
     const files = await saveIncidentFiles(id, req.files);
-    // Wherever it was entered, it now lives on Expenses: land there.
-    back(res, '/admin/expenses',
-      `${data.category === 'parts' ? 'Spare part' : 'Incident'} for ${data.plate} added.` +
-      fileNote(files));
+    // Wherever it was entered, it now lives on Expenses, in its own section.
+    back(res, `/admin/expenses?scope=${data.scope}`,
+      `${entryName(data)}${data.plate ? ' for ' + data.plate : ''} added.` + fileNote(files));
   } catch (err) { next(err); }
 });
 
@@ -1387,13 +1428,14 @@ app.post('/admin/incidents/:id', upload, async (req, res, next) => {
     const to = returnTo(req);
     const inc = await db.getIncident(req.params.id);
     if (!inc) return back(res, to, 'That entry no longer exists.');
-    const data = readIncidentBody(req.body);
-    if (!data.plate) return back(res, to, 'Choose which vehicle it concerns.');
-    if (!data.occurredOn) return back(res, to, 'The entry needs a date.');
+    // A row never changes section by being saved: the page it was on decides.
+    const data = readIncidentBody({ ...req.body, scope: inc.scope });
+    const problem = entryProblem(data);
+    if (problem) return back(res, to, problem);
     const result = await db.updateIncident(inc.id, data);
     const files = await saveIncidentFiles(inc.id, req.files);
     back(res, to, 'Saved.' + fileNote(files) +
-      (data.category === 'parts' && (inc.shop_in || inc.shop_out)
+      (data.scope === 'vehicle' && data.category === 'parts' && (inc.shop_in || inc.shop_out)
         ? ' Spare parts have no workshop dates, so those were cleared.' : '') +
       (result && result.costChanged
         ? ' The cost changed, so the SM check was reset and needs to be given again.' : ''));
@@ -1436,7 +1478,7 @@ app.post('/admin/incidents/:id/sm/withdraw', upload, async (req, res, next) => {
     const who = String(req.body.smBy || '').trim().slice(0, 120);
     await db.signOffIncident(inc.id, { ok: false, who });
     back(res, to,
-      `The approval for ${inc.plate} ${inc.occurred_on} was withdrawn. The history is kept.`);
+      `The approval for ${inc.plate ? inc.plate + ' ' : 'the entry from '}${inc.occurred_on} was withdrawn. The history is kept.`);
   } catch (err) { next(err); }
 });
 
@@ -1498,7 +1540,7 @@ app.post('/admin/incidents/:id/delete', upload, async (req, res, next) => {
     }
     await db.deleteIncident(inc.id);
     console.log(`[admin] deleted expense ${inc.id} (${inc.plate} ${inc.occurred_on})`);
-    back(res, to, `The entry for ${inc.plate} ${inc.occurred_on} was deleted.`);
+    back(res, to, `The entry ${inc.plate ? 'for ' + inc.plate + ' ' : ''}from ${inc.occurred_on} was deleted.`);
   } catch (err) { next(err); }
 });
 
@@ -1510,28 +1552,29 @@ app.get('/admin/incidents.csv', (req, res) => {
 
 app.get('/admin/expenses.csv', async (req, res, next) => {
   try {
-    const { incidents } = await incidentsFor(req);
-    const header = ['Id', 'Category', 'Vehicle', 'Date', 'Description', 'Driver',
-      'Workshop in', 'Workshop out', 'Days', 'Handled by', 'Cost (SEK)', 'Photos', 'Invoices',
-      'SM check', 'SM by', 'SM time', 'Check'];
+    const { filters, incidents } = await incidentsFor(req);
+    const header = ['Id', 'Type', 'Category', 'Vehicle', 'Date', 'Description', 'Driver',
+      'Workshop in', 'Workshop out', 'Days', 'OKQ8 / Own', 'Supplier', 'Invoice no.', 'Cost (SEK)',
+      'Photos', 'Invoices', 'SM check', 'SM by', 'SM time', 'Check', 'Note'];
     const lines = [header.map(csvCell).join(';')];
     for (const i of incidents) {
       const dayCount = i.shop_in && i.shop_out
         ? Math.round((Date.parse(i.shop_out) - Date.parse(i.shop_in)) / 86400000) + 1 : '';
       lines.push([
-        i.id, EXPENSE_LABEL[i.category] || i.category, i.plate, i.occurred_on,
-        i.description, i.driver_name,
+        i.id, SCOPE_LABEL[i.scope] || i.scope, EXPENSE_LABEL[i.category] || i.category,
+        i.plate, i.occurred_on, i.description, i.driver_name,
         i.shop_in, i.shop_out, dayCount, HANDLER_LABEL[i.handled_by] || '',
+        i.supplier, i.invoice_no,
         // Decimal comma: the file is ;-separated for a Swedish Excel.
         i.cost_sek === null ? '' : String(i.cost_sek).replace('.', ','),
         i.files.filter(f => f.kind !== 'invoice').length,
         i.files.filter(f => f.kind === 'invoice').length,
         i.sm_ok ? 'YES' : 'NO', i.sm_by, i.sm_at ? fmtDateTime(i.sm_at) : '',
-        i.submission_id || ''
+        i.submission_id || '', i.note
       ].map(csvCell).join(';'));
     }
     res.type('text/csv; charset=utf-8')
-      .set('Content-Disposition', 'attachment; filename="expenses.csv"')
+      .set('Content-Disposition', `attachment; filename="expenses-${filters.scope}.csv"`)
       .send('﻿' + lines.join('\r\n'));
   } catch (err) { next(err); }
 });

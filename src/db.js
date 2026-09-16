@@ -445,6 +445,17 @@ CREATE UNIQUE INDEX IF NOT EXISTS incidents_submission_idx
 -- owner, a rented van can still be fixed in-house.
 ALTER TABLE incidents ADD COLUMN IF NOT EXISTS category   TEXT NOT NULL DEFAULT 'damage';
 ALTER TABLE incidents ADD COLUMN IF NOT EXISTS handled_by TEXT NOT NULL DEFAULT '';
+-- 2026-09-16: Expenses covers Vehicles, Tools and Misc. Only vehicle rows
+-- carry a plate, a driver, a category and workshop dates; tools and misc
+-- have plate '' and category ''. Supplier, invoice number and a note are
+-- for every row. "In-house" was renamed "Own"; the UPDATE is a no-op once
+-- nothing is left to rename, so it is safe on every boot.
+ALTER TABLE incidents ADD COLUMN IF NOT EXISTS scope      TEXT NOT NULL DEFAULT 'vehicle';
+ALTER TABLE incidents ADD COLUMN IF NOT EXISTS supplier   TEXT NOT NULL DEFAULT '';
+ALTER TABLE incidents ADD COLUMN IF NOT EXISTS invoice_no TEXT NOT NULL DEFAULT '';
+ALTER TABLE incidents ADD COLUMN IF NOT EXISTS note       TEXT NOT NULL DEFAULT '';
+UPDATE incidents SET handled_by = 'own' WHERE handled_by = 'inhouse';
+CREATE INDEX IF NOT EXISTS incidents_scope_idx ON incidents (scope, occurred_on DESC);
 
 -- Photos of the damage and invoices from the workshop, in the database beside
 -- everything else so a backup is a backup of the whole case.
@@ -1023,7 +1034,7 @@ async function countsBefore(date) {
  * ------------------------------------------------------------------ */
 
 const INCIDENT_COLS = `id, plate, occurred_on, description, driver_name,
-  category, handled_by, shop_in, shop_out, cost_sek, sm_ok, sm_by, sm_at, submission_id,
+  category, handled_by, scope, supplier, invoice_no, note, shop_in, shop_out, cost_sek, sm_ok, sm_by, sm_at, submission_id,
   created_at, updated_at`;
 
 /** Dates come back as Date objects; the page wants 2026-09-14. */
@@ -1046,10 +1057,11 @@ function shapeIncident(row, files = [], events = []) {
 }
 
 async function listIncidents({ plate = '', from = '', to = '', smOk = null,
-                               category = '', handledBy = '' } = {}) {
+                               category = '', handledBy = '', scope = '' } = {}) {
   const where = [];
   const args = [];
   if (plate) { args.push(plate); where.push(`plate = $${args.length}`); }
+  if (scope) { args.push(scope); where.push(`scope = $${args.length}`); }
   if (category) { args.push(category); where.push(`category = $${args.length}`); }
   if (handledBy) { args.push(handledBy); where.push(`handled_by = $${args.length}`); }
   if (from) { args.push(from); where.push(`occurred_on >= $${args.length}`); }
@@ -1094,13 +1106,14 @@ async function createIncident(data) {
   const r = await pool.query(
     `INSERT INTO incidents
        (plate, occurred_on, description, driver_name, shop_in, shop_out, cost_sek, submission_id,
-        category, handled_by)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`,
+        category, handled_by, scope, supplier, invoice_no, note)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING id`,
     [data.plate, data.occurredOn, data.description || '', data.driverName || '',
      data.shopIn || null, data.shopOut || null,
      data.cost === null || data.cost === undefined ? null : data.cost,
      data.submissionId || null,
-     data.category || 'damage', data.handledBy || '']);
+     data.category ?? 'damage', data.handledBy || '',
+     data.scope || 'vehicle', data.supplier || '', data.invoiceNo || '', data.note || '']);
   return String(r.rows[0].id);
 }
 
@@ -1122,11 +1135,12 @@ async function updateIncident(id, data) {
   await pool.query(
     `UPDATE incidents SET plate = $2, occurred_on = $3, description = $4, driver_name = $5,
             shop_in = $6, shop_out = $7, cost_sek = $8, category = $9, handled_by = $10,
-            updated_at = now()
+            scope = $11, supplier = $12, invoice_no = $13, note = $14, updated_at = now()
       WHERE id = $1`,
     [id, data.plate, data.occurredOn, data.description || '', data.driverName || '',
      data.shopIn || null, data.shopOut || null, newCost,
-     data.category || 'damage', data.handledBy || '']);
+     data.category ?? 'damage', data.handledBy || '',
+     data.scope || 'vehicle', data.supplier || '', data.invoiceNo || '', data.note || '']);
 
   if (costChanged) {
     await pool.query(
@@ -1138,14 +1152,25 @@ async function updateIncident(id, data) {
   return { costChanged };
 }
 
-/** The three figures the Incidents tab shows, without loading every row. */
+/** Count and total per section, for the sub-tab labels on Expenses. */
+async function expenseSections() {
+  const r = await pool.query(
+    `SELECT scope, count(*)::int AS n, coalesce(sum(cost_sek), 0)::float AS cost,
+            count(*) FILTER (WHERE NOT sm_ok)::int AS waiting
+       FROM incidents GROUP BY scope`);
+  const out = {};
+  for (const row of r.rows) out[row.scope] = row;
+  return out;
+}
+
+/** The three figures the Incidents tab shows (vehicles only), without loading every row. */
 async function incidentCounts() {
   const r = await pool.query(
     `SELECT count(*)::int AS total,
             count(*) FILTER (WHERE NOT sm_ok)::int AS waiting,
-            count(*) FILTER (WHERE category <> 'parts' AND shop_in IS NOT NULL
+            count(*) FILTER (WHERE scope = 'vehicle' AND category <> 'parts' AND shop_in IS NOT NULL
                                AND shop_out IS NULL)::int AS "atShop"
-       FROM incidents`);
+       FROM incidents WHERE scope = 'vehicle'`);
   return r.rows[0];
 }
 
@@ -1754,7 +1779,7 @@ module.exports = {
   replaceAssignments, assignmentsBetween, assignmentRange,
   assignmentsForPlate, plateHistory, lastOdometer, deleteSubmission,
   getSetting, setSetting, getStatsEpoch, setStatsEpoch, countsBefore,
-  listIncidents, getIncident, createIncident, updateIncident, deleteIncident, incidentCounts,
+  listIncidents, getIncident, createIncident, updateIncident, deleteIncident, incidentCounts, expenseSections,
   signOffIncident, addIncidentFile, getIncidentFile, deleteIncidentFile,
   submissionsWithIncident,
   get pool() { return pool; }
