@@ -397,6 +397,49 @@ function assignedBanner(lang, ctx) {
 }
 
 /**
+ * The vehicle's own instruktionsbok, one tap from the QR code.
+ *
+ * The PDF is served from the app itself (public/manualer/) rather than linked
+ * to the maker's site: a driver standing between two vans in a yard has one
+ * bar of signal, and the manufacturers' manual portals are heavy pages that
+ * often want a VIN. What is hosted is the warning-light chapter — the part
+ * this form sends people to — and where the whole book is small enough it IS
+ * the whole book. `full` links the maker's own site for the rest.
+ *
+ * Which file a van gets follows its model (telltales.MODELS), so a van whose
+ * model nobody has set yet shows no book rather than the wrong one.
+ */
+function manualPanel(lang, ctx) {
+  const man = ctx.manual;
+  if (!man || !man.file) return '';
+  const title = filledAttrs('manualTitle', { plate: ctx.plate });
+  const sub = [man.title, man.pages].filter(Boolean).join(' · ');
+  const full = man.full
+    ? `\n    <a class="manual-full" href="${esc(man.full)}" target="_blank" rel="noopener"
+         ${uiAttrs('manualFull')}>${esc(i18n.t(lang, 'manualFull'))}</a>`
+    : '';
+  return `<div class="manual-box no-print">
+    <a class="manual-link" href="/manualer/${esc(man.file)}" target="_blank" rel="noopener">
+      <span class="manual-ico">${bookIcon()}</span>
+      <span class="manual-text">
+        <b ${title}>${esc(filledText(lang, 'manualTitle', { plate: ctx.plate }))}</b>
+        <em>${esc(i18n.isolate(sub))}</em>
+      </span>
+      <span class="manual-go" ${uiAttrs('manualOpen')}>${esc(i18n.t(lang, 'manualOpen'))}</span>
+    </a>${full}
+  </div>`;
+}
+
+/** An open book — drawn here like the telltales, for the same reasons. */
+function bookIcon() {
+  return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" fill="none" ' +
+    'stroke="currentColor" stroke-width="5" stroke-linecap="round" stroke-linejoin="round">' +
+    '<path d="M50 30C42 22 28 20 16 22v52c12-2 26 0 34 8" />' +
+    '<path d="M50 30c8-8 22-10 34-8v52c-12-2-26 0-34 8z" />' +
+    '<path d="M50 30v52" /></svg>';
+}
+
+/**
  * "Drivers of this car last week", top of the page.
  *
  * One line per day: who the van was given to, and who actually signed for it
@@ -525,10 +568,10 @@ ${i18n.LANGS.map(l =>
 
 function formPage({ vehicle, form, lastCheck, preview = false, lang = 'sv', sources = {},
                     assignment = null, week = null, odometer = null, board = null,
-                    openedAt = null }) {
+                    openedAt = null, manual = null }) {
   const code = i18n.langOf(lang);
   const ctx = { assignment, week, odometer: preview ? null : odometer,
-                plate: vehicle.plate, preview, driverBoxDrawn: false };
+                plate: vehicle.plate, preview, manual, driverBoxDrawn: false };
   const groups = groupBySection(form.fields);
   const titles = {};
   for (const c of i18n.CODES) titles[c] = i18n.formTitle(form, c);
@@ -572,6 +615,7 @@ ${i === groups.length - 1 ? actions(code) : ''}
   ${flags(code)}
   ${last}
   ${preview ? '' : assignedBanner(code, ctx)}
+  ${preview ? '' : manualPanel(code, ctx)}
 
 ${rail(groups, code)}
 

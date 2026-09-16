@@ -24,7 +24,9 @@ const {
 } = require('./views/admin');
 const { qrPage } = require('./views/qr');
 const { statsPage, statsResetPage } = require('./views/stats');
-const { incidentsPage, expensesPage, incidentDeletePage, EXPENSE_LABEL, HANDLER_LABEL, SCOPE_LABEL } = require('./views/incidents');
+const { incidentsPage, expensesPage, incidentDeletePage, EXPENSE_LABEL, HANDLER_LABEL, SCOPE_LABEL,
+  RENTAL_FIRM_LABEL } = require('./views/incidents');
+const exif = require('./exif');
 const statsLib = require('./stats');
 const { buildDriverStats } = statsLib;
 const { badgeText } = require('./badges');
@@ -381,6 +383,9 @@ app.get('/v/:plate', async (req, res, next) => {
       lastCheck: l
         ? `${fmtDateTime(l.submitted_at)}${l.driver_name ? ' – ' + mask.maskName(l.driver_name) : ''}`
         : null,
+      // The van's own instruktionsbok, from its model unless this vehicle
+      // names its own file.
+      manual: telltales.manualFor(vehicle.model_key, vehicle.manual_file),
       // Who has this van today (pre-filled), and who has had it this week.
       // Tomorrow's when today has none: the assigner runs the evening before.
       assignment: assignmentLib.currentAssignment(todayRows, tomorrowRows),
@@ -1233,8 +1238,10 @@ function parseCost(raw) {
 const EXPENSE_CATEGORIES = new Set(['damage', 'parts']);
 /** Who did the work. '' = nobody has said; never guessed from the owner. */
 const HANDLERS = new Set(['', 'okq8', 'own']);
-/** Vehicles, Tools, Misc: the three sections of Expenses. */
-const SCOPES = new Set(['vehicle', 'tool', 'misc']);
+/** Vehicles, Tools, Misc, Rental cars: the four sections of Expenses. */
+const SCOPES = new Set(['vehicle', 'tool', 'misc', 'rental']);
+/** The firms we hire from. A fixed list, on Tobias's instruction. */
+const RENTAL_FIRMS = new Set(Object.keys(RENTAL_FIRM_LABEL));
 
 function readIncidentBody(body) {
   const day = s => (/^\d{4}-\d{2}-\d{2}$/.test(String(s || '')) ? String(s) : null);
@@ -1247,8 +1254,26 @@ function readIncidentBody(body) {
     supplier: text(body.supplier, 160),
     invoiceNo: text(body.invoiceNo, 80),
     note: text(body.note, 2000),
-    cost: parseCost(body.cost)
+    cost: parseCost(body.cost),
+    rentalFirm: '', rentedTo: null, forPlate: ''
   };
+  /* A hire car. `plate` is the HIRE CAR's registration, which is not one of
+     ours, so it is typed rather than picked -- normalised the same way as
+     ours so "abc 12d" and "ABC12D" are the same car. `forPlate` is the van
+     of ours it stands in for, and is allowed to be empty: a hire taken for
+     extra capacity stands in for nothing. No driver, no category, no
+     workshop dates and no OKQ8/Own -- a rental is not repaired, it is
+     returned. */
+  if (scope === 'rental') {
+    return {
+      ...common,
+      plate: normalisePlate(body.plate),
+      driverName: '', category: '', handledBy: '', shopIn: null, shopOut: null,
+      rentalFirm: RENTAL_FIRMS.has(body.rentalFirm) ? body.rentalFirm : '',
+      rentedTo: day(body.rentedTo),
+      forPlate: normalisePlate(body.forPlate)
+    };
+  }
   // Tools and misc belong to no van: no plate, driver, category, OKQ8/Own
   // or workshop dates, whatever the form happened to send.
   if (scope !== 'vehicle') {
@@ -1277,6 +1302,7 @@ function readIncidentBody(body) {
 function entryName(data) {
   if (data.scope === 'tool') return 'Tool expense';
   if (data.scope === 'misc') return 'Misc expense';
+  if (data.scope === 'rental') return 'Rental car';
   return data.category === 'parts' ? 'Spare part' : 'Incident';
 }
 
@@ -1284,6 +1310,16 @@ function entryName(data) {
 function entryProblem(data) {
   if (data.scope === 'vehicle' && !data.plate) return 'Choose which vehicle it concerns.';
   if (!data.occurredOn) return 'The entry needs a date.';
+  if (data.scope === 'rental') {
+    if (!data.plate) return "Type the hire car's registration number.";
+    if (!data.rentalFirm) return 'Choose which firm the car was hired from.';
+    // Not "is it filled in" but "does it make sense": a hire that ends before
+    // it starts is a typo somebody will otherwise spend a day looking for.
+    if (data.rentedTo && data.rentedTo < data.occurredOn) {
+      return 'The car cannot go back before it was picked up.';
+    }
+    return null;
+  }
   if (data.scope !== 'vehicle' && !data.description) return 'Say what the expense was for.';
   return null;
 }
@@ -1299,17 +1335,55 @@ function returnTo(req) {
   return '/admin/expenses';
 }
 
-/** Photos and invoices off a multipart post, by the field they came from. */
+/**
+ * The same upload, but a file that is too big or one file too many does not
+ * throw the edit away.
+ *
+ * On /v/:plate a failed upload is the whole submission, and the driver is
+ * told. Here it is one line in a ledger somebody has just typed into: a
+ * hire's cost, dates and invoice number must not be lost because the ninth
+ * photo was 13 MB. The row saves, and the message says what was left out --
+ * the same way a file of the wrong type is already reported.
+ */
+function softUpload(req, res, next) {
+  upload(req, res, err => {
+    if (!err) return next();
+    if (err.code === 'LIMIT_FILE_SIZE' || err.code === 'LIMIT_FILE_COUNT' ||
+        err.code === 'LIMIT_PART_COUNT' || err.code === 'LIMIT_FIELD_COUNT') {
+      req.uploadLimit = err.code;
+      req.files = req.files || [];
+      return next();
+    }
+    return next(err);
+  });
+}
+
+/** What to tell somebody whose files did not all fit. */
+function limitNote(req) {
+  if (!req.uploadLimit) return '';
+  return req.uploadLimit === 'LIMIT_FILE_SIZE'
+    ? ' One file was over 12 MB and was not attached – the rest of the line was saved.'
+    : ' Too many files in one go (24 at most) – the rest of the line was saved.';
+}
+
+/** Photos, invoices and rental agreements off a multipart post. */
+const FILE_KIND = { photos: 'photo', invoices: 'invoice', agreements: 'agreement' };
+
 async function saveIncidentFiles(incidentId, files) {
   let n = 0, skipped = 0;
   for (const f of files || []) {
-    if (f.fieldname !== 'photos' && f.fieldname !== 'invoices') continue;
+    const kind = FILE_KIND[f.fieldname];
+    if (!kind) continue;
     if (!INCIDENT_MIME.test(f.mimetype)) { skipped++; continue; }
     await db.addIncidentFile(incidentId, {
-      kind: f.fieldname === 'invoices' ? 'invoice' : 'photo',
+      kind,
       filename: (f.originalname || '').slice(0, 200),
       mime: f.mimetype,
-      buffer: f.buffer
+      buffer: f.buffer,
+      // What the camera says, not what the clock says: a hand-back photo
+      // uploaded the following morning still dates itself to the hand-back.
+      // Null when the file carries no EXIF, which is most of the time.
+      takenAt: exif.takenAt(f.buffer, f.mimetype)
     });
     n++;
   }
@@ -1391,8 +1465,11 @@ function incidentFilters(req) {
     handledBy: (req.query.by === 'inhouse' ? 'own' : HANDLERS.has(req.query.by) && req.query.by ? req.query.by : '')
       || (req.query.by === 'none' ? 'none' : '')
   };
-  // Vehicle-only filters mean nothing on Tools and Misc.
+  // Vehicle-only filters mean nothing on Tools and Misc. A rental keeps the
+  // plate filter -- it is the hire car's own registration -- but has no
+  // category and nobody repairs it.
   if (f.scope === 'tool' || f.scope === 'misc') { f.plate = ''; f.category = ''; f.handledBy = ''; }
+  if (f.scope === 'rental') { f.category = ''; f.handledBy = ''; }
   f.query = qsOf({ scope: f.scope, plate: f.plate, from: f.from, to: f.to, sm: f.sm,
     category: f.category, by: f.handledBy });
   return f;
@@ -1424,7 +1501,13 @@ async function incidentsFor(req) {
     damageCost: sum(withCost.filter(i => i.category !== 'parts')),
     partsCost: sum(withCost.filter(i => i.category === 'parts')),
     waiting: incidents.filter(i => !i.sm_ok).length,
-    atShop: incidents.filter(i => i.scope === 'vehicle' && i.category !== 'parts' && i.shop_in && !i.shop_out).length
+    atShop: incidents.filter(i => i.scope === 'vehicle' && i.category !== 'parts' && i.shop_in && !i.shop_out).length,
+    /* Hire cars still out: no return date at all, or one still in the future
+       (a booked return). A car handed back TODAY is back -- ">=" would have
+       counted every car returned this morning as still out, which is the one
+       number on this line somebody acts on. */
+    outNow: incidents.filter(i => i.scope === 'rental' &&
+      (!i.rented_to || i.rented_to > summaryLib.dayKey())).length
   };
   return { filters, incidents, totals };
 }
@@ -1470,7 +1553,7 @@ app.get('/admin/expenses', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-app.post('/admin/incidents', upload, async (req, res, next) => {
+app.post('/admin/incidents', softUpload, async (req, res, next) => {
   try {
     const data = readIncidentBody(req.body);
     const from = returnTo(req);
@@ -1480,11 +1563,12 @@ app.post('/admin/incidents', upload, async (req, res, next) => {
     const files = await saveIncidentFiles(id, req.files);
     // Wherever it was entered, it now lives on Expenses, in its own section.
     back(res, `/admin/expenses?scope=${data.scope}`,
-      `${entryName(data)}${data.plate ? ' for ' + data.plate : ''} added.` + fileNote(files));
+      `${entryName(data)}${data.plate ? ' for ' + data.plate : ''} added.` +
+      fileNote(files) + limitNote(req));
   } catch (err) { next(err); }
 });
 
-app.post('/admin/incidents/:id', upload, async (req, res, next) => {
+app.post('/admin/incidents/:id', softUpload, async (req, res, next) => {
   try {
     const to = returnTo(req);
     const inc = await db.getIncident(req.params.id);
@@ -1495,7 +1579,7 @@ app.post('/admin/incidents/:id', upload, async (req, res, next) => {
     if (problem) return back(res, to, problem);
     const result = await db.updateIncident(inc.id, data);
     const files = await saveIncidentFiles(inc.id, req.files);
-    back(res, to, 'Saved.' + fileNote(files) +
+    back(res, to, 'Saved.' + fileNote(files) + limitNote(req) +
       (data.scope === 'vehicle' && data.category === 'parts' && (inc.shop_in || inc.shop_out)
         ? ' Spare parts have no workshop dates, so those were cleared.' : '') +
       (result && result.costChanged
@@ -1614,22 +1698,30 @@ app.get('/admin/incidents.csv', (req, res) => {
 app.get('/admin/expenses.csv', async (req, res, next) => {
   try {
     const { filters, incidents } = await incidentsFor(req);
-    const header = ['Id', 'Type', 'Category', 'Vehicle', 'Date', 'Description', 'Driver',
-      'Workshop in', 'Workshop out', 'Days', 'OKQ8 / Own', 'Supplier', 'Invoice no.', 'Cost (SEK)',
-      'Photos', 'Invoices', 'SM check', 'SM by', 'SM time', 'Check', 'Note'];
+    /* One shape for all four sections, so "CSV, all sections" is one table
+       rather than four stapled together. A rental's dates live in the
+       workshop columns' place -- renamed in the header, because "in" and
+       "out" is what both of them are. */
+    const header = ['Id', 'Type', 'Category', 'Vehicle', 'Date / picked up', 'Description',
+      'Driver', 'Workshop in / hire from', 'Workshop out / hire to', 'Days', 'OKQ8 / Own',
+      'Supplier', 'Rental firm', 'Stands in for', 'Invoice no.', 'Cost (SEK)',
+      'Photos', 'Invoices', 'Agreements', 'SM check', 'SM by', 'SM time', 'Check', 'Note'];
     const lines = [header.map(csvCell).join(';')];
     for (const i of incidents) {
-      const dayCount = i.shop_in && i.shop_out
-        ? Math.round((Date.parse(i.shop_out) - Date.parse(i.shop_in)) / 86400000) + 1 : '';
+      const rental = i.scope === 'rental';
+      const [start, end] = rental ? [i.occurred_on, i.rented_to] : [i.shop_in, i.shop_out];
+      const dayCount = start && end
+        ? Math.round((Date.parse(end) - Date.parse(start)) / 86400000) + 1 : '';
       lines.push([
         i.id, SCOPE_LABEL[i.scope] || i.scope, EXPENSE_LABEL[i.category] || i.category,
         i.plate, i.occurred_on, i.description, i.driver_name,
-        i.shop_in, i.shop_out, dayCount, HANDLER_LABEL[i.handled_by] || '',
-        i.supplier, i.invoice_no,
+        start, end, dayCount, HANDLER_LABEL[i.handled_by] || '',
+        i.supplier, RENTAL_FIRM_LABEL[i.rental_firm] || '', i.for_plate, i.invoice_no,
         // Decimal comma: the file is ;-separated for a Swedish Excel.
         i.cost_sek === null ? '' : String(i.cost_sek).replace('.', ','),
-        i.files.filter(f => f.kind !== 'invoice').length,
+        i.files.filter(f => f.kind === 'photo').length,
         i.files.filter(f => f.kind === 'invoice').length,
+        i.files.filter(f => f.kind === 'agreement').length,
         i.sm_ok ? 'YES' : 'NO', i.sm_by, i.sm_at ? fmtDateTime(i.sm_at) : '',
         i.submission_id || '', i.note
       ].map(csvCell).join(';'));
@@ -1653,9 +1745,14 @@ function readVehicleBody(body) {
   // list falls back to the shared one, which is the safe direction.
   const modelKey = telltales.MODEL_KEYS.includes(body.modelKey) && body.modelKey !== 'generic'
     ? body.modelKey : '';
+  /* A file name in public/manualer/, nothing else: no path, no protocol. The
+     field is an override for one van, so a typo must land on "no manual"
+     rather than on somebody else's server or on ../. */
+  const manualFile = /^[A-Za-z0-9._-]+\.pdf$/.test(String(body.manualFile || '').trim())
+    ? String(body.manualFile).trim() : '';
   return {
     plate: normalisePlate(body.plate),
-    owner, fleet, formId, modelKey,
+    owner, fleet, formId, modelKey, manualFile,
     note: String(body.note || '').slice(0, 500),
     active: body.active === '1'
   };

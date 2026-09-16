@@ -10,15 +10,30 @@
  * suspension lamp. What is stored is a code, and the Swedish name is what the
  * workshop reads.
  *
- * Where the lists come from (2026-09-13):
- *  - IVECO Daily: the Swedish instruktionsbok, chapter "Förarplats", table
- *    VARNINGSLAMPOR, placering 1–29 (photographed pages 114–122).
- *  - Mercedes-Benz Sprinter 907: the Swedish instruktionsbok, "Varnings- och
- *    kontrollampor", pages 790–802. NOTE: that van shows AdBlue, particulate
- *    filter and engine-oil trouble as DISPLAY MESSAGES (pages 757–762), not as
- *    telltales, so they are offered here as messages and labelled as such.
- *  - Toyota Proace Max: the Swedish quick guide PZ49X-Q0269-SV, section 1-6
- *    "Varningslampor och meddelanden", pages 5–12.
+ * Where the lists come from — every one read out of that model's own Swedish
+ * manual, never from a general list of car symbols (rebuilt 2026-09-16, after
+ * the registry told us what the fleet actually is):
+ *  - IVECO Daily (12 vans): instruktionsboken, "Förarplats", table
+ *    VARNINGSLAMPOR placering 1–29 (pages 113–122) plus the display
+ *    ideograms (123–129). Photographed pages.
+ *  - Mercedes-Benz Sprinter 907 (1): instruktionsbok F907 0082 09,
+ *    "Varnings- och kontrollampor" 790–802 and the display messages 753–783.
+ *  - Mercedes-Benz Vito 447 (4): instruktionsbok F447 0099 09, 785–798 and
+ *    753–778.
+ *    NOTE for both Mercedes: AdBlue, particulate filter and engine oil are
+ *    DISPLAY MESSAGES on those vans, not telltales, so they are offered as
+ *    messages and labelled as such.
+ *  - Toyota Proace MAX (3): instruktionsbok PZ49X-MAX24-SV V5, chapter 3.4,
+ *    lamp table 119–126 and display symbols 127–136.
+ *  - Citroën Jumpy (1): eGuide jumpy3vp sv-SE, "Kontrollampor och
+ *    varningslampor" 11–22.
+ *  - Peugeot Expert (1): eGuide expert3vp sv-SE, same chapter 12–17.
+ *
+ * What is left out, deliberately: green and blue telltales (a system is on,
+ * not a fault), the comfort-electronics faults nobody acts on at the van
+ * (rain sensor, dusk sensor, keyless, traffic-sign recognition, blind spot),
+ * and the electric-van lamps in the Toyota and Peugeot books — this fleet is
+ * diesel. A driver who sees something not on the list picks "Annan lampa".
  *
  * Only the lamps a driver would REPORT are listed: red and amber. Green and
  * blue telltales say a system is on, not that something is wrong, and putting
@@ -143,6 +158,57 @@ const ICONS = {
   // A screen with lines — the Sprinter's display messages.
   message: `<svg ${S}><rect x="14" y="26" width="72" height="44" rx="6" /><path d="M28 42h44M28 54h30" /><path d="M40 70l-6 12 16-12" /></svg>`,
 
+  /* --- added 2026-09-16, with the per-model lists ------------------- */
+
+  // (!) in a circle with the word under it — the Stellantis STOP lamp.
+  stop: `<svg ${S}><circle cx="50" cy="38" r="20" /><path d="M50 26v14M50 46v.5" stroke-width="7" /><text x="50" y="84" text-anchor="middle" font-size="22" font-family="Arial, sans-serif" font-weight="700" fill="currentColor" stroke="none">STOP</text></svg>`,
+
+  // Catalyst body with exhaust flowing out — the SCR / emission lamp.
+  scr: `<svg ${S}><rect x="22" y="38" width="42" height="24" rx="6" /><path d="M32 46v8M42 46v8M52 46v8" stroke-width="6" /><path d="M64 44h10M64 56h14M78 50q6 4 0 8" /></svg>`,
+
+  // Car with the braking burst ahead of it — active brake assist.
+  brakeAssist: `<svg ${S}><path d="M22 66l5-14h22l5 14v12H22z" /><circle cx="30" cy="78" r="4" /><circle cx="50" cy="78" r="4" /><path d="M66 30a26 26 0 010 40M78 20a38 38 0 010 60" /><path d="M64 50h.5" stroke-width="7" /></svg>`,
+
+  // A bolt inside a circle — a fault in the electrical system.
+  electrical: `<svg ${S}><circle cx="50" cy="50" r="28" /><path d="M56 26L38 54h12l-6 22 20-30H50z" fill="currentColor" stroke="none"/></svg>`,
+
+  // Car on a slope with the hill behind it — hill-start assist.
+  hill: `<svg ${S}><path d="M14 78h72" /><path d="M20 70L62 26" /><path d="M36 62l6-12h18l8 10v10H36z" transform="rotate(-20 50 55)" /><circle cx="42" cy="70" r="5" /><circle cx="66" cy="54" r="5" /></svg>`,
+
+  // Van tail with the platform and its two arrows — the tail lift.
+  tailLift: `<svg ${S}><path d="M18 22h40v46H18z" /><path d="M58 52h26" stroke-width="7" /><path d="M72 36v10M72 58v10M66 42l6-6 6 6M66 62l6 6 6-6" /></svg>`,
+
+  // Van with a trailer box behind it — trailer or coupling fault.
+  trailer: `<svg ${S}><path d="M12 44l6-12h20l6 12v18H12z" /><circle cx="22" cy="66" r="6" /><circle cx="38" cy="66" r="6" /><path d="M50 56h6" /><rect x="56" y="34" width="32" height="28" rx="3" /><circle cx="72" cy="68" r="6" /></svg>`,
+
+  // Pleated filter element with air arrows — a clogged air filter.
+  airFilter: `<svg ${S}><rect x="26" y="30" width="48" height="40" rx="6" /><path d="M38 30v40M50 30v40M62 30v40" stroke-width="6" /><path d="M14 40h8M14 60h8M80 40h8M80 60h8" stroke-width="6" /></svg>`,
+
+  // Cup with steam — the fatigue warning.
+  coffee: `<svg ${S}><path d="M24 44h44v18a16 16 0 01-16 16H40a16 16 0 01-16-16z" /><path d="M68 48h8a8 8 0 010 16h-8" /><path d="M38 20q6 6 0 12M52 20q6 6 0 12" /><path d="M20 86h56" /></svg>`,
+
+  // Snowflake — risk of ice.
+  ice: `<svg ${S}><path d="M50 16v68M20 33l60 34M80 33L20 67" /><path d="M42 24l8 8 8-8M42 76l8-8 8 8" /><path d="M22 44l2 11 11 2M78 44l-2 11-11 2M22 56l2-11 11-2M78 56l-2-11-11-2" /></svg>`,
+
+  // A key — the battery in the key, and the key-system lamps.
+  key: `<svg ${S}><circle cx="34" cy="50" r="14" /><path d="M48 50h36" /><path d="M70 50v12M82 50v10" /><path d="M34 50h.5" stroke-width="8" /></svg>`,
+
+  // Car seen from above with three arcs behind it — the parking sensors.
+  parkSensor: `<svg ${S}><rect x="32" y="30" width="36" height="34" rx="5" /><path d="M36 30l4-8h20l4 8" /><path d="M30 74q20-10 40 0M26 84q24-14 48 0" /></svg>`,
+
+  /* Three that would otherwise share a symbol with a lamp sitting a few rows
+     above them in the same list: two identical pictures with different words
+     under them is exactly what this picker exists to avoid. */
+
+  // Brake disc with an R — the retarder.
+  retarder: `<svg ${S}><circle cx="50" cy="50" r="26" /><circle cx="50" cy="50" r="10" /><text x="50" y="40" text-anchor="middle" font-size="18" font-family="Arial, sans-serif" font-weight="700" fill="currentColor" stroke="none">R</text><path d="M24 74h52" /></svg>`,
+
+  // Gear on a shaft — the power take-off.
+  pto: `<svg ${S}><circle cx="62" cy="50" r="18" /><path d="M56 26h12M56 74h12M38 44h10M38 56h10M76 44h10M76 56h10" stroke-width="6" /><circle cx="62" cy="50" r="6" /><path d="M14 50h20" stroke-width="7" /></svg>`,
+
+  // Two discs pressed together — the clutch.
+  clutch: `<svg ${S}><circle cx="38" cy="50" r="22" /><path d="M62 28v44" /><path d="M72 34v32M82 40v20" /><circle cx="38" cy="50" r="7" /></svg>`,
+
   // A question mark in a circle — "something else".
   other: `<svg ${S}><circle cx="50" cy="50" r="30" /><path d="M40 40a10 10 0 0117 7c0 7-7 7-7 13" /><path d="M50 68v.5" stroke-width="7" /></svg>`
 };
@@ -160,7 +226,10 @@ const ICONS = {
 
 const LAMPS = {
   brake:        { icon: 'brake',        sv: 'Bromsvarning / bromsvätska',        en: 'Brake warning / brake fluid',      ar: 'تحذير الفرامل / سائل الفرامل',        hi: 'ब्रेक चेतावनी / ब्रेक फ़्लूइड' },
-  brakeFault:   { icon: 'brake',        sv: 'Fel i bromssystemet (gul)',         en: 'Brake system fault (amber)',       ar: 'عطل في نظام الفرامل (كهرماني)',       hi: 'ब्रेक सिस्टम में ख़राबी (पीली)' },
+  /* No colour in the name: the same fault is a red lamp on the IVECO ("Fel på
+     bromsar", placering 7) and an amber one on the Mercedes and the Peugeot,
+     and the button the driver taps is already drawn in the right colour. */
+  brakeFault:   { icon: 'brake',        sv: 'Fel i bromssystemet',               en: 'Brake system fault',               ar: 'عطل في نظام الفرامل',                 hi: 'ब्रेक सिस्टम में ख़राबी' },
   abs:          { icon: 'abs',          sv: 'ABS',                               en: 'ABS',                              ar: 'نظام ABS',                            hi: 'ABS' },
   parkBrake:    { icon: 'parkBrake',    sv: 'Parkeringsbroms – fel',             en: 'Parking brake fault',              ar: 'عطل في فرملة الانتظار',               hi: 'पार्किंग ब्रेक ख़राबी' },
   engine:       { icon: 'engine',       sv: 'Motorlampa (motorfel / EOBD)',      en: 'Engine light (engine fault / EOBD)', ar: 'لمبة المحرك (عطل / EOBD)',          hi: 'इंजन लाइट (इंजन ख़राबी / EOBD)' },
@@ -199,6 +268,33 @@ const LAMPS = {
   msgAdblue:    { icon: 'message',      sv: 'Meddelande på displayen: AdBlue',   en: 'Display message: AdBlue',          ar: 'رسالة على الشاشة: AdBlue',            hi: 'डिस्प्ले संदेश: AdBlue' },
   msgDpf:       { icon: 'message',      sv: 'Meddelande på displayen: partikelfilter', en: 'Display message: particulate filter', ar: 'رسالة على الشاشة: مرشّح الجسيمات', hi: 'डिस्प्ले संदेश: पार्टिकुलेट फ़िल्टर' },
   msgOil:       { icon: 'message',      sv: 'Meddelande på displayen: motorolja', en: 'Display message: engine oil',     ar: 'رسالة على الشاشة: زيت المحرك',        hi: 'डिस्प्ले संदेश: इंजन ऑयल' },
+  /* --- added 2026-09-16, from the six manuals (see MODELS below) ---- */
+  stop:         { icon: 'stop',         sv: 'STOP – stanna bilen omgående',      en: 'STOP – stop the vehicle at once',  ar: 'STOP – أوقف المركبة فوراً',           hi: 'STOP – वाहन तुरंत रोकें' },
+  ebd:          { icon: 'abs',          sv: 'Bromskraftfördelning (EBD) – fel',  en: 'Brake force distribution (EBD) fault', ar: 'عطل في توزيع قوة الفرملة (EBD)',  hi: 'ब्रेक फ़ोर्स वितरण (EBD) ख़राबी' },
+  scr:          { icon: 'scr',          sv: 'Avgasrening (SCR) – fel',           en: 'Exhaust after-treatment (SCR) fault', ar: 'عطل في نظام معالجة العادم (SCR)', hi: 'एग्ज़ॉस्ट सिस्टम (SCR) ख़राबी' },
+  tyreFault:    { icon: 'tyre',         sv: 'Däcktryckskontrollen ur funktion',  en: 'Tyre pressure monitoring out of order', ar: 'نظام مراقبة ضغط الإطارات متوقف', hi: 'टायर प्रेशर मॉनिटरिंग बंद' },
+  brakeAssist:  { icon: 'brakeAssist',  sv: 'Aktiv bromsassistent – fel eller ej tillgänglig', en: 'Active brake assist – fault or unavailable', ar: 'مساعد الفرملة النشط – عطل أو غير متاح', hi: 'एक्टिव ब्रेक असिस्ट – ख़राबी या अनुपलब्ध' },
+  brakeAssistOff:{ icon: 'brakeAssist', sv: 'Aktiv bromsassistent avstängd',     en: 'Active brake assist switched off',  ar: 'مساعد الفرملة النشط متوقف',          hi: 'एक्टिव ब्रेक असिस्ट बंद' },
+  electrical:   { icon: 'electrical',   sv: 'Fel i elsystemet',                  en: 'Electrical system fault',          ar: 'عطل في النظام الكهربائي',             hi: 'इलेक्ट्रिकल सिस्टम ख़राबी' },
+  hillHold:     { icon: 'hill',         sv: 'Backstartshjälp (Hill Holder) – fel', en: 'Hill start assist fault',        ar: 'عطل في مساعد الانطلاق على المنحدر',   hi: 'हिल स्टार्ट असिस्ट ख़राबी' },
+  tailLift:     { icon: 'tailLift',     sv: 'Bakgavellyft / ramp',               en: 'Tail lift / ramp',                 ar: 'رافعة خلفية / منحدر',                 hi: 'टेल लिफ्ट / रैंप' },
+  pto:          { icon: 'pto',          sv: 'Kraftuttag (PTO) inkopplat',        en: 'Power take-off (PTO) engaged',     ar: 'مأخذ القدرة (PTO) مفعّل',             hi: 'पावर टेक-ऑफ़ (PTO) चालू' },
+  retarder:     { icon: 'retarder',     sv: 'Retarder – inkopplad eller blockerad', en: 'Retarder engaged or blocked',   ar: 'المبطئ (Retarder) مفعّل أو محجوب',    hi: 'रिटार्डर चालू या अवरुद्ध' },
+  trailer:      { icon: 'trailer',      sv: 'Släp eller kopplingsanordning – fel', en: 'Trailer or coupling fault',      ar: 'عطل في المقطورة أو وصلة القطر',       hi: 'ट्रेलर या कपलिंग ख़राबी' },
+  glowFault:    { icon: 'glow',         sv: 'Fel i förglödningssystemet',        en: 'Preheating system fault',          ar: 'عطل في نظام التسخين المسبق',          hi: 'प्रीहीटिंग सिस्टम ख़राबी' },
+  oilSensor:    { icon: 'oilLevel',     sv: 'Fel på motoroljegivaren',           en: 'Engine oil sensor fault',          ar: 'عطل في حساس زيت المحرك',              hi: 'इंजन ऑयल सेंसर ख़राबी' },
+  fuelSensor:   { icon: 'fuel',         sv: 'Fel på bränslenivågivaren',         en: 'Fuel level sender fault',          ar: 'عطل في حساس مستوى الوقود',            hi: 'ईंधन स्तर सेंसर ख़राबी' },
+  airFilter:    { icon: 'airFilter',    sv: 'Luftfiltret igensatt',              en: 'Air filter clogged',               ar: 'مرشّح الهواء مسدود',                  hi: 'एयर फ़िल्टर जाम' },
+  gearboxHot:   { icon: 'gearbox',      sv: 'Växellådsoljan överhettad',         en: 'Gearbox oil overheating',          ar: 'ارتفاع حرارة زيت ناقل الحركة',        hi: 'गियरबॉक्स ऑयल ज़्यादा गरम' },
+  driverAttention:{ icon: 'coffee',     sv: 'Trötthetsvarning – ta en paus',     en: 'Fatigue warning – take a break',   ar: 'تحذير الإرهاق – خذ استراحة',          hi: 'थकान चेतावनी – ब्रेक लें' },
+  ice:          { icon: 'ice',          sv: 'Risk för is på vägen',              en: 'Risk of ice on the road',          ar: 'خطر وجود جليد على الطريق',            hi: 'सड़क पर बर्फ़ का ख़तरा' },
+  clutchOverheat:{ icon: 'clutch',      sv: 'Kopplingen överhettas',             en: 'Clutch overheating',               ar: 'ارتفاع حرارة القابض (الدبرياج)',      hi: 'क्लच ज़्यादा गरम' },
+  keyBattery:   { icon: 'key',          sv: 'Byt batteri i nyckeln',             en: 'Replace the key battery',          ar: 'استبدل بطارية المفتاح',               hi: 'चाबी की बैटरी बदलें' },
+  sos:          { icon: 'message',      sv: 'Nödanropssystemet (SOS) – fel',     en: 'Emergency call system (SOS) fault', ar: 'عطل في نظام نداء الطوارئ (SOS)',     hi: 'आपातकालीन कॉल सिस्टम (SOS) ख़राबी' },
+  parkSensor:   { icon: 'parkSensor',   sv: 'Parkerings- eller backsensorer – fel', en: 'Parking or reversing sensor fault', ar: 'عطل في حساسات الركن أو الرجوع',   hi: 'पार्किंग या रिवर्स सेंसर ख़राबी' },
+  crossWind:    { icon: 'esp',          sv: 'Sidvindsassistans (Cross Wind Assist)', en: 'Cross Wind Assist',            ar: 'مساعد الرياح الجانبية',               hi: 'क्रॉस विंड असिस्ट' },
+  forwardCross: { icon: 'collision',    sv: 'Varning för korsande trafik framför', en: 'Forward crossing alert',         ar: 'تحذير من عبور أمام المركبة',          hi: 'आगे क्रॉसिंग चेतावनी' },
+
   other:        { icon: 'other',        sv: 'Annan lampa – beskriv nedan',       en: 'Another light – describe below',   ar: 'لمبة أخرى – صِفها أدناه',             hi: 'कोई और लाइट – नीचे बताएं' }
 };
 
@@ -207,41 +303,143 @@ const LAMPS = {
 const MODELS = {
   'iveco-daily': {
     brand: 'IVECO', name: 'Daily',
-    source: 'Instruktionsbok, "Förarplats", tabell VARNINGSLAMPOR (placering 1–29)',
+    source: 'Instruktionsbok, "Förarplats", tabell VARNINGSLAMPOR (placering 1–29, ' +
+            's. 113–122) och ideogramförteckningen för huvuddisplayen (s. 123–129)',
+    manual: {
+      file: 'iveco-daily-varningslampor.pdf',
+      title: 'IVECO Daily – Förarplats: varningslampor',
+      pages: 's. 113–129 ur instruktionsboken'
+    },
     lights: [
-      ['coolant', 'r'], ['brake', 'r'], ['seatbelt', 'r'], ['steering', 'r'],
-      ['airbag', 'r'], ['battery', 'r'], ['oilPressure', 'r'], ['oilLevel', 'r'],
-      ['airSuspension', 'r'], ['diff', 'r'],
-      ['engine', 'a'], ['abs', 'a'], ['esp', 'a'], ['glow', 'a'], ['dpf', 'a'],
-      ['adblue', 'a'], ['fuel', 'a'], ['lampFault', 'a'], ['immobiliser', 'a'],
-      ['collision', 'a'], ['lane', 'a'], ['triangle', 'a'], ['other', 'a']
+      ['coolant', 'r'], ['brake', 'r'], ['brakeFault', 'r'], ['seatbelt', 'r'],
+      ['steering', 'r'], ['airbag', 'r'], ['battery', 'r'], ['oilPressure', 'r'],
+      ['oilLevel', 'r'], ['airSuspension', 'r'], ['diff', 'r'], ['tailLift', 'r'],
+      ['engine', 'a'], ['abs', 'a'], ['ebd', 'a'], ['esp', 'a'], ['espOff', 'a'],
+      ['glow', 'a'], ['glowFault', 'a'], ['dpf', 'a'], ['adblue', 'a'],
+      ['fuel', 'a'], ['fuelCut', 'a'], ['lampFault', 'a'], ['immobiliser', 'a'],
+      ['collision', 'a'], ['lane', 'a'], ['retarder', 'a'], ['triangle', 'a'],
+      ['door', 'a'], ['brakePad', 'a'], ['brakeHot', 'a'], ['gearbox', 'a'],
+      ['tyre', 'a'], ['waterFuel', 'a'], ['service', 'a'], ['tacho', 'a'],
+      ['parkSensor', 'a'], ['trailer', 'a'], ['pto', 'a'], ['oilSensor', 'a'],
+      ['ice', 'a'], ['other', 'a']
     ]
   },
   'mb-sprinter': {
     brand: 'Mercedes-Benz', name: 'Sprinter (907)',
-    source: 'Instruktionsbok, "Varnings- och kontrollampor" s. 790–802; AdBlue, ' +
-            'partikelfilter och motorolja visas som displaymeddelanden (s. 757–762)',
+    source: 'Instruktionsbok F907 0082 09, "Varnings- och kontrollampor" s. 790–802 ' +
+            'och displaymeddelandena s. 753–783. AdBlue, partikelfilter och motorolja ' +
+            'visas som displaymeddelanden på den här bilen, inte som lampor',
+    manual: {
+      file: 'mb-sprinter-907-varningslampor.pdf',
+      title: 'Sprinter 907 – Displaymeddelanden och varnings-/kontrollampor',
+      pages: 's. 737–802 ur instruktionsboken (maj 2026)',
+      full: 'https://www.mercedes-benz.se/vans/services/manuals.html'
+    },
     lights: [
-      ['brake', 'r'], ['seatbelt', 'r'], ['steering', 'r'], ['battery', 'r'],
-      ['airbag', 'r'], ['coolant', 'r'],
-      ['engine', 'a'], ['abs', 'a'], ['esp', 'a'], ['espOff', 'a'],
-      ['brakeFault', 'a'], ['parkBrake', 'a'], ['glow', 'a'], ['tyre', 'a'],
-      ['fuel', 'a'], ['door', 'a'], ['tacho', 'a'],
+      ['brake', 'r'], ['seatbelt', 'r'], ['airbag', 'r'], ['steering', 'r'],
+      ['electrical', 'r'], ['coolant', 'r'], ['collision', 'r'],
+      ['oilPressure', 'r'], ['oilLevel', 'r'], ['bonnet', 'r'],
+      ['engine', 'a'], ['abs', 'a'], ['ebd', 'a'], ['brakeFault', 'a'],
+      ['esp', 'a'], ['espOff', 'a'], ['parkBrake', 'a'], ['glow', 'a'],
+      ['glowFault', 'a'], ['tyre', 'a'], ['tyreFault', 'a'], ['fuel', 'a'],
+      ['door', 'a'], ['tacho', 'a'], ['brakeAssist', 'a'], ['brakeAssistOff', 'a'],
+      ['brakePad', 'a'], ['waterFuel', 'a'], ['battery', 'a'], ['airFilter', 'a'],
+      ['keyBattery', 'a'], ['gearbox', 'a'], ['diff', 'a'],
+      ['msgAdblue', 'a'], ['msgDpf', 'a'], ['msgOil', 'a'], ['other', 'a']
+    ]
+  },
+  'mb-vito': {
+    brand: 'Mercedes-Benz', name: 'Vito (447)',
+    source: 'Instruktionsbok F447 0099 09, "Varnings- och kontrollampor" s. 785–798 ' +
+            'och displaymeddelandena s. 753–778. Som på Sprintern är AdBlue, ' +
+            'partikelfilter och motorolja displaymeddelanden. Chassilampan (gul/röd) ' +
+            'är AIRMATIC-luftfjädringen, som Sprintern saknar',
+    manual: {
+      file: 'mb-vito-447-varningslampor.pdf',
+      title: 'Vito 447 – Displaymeddelanden och varnings-/kontrollampor',
+      pages: 's. 729–798 ur instruktionsboken (maj 2026)',
+      full: 'https://www.mercedes-benz.se/vans/services/manuals.html'
+    },
+    lights: [
+      ['brake', 'r'], ['seatbelt', 'r'], ['airbag', 'r'], ['steering', 'r'],
+      ['electrical', 'r'], ['coolant', 'r'], ['collision', 'r'],
+      ['airSuspension', 'r'], ['oilPressure', 'r'], ['oilLevel', 'r'], ['bonnet', 'r'],
+      ['engine', 'a'], ['abs', 'a'], ['ebd', 'a'], ['brakeFault', 'a'],
+      ['esp', 'a'], ['espOff', 'a'], ['parkBrake', 'a'], ['glow', 'a'],
+      ['tyre', 'a'], ['tyreFault', 'a'], ['fuel', 'a'], ['door', 'a'],
+      ['tacho', 'a'], ['brakeAssist', 'a'], ['brakeAssistOff', 'a'],
+      ['brakePad', 'a'], ['waterFuel', 'a'], ['battery', 'a'], ['airFilter', 'a'],
+      ['keyBattery', 'a'], ['gearbox', 'a'], ['gearboxHot', 'a'],
       ['msgAdblue', 'a'], ['msgDpf', 'a'], ['msgOil', 'a'], ['other', 'a']
     ]
   },
   'toyota-proace-max': {
     brand: 'Toyota', name: 'Proace Max',
-    source: 'Snabbguide PZ49X-Q0269-SV, avsnitt 1-6 "Varningslampor och meddelanden"',
+    source: 'Instruktionsbok PZ49X-MAX24-SV V5, kapitel 3.4 "Varningslampor och ' +
+            'meddelanden": lamptabellen s. 119–126 och displaysymbolerna s. 127–136. ' +
+            'De rent eldrivna versionernas lampor är utelämnade – våra bilar är diesel',
+    manual: {
+      file: 'toyota-proace-max-varningslampor.pdf',
+      title: 'Toyota Proace MAX – Varningslampor och meddelanden',
+      pages: 's. 119–137 ur instruktionsboken PZ49X-MAX24-SV'
+    },
     lights: [
-      ['brake', 'r'], ['airbag', 'r'], ['seatbelt', 'r'], ['coolant', 'r'],
-      ['steering', 'r'], ['oilPressure', 'r'], ['oilLevel', 'r'], ['battery', 'r'],
-      ['door', 'r'], ['bonnet', 'r'], ['gearbox', 'r'], ['triangle', 'r'],
-      ['hvBattery', 'r'],
-      ['engine', 'a'], ['abs', 'a'], ['esp', 'a'], ['tyre', 'a'], ['glow', 'a'],
-      ['adblue', 'a'], ['dpf', 'a'], ['fuel', 'a'], ['waterFuel', 'a'],
-      ['brakePad', 'a'], ['brakeHot', 'a'], ['service', 'a'], ['lampFault', 'a'],
-      ['immobiliser', 'a'], ['turtle', 'a'], ['other', 'a']
+      ['brake', 'r'], ['ebd', 'r'], ['airbag', 'r'], ['seatbelt', 'r'],
+      ['coolant', 'r'], ['steering', 'r'], ['immobiliser', 'r'],
+      ['oilPressure', 'r'], ['oilLevel', 'r'], ['battery', 'r'], ['door', 'r'],
+      ['bonnet', 'r'], ['gearbox', 'r'], ['driverAttention', 'r'], ['sos', 'r'],
+      ['forwardCross', 'r'], ['triangle', 'r'],
+      ['engine', 'a'], ['abs', 'a'], ['adblue', 'a'], ['fuel', 'a'],
+      ['glow', 'a'], ['glowFault', 'a'], ['esp', 'a'], ['espOff', 'a'],
+      ['crossWind', 'a'], ['hillHold', 'a'], ['lane', 'a'], ['tyre', 'a'],
+      ['tyreFault', 'a'], ['collision', 'a'], ['brakePad', 'a'], ['brakeHot', 'a'],
+      ['oilSensor', 'a'], ['fuelCut', 'a'], ['fuelSensor', 'a'], ['waterFuel', 'a'],
+      ['ice', 'a'], ['lampFault', 'a'], ['gearboxHot', 'a'], ['service', 'a'],
+      ['dpf', 'a'], ['msgOil', 'a'], ['parkSensor', 'a'], ['trailer', 'a'],
+      ['other', 'a']
+    ]
+  },
+  'citroen-jumpy': {
+    brand: 'Citroën', name: 'Jumpy',
+    source: 'Instruktionsbok (eGuide jumpy3vp, sv-SE), kapitlet "Kontrollampor och ' +
+            'varningslampor", s. 11–22: röda s. 11–12, orange s. 13–20. Gröna och blå ' +
+            'kontrollampor säger att ett system är på och är utelämnade',
+    manual: {
+      file: 'citroen-jumpy-instruktionsbok.pdf',
+      title: 'Citroën Jumpy – Instruktionsbok (hela boken)',
+      pages: '324 sidor; varningslamporna s. 11–22',
+      full: 'https://service.citroen.com/ACddb/'
+    },
+    lights: [
+      ['stop', 'r'], ['oilPressure', 'r'], ['brake', 'r'], ['ebd', 'r'],
+      ['coolant', 'r'], ['battery', 'r'], ['seatbelt', 'r'], ['door', 'r'],
+      ['abs', 'a'], ['service', 'a'], ['adblue', 'a'], ['scr', 'a'],
+      ['fuelCut', 'a'], ['engine', 'a'], ['collision', 'a'], ['esp', 'a'],
+      ['espOff', 'a'], ['tyre', 'a'], ['tyreFault', 'a'], ['glow', 'a'],
+      ['airbag', 'a'], ['fuel', 'a'], ['waterFuel', 'a'], ['dpf', 'a'],
+      ['steering', 'a'], ['clutchOverheat', 'a'], ['other', 'a']
+    ]
+  },
+  'peugeot-expert': {
+    brand: 'Peugeot', name: 'Expert',
+    source: 'Instruktionsbok (eGuide expert3vp, sv-SE), kapitlet "Kontrollampor och ' +
+            'varningslampor", s. 12–17: röda s. 12–13, orange s. 13–17. Lamporna för ' +
+            'e-Expert är utelämnade – vår bil är diesel',
+    manual: {
+      file: 'peugeot-expert-instruktionsbok.pdf',
+      title: 'Peugeot Expert – Instruktionsbok (hela boken)',
+      pages: '324 sidor; varningslamporna s. 12–17',
+      full: 'https://public.servicebox.peugeot.com/APddb/'
+    },
+    lights: [
+      ['stop', 'r'], ['oilPressure', 'r'], ['brake', 'r'], ['ebd', 'r'],
+      ['coolant', 'r'], ['battery', 'r'], ['seatbelt', 'r'], ['door', 'r'],
+      ['abs', 'a'], ['brakeFault', 'a'], ['parkBrake', 'a'], ['service', 'a'],
+      ['adblue', 'a'], ['scr', 'a'], ['fuelCut', 'a'], ['engine', 'a'],
+      ['collision', 'a'], ['brakeAssist', 'a'], ['esp', 'a'], ['espOff', 'a'],
+      ['hillHold', 'a'], ['tyre', 'a'], ['tyreFault', 'a'], ['glow', 'a'],
+      ['airbag', 'a'], ['fuel', 'a'], ['waterFuel', 'a'], ['dpf', 'a'],
+      ['steering', 'a'], ['other', 'a']
     ]
   },
   /* A van whose model nobody has set yet. The lamps every van in this fleet
@@ -280,6 +478,34 @@ function lightsFor(key) {
   }).filter(Boolean);
 }
 
+/**
+ * The manual a vehicle's page should link to, or null.
+ *
+ * `file` is a PDF served from /manualer/, `full` an official page at the
+ * maker's own site for the whole book where only an extract is hosted here.
+ * A vehicle may override the file (vehicles.manual_file) when its own van
+ * differs from the model's default — a different model year, say.
+ */
+function manualFor(key, override) {
+  const own = String(override || '').trim();
+  const model = modelOf(key);
+  const man = model.manual;
+  if (!man && !own) return null;
+  /* An override is a different book, so it does not keep the model's
+     subtitle: "annat.pdf" under "s. 113–129 ur instruktionsboken" would be a
+     caption describing a document nobody is looking at. */
+  const modelName = `${model.brand} ${model.name}`.trim() || 'Instruktionsbok';
+  if (own && (!man || own !== man.file)) {
+    return { file: own, title: modelName, pages: own, full: (man && man.full) || '' };
+  }
+  return {
+    file: own || man.file,
+    title: man.title || modelName,
+    pages: man.pages || '',
+    full: man.full || ''
+  };
+}
+
 /** The name of a lamp in one language, for reading a check back. */
 function lampText(code, lang) {
   const lamp = LAMPS[code];
@@ -305,4 +531,5 @@ const PICK_LABEL = {
   hi: 'कौन सी लाइट जल रही है?'
 };
 
-module.exports = { ICONS, icon, LAMPS, MODELS, MODEL_KEYS, modelOf, lightsFor, lampText, PICK_LABEL };
+module.exports = { ICONS, icon, LAMPS, MODELS, MODEL_KEYS, modelOf, lightsFor, lampText,
+  manualFor, PICK_LABEL };

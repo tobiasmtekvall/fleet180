@@ -95,6 +95,9 @@ const UI = {
     boardFew: 'Färre än {n} tilldelningar – ingen placering',
     boardEmpty: 'Ingen statistik ännu.',
     boardYou: 'Du',
+    manualTitle: 'Instruktionsbok för {plate}',
+    manualOpen: 'Öppna som PDF',
+    manualFull: 'Hela instruktionsboken hos tillverkaren',
     languageLabel: 'Språk'
   },
   en: {
@@ -163,6 +166,9 @@ const UI = {
     boardFew: 'Fewer than {n} assignments – not ranked',
     boardEmpty: 'No statistics yet.',
     boardYou: 'You',
+    manualTitle: 'Owner’s manual for {plate}',
+    manualOpen: 'Open as PDF',
+    manualFull: 'The complete manual at the manufacturer',
     languageLabel: 'Language'
   },
   ar: {
@@ -231,6 +237,9 @@ const UI = {
     boardFew: 'أقل من {n} تكليفات – خارج الترتيب',
     boardEmpty: 'لا توجد إحصاءات بعد.',
     boardYou: 'أنت',
+    manualTitle: 'دليل المالك للمركبة {plate}',
+    manualOpen: 'افتح بصيغة PDF',
+    manualFull: 'الدليل الكامل على موقع الشركة المصنّعة',
     languageLabel: 'اللغة'
   },
   hi: {
@@ -299,6 +308,9 @@ const UI = {
     boardFew: '{n} से कम असाइनमेंट – रैंक नहीं',
     boardEmpty: 'अभी कोई आँकड़े नहीं।',
     boardYou: 'आप',
+    manualTitle: '{plate} की ओनर मैनुअल',
+    manualOpen: 'PDF के रूप में खोलें',
+    manualFull: 'निर्माता की साइट पर पूरी मैनुअल',
     languageLabel: 'भाषा'
   }
 };

@@ -219,6 +219,13 @@ function adminVehiclesPage({ vehicles, forms, message, counts }) {
   const formOptions = [{ value: '', label: 'Default form' }]
     .concat(forms.filter(f => !f.is_default).map(f => ({ value: String(f.id), label: f.title })));
 
+  /* The manual this van would get from its model, shown as the placeholder in
+     the override box so it is clear what "empty" means. */
+  const manualHint = key => {
+    const man = telltales.manualFor(key, '');
+    return man && man.file ? man.file : 'no manual for this model';
+  };
+
   /* Which van it is. This decides the list of warning lights a driver is
      offered when they report a lamp, so it is set here rather than in the
      form: one form, many models. */
@@ -236,6 +243,10 @@ function adminVehiclesPage({ vehicles, forms, message, counts }) {
           ${select('owner', OWNER_OPTIONS, v.owner)}
           ${select('fleet', FLEET_OPTIONS, v.fleet)}
           ${select('modelKey', modelOptions, v.model_key || '')}
+          <input class="form-control" type="text" name="manualFile" style="width:190px"
+                 value="${esc(v.manual_file || '')}" maxlength="120"
+                 placeholder="${esc(manualHint(v.model_key))}"
+                 title="A PDF in public/manualer/ for this van only. Empty = the model's own manual.">
           ${select('formId', formOptions, v.form_id ? String(v.form_id) : '', 'grow')}
           <label class="check"><input type="checkbox" name="active" value="1"${v.active ? ' checked' : ''}> Active</label>
           <span class="muted" style="font-size:13px">${esc(counts.get(v.plate) || 0)} checks</span>
@@ -262,6 +273,12 @@ ${flash(message)}
      to the dashboard-lights question, they get a list of this particular van's lamps and symbols.
      A vehicle with no model gets a shared list of the lamps every van has.</p>
 
+  <p class="lede"><strong>The model also decides the manual.</strong> Each van's page carries a link
+     to its own instruktionsbok, served from this app. The box after the model is only for a van
+     that needs a different file from the rest of its model – a file name in
+     <span class="mono">public/manualer/</span>, nothing else. Leave it empty and the van gets the
+     model's own manual.</p>
+
   <div class="card">
     <div class="card-header">New vehicle</div>
     <div class="card-body">
@@ -271,6 +288,9 @@ ${flash(message)}
         ${select('owner', OWNER_OPTIONS, '')}
         ${select('fleet', FLEET_OPTIONS, 'box')}
         ${select('modelKey', modelOptions, '')}
+        <input class="form-control" type="text" name="manualFile" style="width:190px"
+               maxlength="120" placeholder="manual – the model's own"
+               title="A PDF in public/manualer/ for this van only. Empty = the model's own manual.">
         ${select('formId', formOptions, '', 'grow')}
         <button class="btn btn-primary" type="submit">Add</button>
       </form>
@@ -278,7 +298,7 @@ ${flash(message)}
   </div>
 
   <div class="card">
-    <div class="card-header">All vehicles<span class="step-tag">Reg. no. · owner · fleet · model · form</span></div>
+    <div class="card-header">All vehicles<span class="step-tag">Reg. no. · owner · fleet · model · manual · form</span></div>
     <table class="table"><tbody>
 ${rows || '<tr><td class="muted" style="padding:20px">No vehicles yet.</td></tr>'}
     </tbody></table>

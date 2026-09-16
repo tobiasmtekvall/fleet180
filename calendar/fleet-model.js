@@ -56,7 +56,13 @@ export const FLEETS = Object.freeze([
     vehicles: [
       { plate: 'MER05W', owner: '' },
       { plate: 'BZU92Z', owner: '' },
-      { plate: 'RLX94L', owner: '' },
+      // Was RLX94L here and in Fleet 180 until 2026-09-16. No such
+      // registration exists; the van is RLX94A. The two halves of the app
+      // have to call it the same thing, or the checkpoint history in
+      // calendar_fleet_weeks (keyed by plate) is filed under a van the
+      // safety check no longer knows. Whatever was recorded against the old
+      // key stays under it and is not shown.
+      { plate: 'RLX94A', owner: '' },
       { plate: 'CDK93M', owner: '' },
       { plate: 'DTE97W', owner: '' },
       { plate: 'WBH37M', owner: '' }

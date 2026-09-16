@@ -34,7 +34,13 @@ const ICON = {
     '<circle cx="12" cy="13" r="3.2" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>',
   invoice: '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">' +
     '<path d="M5.5 3.5h9l4 4v13h-13z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>' +
-    '<path d="M14 3.5v4.5h4.5M8.5 12h7M8.5 15.5h7M8.5 19h4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>'
+    '<path d="M14 3.5v4.5h4.5M8.5 12h7M8.5 15.5h7M8.5 19h4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
+  // A sheet with a signature line — the rental agreement, which is a
+  // different thing from an invoice and files as its own kind.
+  agreement: '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">' +
+    '<path d="M5.5 3.5h13v17h-13z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>' +
+    '<path d="M8.5 8h7M8.5 11.5h7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>' +
+    '<path d="M8.5 16.5c1.5-2 2.5 1.5 4 0s2-1 3 .5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>'
 };
 
 const LINKS = [
@@ -46,12 +52,24 @@ const LINKS = [
 const EXPENSE_LABEL = { damage: 'Damage', parts: 'Spare parts' };
 // Who did the work on a van. 'inhouse' was renamed 'own' on 2026-09-16.
 const HANDLER_LABEL = { okq8: 'OKQ8', own: 'Own' };
-// The three sections of Expenses. Only Vehicles has plates and workshops.
-const SCOPE_LABEL = { vehicle: 'Vehicles', tool: 'Tools', misc: 'Misc' };
+/* Where we hire from. A fixed list rather than a free-text box: the same firm
+   typed three ways is three firms in the totals, and there are four of them.
+   The KEY is what is stored, so a name can be reworded without touching a
+   single row -- and a new firm is one line here. */
+const RENTAL_FIRM_LABEL = {
+  'okq8-jordbron': 'OKQ8 Jordbron',
+  'okq8-varstarondellen': 'OKQ8 Vårstarondellen',
+  'circlek-osterangen': 'Circle K Österängen',
+  'skeppsbrons': 'Skeppsbrons'
+};
+// The four sections of Expenses. Only Vehicles has workshops; Vehicles and
+// Rental cars have a registration, and a rental's is not one of ours.
+const SCOPE_LABEL = { vehicle: 'Vehicles', tool: 'Tools', misc: 'Misc', rental: 'Rental cars' };
 const SCOPES = Object.keys(SCOPE_LABEL);
 const DESC_HINT = {
   damage: 'What happened?', parts: 'Which part?',
-  tool: 'Which tool? e.g. torque wrench, repaired', misc: 'What was it for?'
+  tool: 'Which tool? e.g. torque wrench, repaired', misc: 'What was it for?',
+  rental: 'Which car, and why it was hired'
 };
 
 /** 12400 -> "12 400 kr". Space as the thousands separator; the money is SEK. */
@@ -89,16 +107,49 @@ function days(inDate, outDate, today) {
   return { text: outDate ? `${n} d` : `${n} d…`, open: !outDate, n };
 }
 
+const FILE_LABEL = { invoice: 'Invoice', agreement: 'Agreement', photo: 'Photo' };
+
+/**
+ * When a file happened.
+ *
+ * "Taken" is what the camera wrote into the picture, and it is the one worth
+ * having: a hand-back photo uploaded the next morning still dates itself to
+ * the hand-back. Most files have none -- a PDF, a screenshot, a picture an
+ * app re-encoded -- and then the upload time is all there is, and the chip
+ * says so rather than passing one off as the other.
+ */
+function fileWhen(f) {
+  if (f.taken_at) return { text: fmtDateTime(f.taken_at), word: 'Taken', exact: true };
+  if (f.uploaded_at) return { text: fmtDateTime(f.uploaded_at), word: 'Uploaded', exact: false };
+  return { text: '', word: '', exact: false };
+}
+
 function fileChip(f) {
-  const label = f.kind === 'invoice' ? 'Invoice' : 'Photo';
+  const label = FILE_LABEL[f.kind] || 'File';
   const name = f.filename || label;
   const size = f.byte_size ? ` (${Math.max(1, Math.round(f.byte_size / 1024))} kB)` : '';
+  const when = fileWhen(f);
+  const tip = [name + size, when.text ? `${when.word.toLowerCase()} ${when.text}` : '']
+    .filter(Boolean).join(' · ');
   return `<span class="filechip file-${esc(f.kind)}">
       <a href="/admin/incidents/file/${esc(f.id)}" target="_blank" rel="noopener"
-         title="${esc(name + size)}">${esc(label)}</a>
+         title="${esc(tip)}">${esc(label)}${when.text
+           ? `<time class="filewhen${when.exact ? ' exact' : ''}">${esc(when.text.slice(0, 10))}</time>` : ''}</a>
       <button class="filex" type="submit" title="Remove ${esc(name)}"
               formaction="/admin/incidents/file/${esc(f.id)}/delete">×</button>
     </span>`;
+}
+
+/** Every attached file with its own time, for the fold-out under a line. */
+function fileTimes(inc) {
+  if (!inc.files.length) return '';
+  const rows = inc.files.map(f => {
+    const when = fileWhen(f);
+    return `<li><span class="ft-kind">${esc(FILE_LABEL[f.kind] || 'File')}</span>
+      <a href="/admin/incidents/file/${esc(f.id)}" target="_blank" rel="noopener">${esc(f.filename || '—')}</a>
+      <span class="ft-when${when.exact ? ' exact' : ''}">${esc(when.word)} ${esc(when.text)}</span></li>`;
+  }).join('');
+  return `<ul class="filetimes">${rows}</ul>`;
 }
 
 /**
@@ -181,13 +232,15 @@ function shopDates(inc, ids = ['', '']) {
   ];
 }
 
-function filesCell(inc) {
-  const photos = inc.files.filter(f => f.kind !== 'invoice');
-  const invoices = inc.files.filter(f => f.kind === 'invoice');
+function filesCell(inc, scope) {
+  const of = k => inc.files.filter(f => (f.kind || 'photo') === k);
+  const rental = scope === 'rental';
+  const agreement = rental ? `
+          <label class="addfile" title="Add the rental agreement – choose a file, then press Save">${ICON.agreement}<input type="file" name="agreements" accept="application/pdf,image/*" multiple hidden></label>` : '';
   return `<span class="inc-files">
-          ${photos.map(fileChip).join('')}${invoices.map(fileChip).join('')}
+          ${of('agreement').map(fileChip).join('')}${of('photo').map(fileChip).join('')}${of('invoice').map(fileChip).join('')}
           <label class="addfile" title="Add photo – choose a file, then press Save">${ICON.camera}<input type="file" name="photos" accept="image/*" multiple hidden></label>
-          <label class="addfile" title="Add invoice – choose a file, then press Save">${ICON.invoice}<input type="file" name="invoices" accept="application/pdf,image/*" multiple hidden></label>
+          <label class="addfile" title="Add invoice – choose a file, then press Save">${ICON.invoice}<input type="file" name="invoices" accept="application/pdf,image/*" multiple hidden></label>${agreement}
         </span>`;
 }
 
@@ -221,8 +274,84 @@ function moreCell(inc, withSupplier) {
             <input class="form-control" type="text" name="invoiceNo" maxlength="80" value="${esc(inc.invoice_no)}"></label>` : ''}
           <label class="nf-field nf-grow"><span>Note</span>
             <textarea class="form-control" name="note" rows="2" maxlength="2000">${esc(inc.note)}</textarea></label>
+          ${fileTimes(inc)}
         </div>
       </details>`;
+}
+
+/** The firm a hire car came from. */
+function firmSelect(current, id = '') {
+  const opts = [['', 'Firm…'], ...Object.entries(RENTAL_FIRM_LABEL)];
+  return `<select class="form-control inc-firm" name="rentalFirm"${id ? ` id="${id}"` : ''}
+            title="Which firm the car was hired from" required>${
+    opts.map(([v, l]) =>
+      `<option value="${esc(v)}"${v === (current || '') ? ' selected' : ''}>${esc(l)}</option>`).join('')
+  }</select>`;
+}
+
+/**
+ * Which of our vans the hire stands in for. Optional: it may stand in for none.
+ *
+ * A van that has since left the fleet -- sold, or its registration corrected --
+ * keeps its own option here. Without it the select would quietly show "Stands
+ * in for…", and the next Save on that line would post an empty value and erase
+ * which van the hire was covering. The row is the record of a hire that has
+ * already happened; it must not lose facts because the fleet moved on.
+ */
+function forSelect(plates, current, id = '') {
+  const known = plates.includes(current);
+  const gone = current && !known
+    ? `<option value="${esc(current)}" selected>${esc(current)} (not in the fleet)</option>` : '';
+  const opts = [`<option value=""${current ? '' : ' selected'}>Stands in for…</option>`, gone]
+    .concat(plates.map(p =>
+      `<option value="${esc(p)}"${p === current ? ' selected' : ''}>${esc(p)}</option>`)).join('');
+  return `<select class="form-control inc-for mono" name="forPlate"${id ? ` id="${id}"` : ''}
+            title="The van of ours it stands in for, if any">${opts}</select>`;
+}
+
+/**
+ * One hire car.
+ *
+ * The two dates are the hire period, not a workshop visit, so `days` counts
+ * them the same way it counts days off the road -- and a car with no return
+ * date yet reads "4 d…", which is the line somebody rings the firm about.
+ * The registration is typed: a hire car is not one of our 22 vans.
+ */
+function rentalRow(inc, plates, today, ret) {
+  /* A return date in the FUTURE is a booking, not a hand-back: the car is
+     still out, and the line has to say the same thing as the "still out"
+     count in the section header (server.js, totals.outNow). Counting to
+     today and leaving it open is what both of them mean. */
+  const back = inc.rented_to && inc.rented_to <= today ? inc.rented_to : '';
+  const d = days(inc.occurred_on, back, today);
+  return `<div class="inc-line${inc.sm_ok ? ' inc-done' : ''}">
+      <form class="inc-form" method="post" enctype="multipart/form-data"
+            action="/admin/incidents/${esc(inc.id)}">
+        <input type="hidden" name="ret" value="${esc(ret)}">
+        <input type="hidden" name="scope" value="rental">
+        <div class="inc-row">
+        <input class="form-control inc-plate mono" type="text" name="plate" maxlength="16" required
+               value="${esc(inc.plate)}" placeholder="REG. NO." title="The hire car's registration">
+        ${firmSelect(inc.rental_firm)}
+        <input class="form-control inc-date" type="date" name="occurredOn" value="${esc(inc.occurred_on)}"
+               required title="Picked up">
+        <input class="form-control inc-date" type="date" name="rentedTo" value="${esc(inc.rented_to)}"
+               title="Returned – leave empty while the car is still out">
+        <span class="inc-days${d.open ? ' open' : ''}" title="${d.open ? 'Still out' : 'Days hired'}">${esc(d.text || '–')}</span>
+        ${forSelect(plates, inc.for_plate)}
+        <input class="form-control inc-desc" type="text" name="description" maxlength="600"
+               value="${esc(inc.description)}" placeholder="${DESC_HINT.rental}" title="${esc(inc.description)}">
+        <input class="form-control inc-inv" type="text" name="invoiceNo" maxlength="80"
+               value="${esc(inc.invoice_no)}" placeholder="Invoice no." title="${esc(inc.invoice_no)}">
+        <input class="form-control inc-cost" type="number" name="cost" step="0.01" min="0"
+               value="${esc(numValue(inc.cost_sek))}" placeholder="kr" title="What the hire cost in total, in SEK">
+        ${filesCell(inc, 'rental')}
+        <span class="inc-sm">${smCell(inc)}</span>
+        ${actionsCell(inc)}
+        </div>
+        ${moreCell(inc, false)}
+      </form>
+  </div>`;
 }
 
 function vehicleRow(inc, plates, today, ret) {
@@ -288,6 +417,22 @@ function otherRow(inc, scope, ret) {
  * order, one place to change.
  */
 function head(scope) {
+  if (scope === 'rental') {
+    return `<div class="inc-row inc-head">
+      <span class="inc-plate">Hire car</span>
+      <span class="inc-firm">Firm</span>
+      <span class="inc-date">Picked up</span>
+      <span class="inc-date">Returned</span>
+      <span class="inc-days">Days</span>
+      <span class="inc-for">Stands in for</span>
+      <span class="inc-desc">Description</span>
+      <span class="inc-inv">Invoice no.</span>
+      <span class="inc-cost">Cost</span>
+      <span class="inc-files">Files</span>
+      <span class="inc-sm">SM check</span>
+      <span class="inc-actions"></span>
+    </div>`;
+  }
   if (scope !== 'vehicle') {
     return `<div class="inc-row inc-head">
       <span class="inc-date">Date</span>
@@ -321,11 +466,59 @@ const field = (label, control, cls = '') =>
   `<label class="nf-field${cls ? ' ' + cls : ''}"><span>${label}</span>${control}</label>`;
 
 /**
+ * The form for a hired car.
+ *
+ * Its own card rather than a branch inside the vehicle form: a hire has a
+ * firm, a period and an agreement, and none of the things a repair has. The
+ * return date is deliberately NOT required -- the car is usually booked in
+ * the morning and comes back whenever the van is ready, and a form that
+ * insists on a date nobody knows yet gets a made-up one.
+ */
+function newRental(plates, today, ret) {
+  return `<div class="card nf-card">
+    <div class="card-header">New rental car
+      <span class="step-tag">A car hired while one of ours is off the road · fields marked * are required</span></div>
+    <div class="card-body">
+      <form class="nf" method="post" action="/admin/incidents" enctype="multipart/form-data">
+        <input type="hidden" name="ret" value="${esc(ret)}">
+        <input type="hidden" name="scope" value="rental">
+        <div class="nf-grid">
+          ${field('Hire car, reg. no. *', `<input class="form-control mono" type="text" name="plate"
+                      maxlength="16" placeholder="REG. NO." required>`)}
+          ${field('Rental firm *', firmSelect('', 'nf-firm'))}
+          ${field('Picked up *', `<input class="form-control" type="date" name="occurredOn" value="${esc(today)}" required>`)}
+          ${field('Returned', `<input class="form-control" type="date" name="rentedTo"
+                      title="Leave empty while the car is still out">`)}
+          ${field('Stands in for', forSelect(plates, '', 'nf-for'))}
+          ${field('Invoice no.', `<input class="form-control" type="text" name="invoiceNo" maxlength="80">`)}
+          ${field('Cost (SEK)', `<input class="form-control" type="number" name="cost" step="0.01" min="0"
+                      placeholder="kr" title="The whole hire, not the daily rate">`)}
+          ${field('Rental agreement (PDF or photo)', `<input class="form-control nf-file" type="file"
+                      name="agreements" accept="application/pdf,image/*" multiple>`)}
+          ${field('Photos of the car', `<input class="form-control nf-file" type="file" name="photos"
+                      accept="image/*" multiple title="Several at once. Each keeps the time it was taken.">`)}
+          ${field('Invoices (PDF or image)', `<input class="form-control nf-file" type="file" name="invoices"
+                      accept="application/pdf,image/*" multiple>`)}
+          ${field('Description', `<textarea class="form-control nf-desc" name="description" rows="3"
+                      maxlength="600" placeholder="${DESC_HINT.rental}"></textarea>`, 'nf-half')}
+          ${field('Note', `<textarea class="form-control" name="note" rows="3" maxlength="2000"
+                      placeholder="Anything else worth keeping – who booked it, the deposit, fuel policy"></textarea>`, 'nf-half')}
+        </div>
+        <div class="actions" style="justify-content:flex-start;margin-top:14px">
+          <button class="btn btn-primary" type="submit">Add rental car</button>
+        </div>
+      </form>
+    </div>
+  </div>`;
+}
+
+/**
  * The form for a new entry: a proper card with a label on every field,
  * rather than one cramped line. Vehicles ask for the van, the category, the
  * driver, the workshop visit and OKQ8/Own; Tools and Misc do not.
  */
 function newEntry(scope, plates, today, ret) {
+  if (scope === 'rental') return newRental(plates, today, ret);
   const vehicle = scope === 'vehicle';
   const u = scope;   // keeps ids unique if two forms ever share a page
   const [shopIn, shopOut] = shopDates({ category: 'damage', shop_in: '', shop_out: '' },
@@ -489,9 +682,19 @@ function sectionTabs(active, sections, filters) {
 function expensesPage({ incidents, plates, filters, totals, sections = {}, today, message, nav }) {
   const scope = filters.scope;
   const vehicle = scope === 'vehicle';
+  const rental = scope === 'rental';
   const ret = '/admin/expenses' + (filters.query || '');
-  const rows = incidents.map(i => vehicle ? vehicleRow(i, plates, today, ret) : otherRow(i, scope, ret)).join('\n');
+  const rows = incidents.map(i => vehicle ? vehicleRow(i, plates, today, ret)
+    : rental ? rentalRow(i, plates, today, ret)
+    : otherRow(i, scope, ret)).join('\n');
   const opt = (v, l, cur) => `<option value="${esc(v)}"${cur === v ? ' selected' : ''}>${esc(l)}</option>`;
+
+  /* The hire car's own registration, typed rather than picked: it is not one
+     of ours, so there is no list to pick it from. */
+  const rentalFilters = rental ? `
+    <div class="f"><label for="plate">Hire car</label>
+      <input class="form-control mono" id="plate" name="plate" type="text" maxlength="16"
+             value="${esc(filters.plate)}" placeholder="REG. NO."></div>` : '';
 
   const vehicleFilters = vehicle ? `
     <div class="f"><label for="plate">Vehicle</label>
@@ -512,6 +715,9 @@ function expensesPage({ incidents, plates, filters, totals, sections = {}, today
     ? `${esc(totals.withCost)} with cost · ${esc(kr(totals.cost) || '0 kr')} total
         (damage ${esc(kr(totals.damageCost) || '0 kr')} · spare parts ${esc(kr(totals.partsCost) || '0 kr')}) ·
         ${esc(totals.waiting)} waiting for the SM check${totals.atShop ? ` · ${esc(totals.atShop)} at the workshop now` : ''}`
+    : rental
+    ? `${esc(totals.withCost)} with cost · ${esc(kr(totals.cost) || '0 kr')} total ·
+        ${esc(totals.waiting)} waiting for the SM check${totals.outNow ? ` · ${esc(totals.outNow)} still out` : ''}`
     : `${esc(totals.withCost)} with cost · ${esc(kr(totals.cost) || '0 kr')} total ·
         ${esc(totals.waiting)} waiting for the SM check`;
 
@@ -519,7 +725,10 @@ function expensesPage({ incidents, plates, filters, totals, sections = {}, today
     vehicle: `What the vans cost, one line each: damage with its workshop visit, and spare parts
      bought for them. New damage reports arrive on <a href="/admin/incidents">Incidents</a>.`,
     tool: "Tools bought, repaired or replaced – one line each, with the supplier, the invoice and the Site Manager's approval.",
-    misc: 'Everything else the site pays for that is neither a vehicle nor a tool.'
+    misc: 'Everything else the site pays for that is neither a vehicle nor a tool.',
+    rental: `Cars hired from OKQ8, Circle K or Skeppsbrons while one of ours is off the road:
+     the hire period, what it cost, the agreement, and photos of the car as it was handed over
+     and handed back. A line with no return date is a car that is still out.`
   }[scope];
 
   const html = `  <div class="page-head">
@@ -534,7 +743,7 @@ ${sectionTabs(scope, sections, filters)}
      of all. Click the small link under a line to add ${vehicle ? 'the supplier, invoice number or a note' : 'a note'}.</p>
 
   <form class="filters no-print" method="get" action="/admin/expenses">
-    <input type="hidden" name="scope" value="${esc(scope)}">${vehicleFilters}
+    <input type="hidden" name="scope" value="${esc(scope)}">${vehicleFilters}${rentalFilters}
     <div class="f"><label for="from">From</label>
       <input class="form-control" type="date" id="from" name="from" value="${esc(filters.from)}"></div>
     <div class="f"><label for="to">To</label>
@@ -546,16 +755,16 @@ ${sectionTabs(scope, sections, filters)}
     <button class="btn btn-primary" type="submit">Show</button>
     <a class="btn btn-ghost" href="/admin/expenses?scope=${esc(scope)}">Everything</a>
     <a class="btn btn-secondary" href="/admin/expenses.csv${esc(filters.query)}">Download CSV</a>
-    <a class="btn btn-ghost" href="/admin/expenses.csv?scope=all" title="Vehicles, tools and misc in one file">CSV, all sections</a>
+    <a class="btn btn-ghost" href="/admin/expenses.csv?scope=all" title="Vehicles, tools, misc and rental cars in one file">CSV, all sections</a>
   </form>
 
 ${newEntry(scope, plates, today, ret)}
 
   <div class="card">
-    <div class="card-header">All ${({ vehicle: 'vehicle', tool: 'tool', misc: 'misc' })[scope]} expenses
+    <div class="card-header">All ${({ vehicle: 'vehicle', tool: 'tool', misc: 'misc', rental: 'rental car' })[scope]} expenses
       <span class="step-tag">${summary}</span></div>
     <div class="inc-scroll">
-      <div class="inc-list${vehicle ? '' : ' inc-list-other'}">
+      <div class="inc-list${vehicle ? '' : rental ? ' inc-list-rental' : ' inc-list-other'}">
 ${head(scope)}
 ${rows || `<p class="muted" style="padding:20px">No entries match. Add one above${vehicle ? ' – or create one from a reported damage on Incidents' : ''}.</p>`}
       </div>
@@ -576,6 +785,12 @@ ${rows || `<p class="muted" style="padding:20px">No entries match. Add one above
          <strong>OKQ8 / Own</strong>, which stays blank until somebody picks. <strong>Spare
          parts</strong> have no workshop visit, so their dates are switched off.
          <strong>Tools</strong> and <strong>Misc</strong> belong to no van and have none of that.</p>
+      <p><strong>Rental cars</strong> carry the hire car's own registration – typed, because it is
+         not one of ours – the firm, the hire period, and optionally the van it stands in for.
+         Leave <em>Returned</em> empty while the car is still out; the Days column then counts up
+         and the section says how many are out. Each photo keeps <strong>when it was taken</strong>
+         where the camera wrote that into the file, and its upload time otherwise – open the fold-out
+         under a line to see every file with its time.</p>
       <p class="muted">Both OKs and withdrawn OKs are kept with their time. Hover over the
          SM box to see the history.</p>
     </div>
@@ -593,7 +808,10 @@ function incidentDeletePage({ inc, ret, nav }) {
   const back = ret || '/admin/expenses';
   const html = `  <div class="page-head">
     <h1>Delete this entry?</h1>
-    <div class="muted mono">${esc([({ vehicle: 'Vehicle', tool: 'Tool', misc: 'Misc' })[inc.scope], inc.plate, EXPENSE_LABEL[inc.category], inc.occurred_on].filter(Boolean).join(' · '))}</div>
+    <div class="muted mono">${esc([
+      ({ vehicle: 'Vehicle', tool: 'Tool', misc: 'Misc', rental: 'Rental car' })[inc.scope],
+      inc.plate, EXPENSE_LABEL[inc.category], RENTAL_FIRM_LABEL[inc.rental_firm],
+      inc.occurred_on].filter(Boolean).join(' · '))}</div>
   </div>
 ${nav}
 
@@ -601,8 +819,8 @@ ${nav}
     <div class="card-header">This will be removed</div>
     <div class="card-body">
       <p>${esc(inc.description || '(no description)')}</p>
-      <p>${esc(inc.files.length)} ${inc.files.length === 1 ? 'file' : 'files'} (photos and invoices)
-         are deleted with the entry, as is the approval history.
+      <p>${esc(inc.files.length)} ${inc.files.length === 1 ? 'file' : 'files'} (photos, invoices
+         and any rental agreement) are deleted with the entry, as is the approval history.
          ${inc.sm_ok ? `<strong>This entry was approved by ${esc(inc.sm_by)} ${esc(fmtDateTime(inc.sm_at))}.</strong>` : ''}</p>
       ${inc.submission_id ? '<p>The check the damage was reported in is not affected – only this line.</p>' : ''}
     </div>
@@ -619,4 +837,5 @@ ${nav}
   return page({ title: 'Delete entry', body: html, links: LINKS, lang: 'en', admin: true });
 }
 
-module.exports = { incidentsPage, expensesPage, incidentDeletePage, kr, EXPENSE_LABEL, HANDLER_LABEL, SCOPE_LABEL };
+module.exports = { incidentsPage, expensesPage, incidentDeletePage, kr, EXPENSE_LABEL, HANDLER_LABEL,
+  SCOPE_LABEL, RENTAL_FIRM_LABEL };

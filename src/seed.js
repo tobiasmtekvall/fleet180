@@ -526,34 +526,48 @@ const DEFAULT_FIELDS = [
  */
 /* The seven vans IBX owns are IVECO Daily, each with a Zepro tail lift —
    proved one by one from their lift inspection certificates (Bilprovningen,
-   "Fordon: IVECO", chassis numbers ZCFC7…/ZCFCB…). The rented ones and the
-   home fleet have no model recorded yet; their model is set under
-   Admin → Fordon, and until then they get the shared warning-light list. */
+   "Fordon: IVECO", chassis numbers ZCFC7…/ZCFCB…).
+
+   EVERY plate was looked up in the Swedish vehicle register on 2026-09-16
+   (biluppgifter.se / car.info), so the model on each line below is what the
+   register says that registration is, not a guess — the make and model decide
+   which warning-light list and which instruktionsbok the driver is shown.
+   The comment after each line is the register's own wording.
+
+   RLX94L, which this list carried since 2026-09-08, exists in no register;
+   the van is RLX94A. Corrected here and in the live table by the
+   seed-2026-09-16-fleet-models migration.
+
+   A van OKQ8 swaps in arrives with no model: it gets the shared list until
+   somebody picks the model under Admin → Fordon. */
 const IVECO = 'iveco-daily';
+const PROACE = 'toyota-proace-max';
+const SPRINTER = 'mb-sprinter';
+const VITO = 'mb-vito';
 
 const DEFAULT_VEHICLES = [
-  { plate: 'ODW03R', owner: 'okq8', fleet: 'box' },
-  { plate: 'RBE87T', owner: 'okq8', fleet: 'box' },
-  { plate: 'XWA50L', owner: 'okq8', fleet: 'box' },
-  { plate: 'BPM38R', owner: 'okq8', fleet: 'box' },
-  { plate: 'HJA34R', owner: 'okq8', fleet: 'box' },
-  { plate: 'BBR00N', owner: 'okq8', fleet: 'box' },
-  { plate: 'WAT90D', owner: 'okq8', fleet: 'box' },
-  { plate: 'RBE26H', owner: 'own',  fleet: 'box', modelKey: IVECO },
-  { plate: 'RPH54L', owner: 'own',  fleet: 'box', modelKey: IVECO },
-  { plate: 'DHN13H', owner: 'own',  fleet: 'box', modelKey: IVECO },
-  { plate: 'GJR88K', owner: 'own',  fleet: 'box', modelKey: IVECO },
-  { plate: 'ODJ63H', owner: 'own',  fleet: 'box', modelKey: IVECO },
-  { plate: 'ELZ35L', owner: 'own',  fleet: 'box', modelKey: IVECO },
-  { plate: 'SSB55B', owner: 'own',  fleet: 'box', modelKey: IVECO },
-  { plate: 'TTJ00A', owner: '',     fleet: 'box' },
-  { plate: 'RAH84S', owner: '',     fleet: 'box' },
-  { plate: 'MER05W', owner: '',     fleet: 'home' },
-  { plate: 'BZU92Z', owner: '',     fleet: 'home' },
-  { plate: 'RLX94L', owner: '',     fleet: 'home' },
-  { plate: 'CDK93M', owner: '',     fleet: 'home' },
-  { plate: 'DTE97W', owner: '',     fleet: 'home' },
-  { plate: 'WBH37M', owner: '',     fleet: 'home' }
+  { plate: 'ODW03R', owner: 'okq8', fleet: 'box', modelKey: SPRINTER }, // Sprinter 3,5-T 315 CDI RWD, 2026
+  { plate: 'RBE87T', owner: 'okq8', fleet: 'box', modelKey: PROACE },   // Proace MAX 2.2 D4D 180, 2026
+  { plate: 'XWA50L', owner: 'okq8', fleet: 'box', modelKey: PROACE },   // Proace MAX 2.2 D4D 180, 2026
+  { plate: 'BPM38R', owner: 'okq8', fleet: 'box', modelKey: PROACE },   // Proace MAX 2.2 D4D 180, 2026
+  { plate: 'HJA34R', owner: 'okq8', fleet: 'box', modelKey: IVECO },    // Daily VI, 136 hk, 2024
+  { plate: 'BBR00N', owner: 'okq8', fleet: 'box', modelKey: IVECO },    // Daily 35-140 Chassi Cab 2.3 JTD
+  { plate: 'WAT90D', owner: 'okq8', fleet: 'box', modelKey: IVECO },    // Daily 35 Chassis Cab 2.3 JTD, 2025
+  { plate: 'RBE26H', owner: 'own',  fleet: 'box', modelKey: IVECO },    // Daily 35 Chassis Cab 2.3 JTD, 2021
+  { plate: 'RPH54L', owner: 'own',  fleet: 'box', modelKey: IVECO },    // Daily 35 Chassis Cab 2.3 JTD
+  { plate: 'DHN13H', owner: 'own',  fleet: 'box', modelKey: IVECO },    // Daily 35-160 Hi-Matic, 2021
+  { plate: 'GJR88K', owner: 'own',  fleet: 'box', modelKey: IVECO },    // Daily 35-160 Hi-Matic, 2021
+  { plate: 'ODJ63H', owner: 'own',  fleet: 'box', modelKey: IVECO },    // Daily 35-160 Hi-Matic, 2021
+  { plate: 'ELZ35L', owner: 'own',  fleet: 'box', modelKey: IVECO },    // Daily 35-160 Hi-Matic, 2022
+  { plate: 'SSB55B', owner: 'own',  fleet: 'box', modelKey: IVECO },    // Daily 35 Chassis Cab 2.3 JTD, 2022
+  { plate: 'TTJ00A', owner: '',     fleet: 'box', modelKey: IVECO },    // Daily 35C Chassis Cab, 2023
+  { plate: 'RAH84S', owner: '',     fleet: 'box', modelKey: IVECO },    // Daily 35-140 Chassi Cab, 2024
+  { plate: 'MER05W', owner: '',     fleet: 'home', modelKey: VITO },    // Vito 30T, 2026
+  { plate: 'BZU92Z', owner: '',     fleet: 'home', modelKey: VITO },    // Vito 30T A, 2026
+  { plate: 'RLX94A', owner: '',     fleet: 'home', modelKey: VITO },    // Vito 114 CDI 3.0t 9G-Tronic, 2026
+  { plate: 'CDK93M', owner: '',     fleet: 'home', modelKey: 'citroen-jumpy' },  // Jumpy 2.0 BlueHDi, 2023
+  { plate: 'DTE97W', owner: '',     fleet: 'home', modelKey: VITO },    // Vito 30T A, 2025
+  { plate: 'WBH37M', owner: '',     fleet: 'home', modelKey: 'peugeot-expert' } // Expert Panel Van 2.0 BlueHDi, 2024
 ];
 
 /** Every language's text for one section heading. */

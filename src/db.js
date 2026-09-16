@@ -318,6 +318,10 @@ CREATE TABLE IF NOT EXISTS vehicles (
 -- so it belongs to the vehicle rather than to the form. Empty means "not set
 -- yet" and falls back to the shared list.
 ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS model_key TEXT NOT NULL DEFAULT '';
+-- The instruktionsbok this van's page links to. Empty means "whatever the
+-- model's own manual is" (telltales.manualFor); a value here is a file in
+-- public/manualer/ and overrides it for this van only.
+ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS manual_file TEXT NOT NULL DEFAULT '';
 CREATE INDEX IF NOT EXISTS vehicles_order_idx ON vehicles (fleet, sort_order, plate);
 
 CREATE TABLE IF NOT EXISTS submissions (
@@ -456,6 +460,15 @@ ALTER TABLE incidents ADD COLUMN IF NOT EXISTS invoice_no TEXT NOT NULL DEFAULT 
 ALTER TABLE incidents ADD COLUMN IF NOT EXISTS note       TEXT NOT NULL DEFAULT '';
 UPDATE incidents SET handled_by = 'own' WHERE handled_by = 'inhouse';
 CREATE INDEX IF NOT EXISTS incidents_scope_idx ON incidents (scope, occurred_on DESC);
+-- 2026-09-16: Rental cars, the fourth section. A hire carries the firm it
+-- came from, the day it goes back, and (optionally) the van it stands in for
+-- while that one is off the road. NOTE: on a rental row the plate column is
+-- the HIRE CAR's registration, which is not one of ours and therefore free
+-- text; for_plate is the van from our own fleet. (No backticks anywhere in
+-- this string: SCHEMA is a template literal and one would end it here.)
+ALTER TABLE incidents ADD COLUMN IF NOT EXISTS rental_firm TEXT NOT NULL DEFAULT '';
+ALTER TABLE incidents ADD COLUMN IF NOT EXISTS rented_to   DATE;
+ALTER TABLE incidents ADD COLUMN IF NOT EXISTS for_plate   TEXT NOT NULL DEFAULT '';
 
 -- Photos of the damage and invoices from the workshop, in the database beside
 -- everything else so a backup is a backup of the whole case.
@@ -467,9 +480,17 @@ CREATE TABLE IF NOT EXISTS incident_files (
   mime        TEXT        NOT NULL,
   bytes       BYTEA       NOT NULL,
   byte_size   INTEGER     NOT NULL DEFAULT 0,
-  uploaded_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  uploaded_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  -- When the PHOTOGRAPH was taken, read out of the file's own EXIF. Null
+  -- when the file carries none (a PDF, a screenshot, a picture an app has
+  -- re-encoded), and then the upload time is all there is. The two are
+  -- shown differently on purpose: "taken" is evidence, "uploaded" is not.
+  taken_at    TIMESTAMPTZ
 );
 CREATE INDEX IF NOT EXISTS incident_files_idx ON incident_files (incident_id, id);
+-- The column above reaches a fresh install only; every existing database
+-- needs it added, like every other column in this file.
+ALTER TABLE incident_files ADD COLUMN IF NOT EXISTS taken_at TIMESTAMPTZ;
 
 -- Every time the Site Manager signs off or takes it back. The incident row
 -- carries the current state; this carries how it got there, because an
@@ -900,6 +921,73 @@ async function addRouteSource(client) {
   return { routes: r.rowCount };
 }
 
+/**
+ * The model of every van in the fleet, and one mistyped plate.
+ *
+ * Until 2026-09-16 only the seven IVECOs we own had a model, so fifteen vans
+ * were offered the shared warning-light list. Every plate was then looked up
+ * in the Swedish vehicle register, so each one can have its own manual's list
+ * — see seed.DEFAULT_VEHICLES and telltales.MODELS.
+ *
+ * RLX94L does not exist in the register. Tobias checked the van: it is
+ * RLX94A. The rename is done first and only when the right plate is not
+ * already there, so a van that has been corrected by hand is left alone; its
+ * checks, assignments and odometer history are keyed on the plate, so they
+ * follow the rename rather than being orphaned by it.
+ *
+ * Timid like every other migration here: a model is set only where the
+ * vehicle has none, so a van somebody has pointed at another list by hand
+ * keeps that list.
+ */
+const FLEET_MODELS_KEY = 'seed-2026-09-16-fleet-models';
+
+async function addFleetModels(client) {
+  const done = await client.query('SELECT 1 FROM jobs WHERE name = $1', [FLEET_MODELS_KEY]);
+  if (done.rowCount) return null;
+
+  /* The vehicles row and its history are renamed independently.
+     `vehicles.plate` is unique, so that one row is renamed only when RLX94A
+     is not already there — but the history tables are not guarded by that:
+     somebody who fixed the plate by hand in /admin renamed the vehicles row
+     ALONE, and the checks, assignments and incidents behind it would then
+     keep the old plate for good, invisible to every query that looks the van
+     up. So each table is asked for itself. */
+  let renamed = 0;
+  const HISTORY = ['submissions', 'assignments', 'incidents'];
+  const taken = await client.query('SELECT 1 FROM vehicles WHERE plate = $1', ['RLX94A']);
+  const old = await client.query('SELECT 1 FROM vehicles WHERE plate = $1', ['RLX94L']);
+  if (old.rowCount && !taken.rowCount) {
+    const r = await client.query(`UPDATE vehicles SET plate = 'RLX94A' WHERE plate = 'RLX94L'`);
+    renamed = r.rowCount;
+  } else if (old.rowCount && taken.rowCount) {
+    // Two rows for one van. Renaming would collide on the unique plate, and
+    // guessing which one to keep is not a migration's business.
+    console.warn('[db] både RLX94L och RLX94A finns som fordon – ingen omdöpning gjord, ' +
+      'ta bort det felaktiga fordonet i Admin → Fordon');
+  }
+  for (const table of HISTORY) {
+    const r = await client.query(
+      `UPDATE ${table} SET plate = 'RLX94A' WHERE plate = 'RLX94L'`);
+    renamed += r.rowCount;
+  }
+
+  let models = 0;
+  for (const car of seed.DEFAULT_VEHICLES) {
+    if (!car.modelKey) continue;
+    const r = await client.query(
+      `UPDATE vehicles SET model_key = $2 WHERE plate = $1 AND model_key = ''`,
+      [car.plate, car.modelKey]);
+    models += r.rowCount;
+  }
+
+  await client.query(
+    `INSERT INTO jobs (name, last_run, note) VALUES ($1, now(), $2)
+     ON CONFLICT (name) DO NOTHING`,
+    [FLEET_MODELS_KEY, `${models} fordon fick modell, ${renamed} registreringsnummer rättat`]);
+
+  return { models, renamed };
+}
+
 async function init() {
   pool = await connectWithRetry();
   await pool.query(SCHEMA);
@@ -914,7 +1002,12 @@ async function init() {
     const clean = await addCleanQuestion(client);
     const damage = await addDamageRole(client);
     const routes = await addRouteSource(client);
+    const fleet = await addFleetModels(client);
     await client.query('COMMIT');
+    if (fleet && (fleet.models || fleet.renamed)) {
+      console.log(`[db] modell satt på ${fleet.models} fordon` +
+        (fleet.renamed ? ', RLX94L rättat till RLX94A' : ''));
+    }
     if (routes && routes.routes) {
       console.log(`[db] ${routes.routes} ruttfrågor hämtar nu listan från tilldelningen`);
     }
@@ -954,7 +1047,8 @@ async function init() {
  * Vehicles                                                            *
  * ------------------------------------------------------------------ */
 
-const VEHICLE_COLS = `id, plate, owner, fleet, note, active, form_id, sort_order, model_key`;
+const VEHICLE_COLS = `id, plate, owner, fleet, note, active, form_id, sort_order, model_key,
+                      manual_file`;
 
 async function listVehicles({ includeInactive = false } = {}) {
   const where = includeInactive ? '' : 'WHERE active';
@@ -977,22 +1071,24 @@ async function getVehicleById(id) {
 }
 
 async function createVehicle({ plate, owner = '', fleet = 'box', note = '', formId = null,
-                               modelKey = '' }) {
+                               modelKey = '', manualFile = '' }) {
   const r = await pool.query(
-    `INSERT INTO vehicles (plate, owner, fleet, note, form_id, model_key, sort_order)
-     VALUES ($1,$2,$3,$4,$5,$6,
+    `INSERT INTO vehicles (plate, owner, fleet, note, form_id, model_key, manual_file, sort_order)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,
              COALESCE((SELECT MAX(sort_order) FROM vehicles WHERE fleet = $3), 0) + 10)
      RETURNING ${VEHICLE_COLS}`,
-    [normalisePlate(plate), owner, fleet, note, formId, modelKey || '']);
+    [normalisePlate(plate), owner, fleet, note, formId, modelKey || '', manualFile || '']);
   return r.rows[0];
 }
 
-async function updateVehicle(id, { plate, owner, fleet, note, active, formId, modelKey }) {
+async function updateVehicle(id, { plate, owner, fleet, note, active, formId, modelKey,
+                                   manualFile }) {
   const r = await pool.query(
     `UPDATE vehicles SET plate = $2, owner = $3, fleet = $4, note = $5,
-            active = $6, form_id = $7, model_key = $8
+            active = $6, form_id = $7, model_key = $8, manual_file = $9
       WHERE id = $1 RETURNING ${VEHICLE_COLS}`,
-    [id, normalisePlate(plate), owner, fleet, note, active, formId, modelKey || '']);
+    [id, normalisePlate(plate), owner, fleet, note, active, formId, modelKey || '',
+     manualFile || '']);
   return r.rows[0] || null;
 }
 
@@ -1074,6 +1170,7 @@ async function countsBefore(date) {
 
 const INCIDENT_COLS = `id, plate, occurred_on, description, driver_name,
   category, handled_by, scope, supplier, invoice_no, note, shop_in, shop_out, cost_sek, sm_ok, sm_by, sm_at, submission_id,
+  rental_firm, rented_to, for_plate,
   created_at, updated_at`;
 
 /** Dates come back as Date objects; the page wants 2026-09-14. */
@@ -1090,6 +1187,7 @@ function shapeIncident(row, files = [], events = []) {
     occurred_on: dayOf(row.occurred_on),
     shop_in: dayOf(row.shop_in),
     shop_out: dayOf(row.shop_out),
+    rented_to: dayOf(row.rented_to),
     cost_sek: row.cost_sek === null || row.cost_sek === undefined ? null : Number(row.cost_sek),
     files, events
   };
@@ -1116,7 +1214,7 @@ async function listIncidents({ plate = '', from = '', to = '', smOk = null,
   // than two per row: forty incidents used to be eighty round trips.
   const ids = rows.map(r => Number(r.id));
   const files = (await pool.query(
-    `SELECT id, incident_id, kind, filename, mime, byte_size, uploaded_at
+    `SELECT id, incident_id, kind, filename, mime, byte_size, uploaded_at, taken_at
        FROM incident_files WHERE incident_id = ANY($1::bigint[]) ORDER BY id`, [ids])).rows;
   const events = (await pool.query(
     `SELECT id, incident_id, action, who, cost_sek, happened_at
@@ -1133,7 +1231,7 @@ async function getIncident(id) {
   const r = await pool.query(`SELECT ${INCIDENT_COLS} FROM incidents WHERE id = $1`, [id]);
   if (!r.rows.length) return null;
   const files = (await pool.query(
-    `SELECT id, incident_id, kind, filename, mime, byte_size, uploaded_at
+    `SELECT id, incident_id, kind, filename, mime, byte_size, uploaded_at, taken_at
        FROM incident_files WHERE incident_id = $1 ORDER BY id`, [id])).rows;
   const events = (await pool.query(
     `SELECT id, incident_id, action, who, cost_sek, happened_at
@@ -1145,14 +1243,16 @@ async function createIncident(data) {
   const r = await pool.query(
     `INSERT INTO incidents
        (plate, occurred_on, description, driver_name, shop_in, shop_out, cost_sek, submission_id,
-        category, handled_by, scope, supplier, invoice_no, note)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING id`,
+        category, handled_by, scope, supplier, invoice_no, note,
+        rental_firm, rented_to, for_plate)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING id`,
     [data.plate, data.occurredOn, data.description || '', data.driverName || '',
      data.shopIn || null, data.shopOut || null,
      data.cost === null || data.cost === undefined ? null : data.cost,
      data.submissionId || null,
      data.category ?? 'damage', data.handledBy || '',
-     data.scope || 'vehicle', data.supplier || '', data.invoiceNo || '', data.note || '']);
+     data.scope || 'vehicle', data.supplier || '', data.invoiceNo || '', data.note || '',
+     data.rentalFirm || '', data.rentedTo || null, data.forPlate || '']);
   return String(r.rows[0].id);
 }
 
@@ -1174,12 +1274,14 @@ async function updateIncident(id, data) {
   await pool.query(
     `UPDATE incidents SET plate = $2, occurred_on = $3, description = $4, driver_name = $5,
             shop_in = $6, shop_out = $7, cost_sek = $8, category = $9, handled_by = $10,
-            scope = $11, supplier = $12, invoice_no = $13, note = $14, updated_at = now()
+            scope = $11, supplier = $12, invoice_no = $13, note = $14,
+            rental_firm = $15, rented_to = $16, for_plate = $17, updated_at = now()
       WHERE id = $1`,
     [id, data.plate, data.occurredOn, data.description || '', data.driverName || '',
      data.shopIn || null, data.shopOut || null, newCost,
      data.category ?? 'damage', data.handledBy || '',
-     data.scope || 'vehicle', data.supplier || '', data.invoiceNo || '', data.note || '']);
+     data.scope || 'vehicle', data.supplier || '', data.invoiceNo || '', data.note || '',
+     data.rentalFirm || '', data.rentedTo || null, data.forPlate || '']);
 
   if (costChanged) {
     await pool.query(
@@ -1239,11 +1341,11 @@ async function signOffIncident(id, { ok, who }) {
   return getIncident(id);
 }
 
-async function addIncidentFile(incidentId, { kind, filename, mime, buffer }) {
+async function addIncidentFile(incidentId, { kind, filename, mime, buffer, takenAt = null }) {
   const r = await pool.query(
-    `INSERT INTO incident_files (incident_id, kind, filename, mime, bytes, byte_size)
-     VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
-    [incidentId, kind, filename || null, mime, buffer, buffer.length]);
+    `INSERT INTO incident_files (incident_id, kind, filename, mime, bytes, byte_size, taken_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
+    [incidentId, kind, filename || null, mime, buffer, buffer.length, takenAt]);
   await pool.query('UPDATE incidents SET updated_at = now() WHERE id = $1', [incidentId]);
   return String(r.rows[0].id);
 }

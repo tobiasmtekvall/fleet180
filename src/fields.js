@@ -7,6 +7,10 @@
  * needs adding in exactly one file.
  */
 
+// Only for reading a stored lamp code back as a name -- see pickName().
+// telltales requires nothing from here, so there is no cycle.
+const telltales = require('./telltales');
+
 const KINDS = [
   // Labels and hints are admin-facing (the form editor), so English.
   { value: 'text',   label: 'Free text',          hint: 'One line of text.' },
@@ -142,6 +146,37 @@ function answerProblem(field, value, allowed) {
 }
 
 /**
+ * What a picked follow-up item is CALLED, from the code that was stored.
+ *
+ * Most lists store their own Swedish wording, so the value is already the
+ * name and comes back untouched. The dashboard-lights list is the exception:
+ * it stores a language-free code ("brakeAssistOff"), because the same lamp
+ * has four names and a stored value cannot be reworded. Without this, every
+ * reader except the receipt printed the raw code — the daily mail to the
+ * workshop, the admin check detail, the CSV export, the extension's day view
+ * and the description copied into an incident all said "Ja: brakeAssistOff".
+ *
+ * The question's own snapshot is asked first, so a check filed last month
+ * reads back in the words that were on the form that day; telltales is the
+ * fallback for a snapshot that predates the translations, and the raw value
+ * is the last resort — never an empty cell.
+ */
+function pickName(field, pick, lang = 'sv') {
+  const value = String(pick || '').trim();
+  if (!value) return '';
+  const list = (field && (field.comment_options || field.commentOptions)) || [];
+  const i = list.indexOf(value);
+  if (i >= 0) {
+    const blob = (field.i18n || {})[lang] || {};
+    const translated = (blob.commentOptions || [])[i];
+    if (translated && String(translated).trim()) return String(translated).trim();
+  }
+  const lamp = telltales.LAMPS[value];
+  if (lamp) return lamp[lang] || lamp.sv;
+  return value;
+}
+
+/**
  * One line for a receipt, the admin detail table or a CSV cell.
  *
  * Tolerant of the other shape on purpose: checks submitted before the form
@@ -158,7 +193,7 @@ function formatAnswer(field, value, lang = 'sv') {
   if (typeof value === 'object') {
     // "Nej: Halvljus – höger fram": the picked item first, then whatever the
     // driver added. Old answers have no pick and read exactly as before.
-    const detail = [String(value.pick || '').trim(), String(value.comment || '').trim()]
+    const detail = [pickName(field, value.pick, lang), String(value.comment || '').trim()]
       .filter(Boolean).join(' – ');
     if (!value.choice) return detail || '—';
     const label = (lang === 'en' ? CHOICE_LABEL_EN : CHOICE_LABEL)[value.choice] || value.choice;
@@ -218,6 +253,6 @@ function optionsFor(field, sources) {
 
 module.exports = {
   KINDS, KIND_VALUES, KIND_LABEL, SOURCES, CHOICES, CHOICE_LABEL, CHOICE_LABEL_EN, COMMENT_CHOICES, commentChoices,
-  ROLES, readAnswer, answerProblem, formatAnswer, isAnswerable, isAlerting, optionsFor,
+  ROLES, readAnswer, answerProblem, formatAnswer, pickName, isAnswerable, isAlerting, optionsFor,
   commentOptionsFor
 };

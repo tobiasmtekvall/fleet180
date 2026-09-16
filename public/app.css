@@ -339,6 +339,56 @@ footer{border-top:1px solid var(--border);padding:18px 24px;color:var(--muted);f
 .assign-line { margin: 2px 0 0; font-size: 15px; font-weight: 600; }
 .assign-hint { margin: 2px 0 0; font-size: 12px; color: #5b6b60; }
 
+/* ---- the vehicle's own manual -------------------------------------------
+ *
+ * One tap, and big enough to hit with a glove on: this is the thing a driver
+ * reaches for when a lamp they do not recognise is lit, standing at the van.
+ * Neutral grey rather than the assignment's green or the change box's amber —
+ * it is a reference, not something that has happened. */
+.manual-box { margin: 0 0 14px; }
+.manual-link {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  min-height: 56px;
+  border: 1px solid #d7dcd8;
+  border-radius: 8px;
+  background: #fafbfa;
+  text-decoration: none;
+  color: inherit;
+}
+.manual-link:active { background: #f0f2f0; }
+.manual-ico { flex: 0 0 auto; width: 28px; height: 28px; color: #41586a; }
+.manual-ico svg { width: 100%; height: 100%; display: block; }
+.manual-text { flex: 1 1 auto; min-width: 0; }
+.manual-text b { display: block; font-size: 15px; }
+.manual-text em {
+  display: block;
+  font-style: normal;
+  font-size: 12px;
+  color: #5b6b60;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.manual-go {
+  flex: 0 0 auto;
+  font-size: 13px;
+  font-weight: 700;
+  color: #1f7a3e;
+  white-space: nowrap;
+}
+.manual-full {
+  display: inline-block;
+  margin: 6px 0 0 4px;
+  font-size: 12px;
+  color: #5b6b60;
+}
+@media (max-width: 420px) {
+  .manual-go { display: none; }   /* the whole row is the tap target anyway */
+}
+
 /* ---- the driver-change confirmation -------------------------------------
  *
  * Amber, and directly under the name that raised it. It is not one of the
@@ -494,6 +544,18 @@ body.wide .wrap{max-width:1720px}
 }
 .filechip a{padding:2px 4px 2px 8px;text-decoration:none;color:var(--primary);white-space:nowrap}
 .filechip.file-invoice a{color:#7a4b00}
+.filechip.file-agreement a{color:#4b3ea8}
+/* The date on the chip. Grey when it is only when the file was uploaded,
+   dark when the camera itself says when the picture was taken -- the second
+   is evidence and the first is not, so they must not look alike. */
+.filewhen{margin-inline-start:5px;color:var(--muted);font-variant-numeric:tabular-nums}
+.filewhen.exact{color:#2b3a4a;font-weight:600}
+/* Every file with its own time, in the fold-out under a line. */
+.filetimes{list-style:none;margin:8px 0 0;padding:0;font-size:12px;width:100%}
+.filetimes li{display:flex;gap:8px;align-items:baseline;padding:2px 0}
+.ft-kind{min-width:74px;color:var(--muted)}
+.ft-when{color:var(--muted);font-variant-numeric:tabular-nums}
+.ft-when.exact{color:#2b3a4a}
 .filex{
   border:0;background:none;cursor:pointer;color:var(--muted);
   font-size:14px;line-height:1;padding:2px 6px 3px;
@@ -567,6 +629,14 @@ body.wide .wrap{max-width:1720px}
 /* ---------- Expenses: sections, fold-outs and the new-entry card (2026-09-16) ---------- */
 .inc-list.inc-list-other{min-width:1080px}
 .inc-supplier{width:170px}
+/* 2026-09-16: rental cars. Narrower than the vehicle line -- no driver, no
+   workshop, no OKQ8/Own -- but wider than tools and misc. */
+/* 1540 is the sum of the twelve fields, their gaps and the row padding --
+   measured, not estimated: a min-width shorter than the row means the line
+   overflows its own container instead of the scroller doing the work. */
+.inc-list.inc-list-rental{min-width:1540px}
+.inc-firm{width:170px}
+.inc-for{width:128px}
 .inc-inv{width:120px}
 /* The fold-out under a line: supplier, invoice number, note. */
 .inc-more{padding:0 10px 6px}
