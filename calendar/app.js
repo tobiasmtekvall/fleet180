@@ -16,6 +16,7 @@ const state = {
   activeIsNew: false,
   persistence: 'server',
   commentTimer: null,
+  noteTimer: null,
   // week key -> { totals } for the vehicle matrix badge on each week row.
   fleetWeeks: new Map()
 };
@@ -219,7 +220,7 @@ function renderMonthView() {
       const progress = checklistProgress(checklist);
       html += `<button class="day-cell${outside ? ' outside' : ''}${isToday ? ' today' : ''}${checklist ? ' has-checklist' : ''}" type="button" data-scope="day" data-key="${key}" data-label="${escapeAttr(formatLongDate(date))}">
         <span class="date-number">${date.getDate()}</span>
-        ${checklist ? `<span class="day-checklist-card${progress.percent === 100 ? ' complete' : ''}">${escapeHtml(checklist.title)}<span class="progress">${progress.done}/${progress.total} checked</span></span>` : '<span class="add-mark">+</span>'}
+        ${checklist ? `<span class="day-checklist-card${progress.percent === 100 ? ' complete' : ''}">${escapeHtml(checklist.title)}<span class="progress">${progress.done}/${progress.total} checked</span>${noteBadge(checklist)}</span>` : '<span class="add-mark">+</span>'}
       </button>`;
     }
   }
@@ -349,6 +350,7 @@ function renderUseView() {
         <div>${leftSections.map(renderSection).join('')}</div>
         <div>${rightSections.map(renderSection).join('')}</div>
       </div>
+      ${renderNotesZone(checklist)}
       <section class="comments-zone">
         <h3>Comments and handover notes</h3>
         ${(checklist.sections || []).map((section) => `<div class="comment-field">
@@ -369,6 +371,7 @@ function renderUseView() {
       render();
     });
   });
+  bindNotesZone();
   elements.useView.querySelectorAll('[data-comment-section]').forEach((textarea) => {
     textarea.addEventListener('input', () => {
       state.activeChecklist.comments ||= {};
@@ -396,6 +399,156 @@ function renderSection(section) {
       ${carryTag(item)}
     </li>`).join('')}</ol>
   </section>`;
+}
+
+/* ---- Notes and ideas ------------------------------------------------------
+ *
+ * A row of free notes under the checklist, laid out like the checklist items
+ * but with no tick box: things to remember or try that day. They live on the
+ * same record as `notes: [{ id, text, createdAt, updatedAt }]`, so they save,
+ * sync to Fleet 180 and travel in a backup exactly like the items do.
+ *
+ * Deliberately NOT carried forward: an idea belongs to the day it was had, and
+ * carry-forward.mjs only ever copies checklist items. It also keeps both
+ * servers' rollover byte-identical, which a change there would put at risk.
+ */
+const NOTE_MAX = 1000;
+
+function noteList(checklist) {
+  return Array.isArray(checklist?.notes) ? checklist.notes : [];
+}
+
+function renderNotesZone(checklist) {
+  const notes = noteList(checklist);
+  return `<section class="notes-zone" aria-label="Notes and ideas">
+    <h3>Notes and ideas <span class="notes-count">${notes.length ? notes.length : ''}</span></h3>
+    <ol class="note-list">${notes.map(renderNote).join('')}</ol>
+    <form class="note-add" data-note-add>
+      <input class="note-add-input" type="text" maxlength="${NOTE_MAX}" placeholder="Jot down an idea for this day…" aria-label="New note">
+      <button class="button button-quiet" type="submit">+ Add note</button>
+    </form>
+  </section>`;
+}
+
+function renderNote(note) {
+  const when = note.createdAt ? formatNoteTime(note.createdAt) : '';
+  return `<li class="note-item" data-note-row="${escapeAttr(note.id)}">
+    <div class="item-line">
+      <div class="note-text" contenteditable="plaintext-only" role="textbox" spellcheck="true"
+        aria-label="Note" data-note-id="${escapeAttr(note.id)}">${escapeHtml(note.text)}</div>
+      <button class="note-remove" type="button" data-note-remove="${escapeAttr(note.id)}" aria-label="Delete this note" title="Delete note">×</button>
+    </div>
+    ${when ? `<span class="note-stamp">${escapeHtml(when)}</span>` : ''}
+  </li>`;
+}
+
+function formatNoteTime(iso) {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return '';
+  const time = new Intl.DateTimeFormat('en-GB', { hour: '2-digit', minute: '2-digit' }).format(date);
+  return dateKey(date) === state.activeChecklist?.key ? `noted ${time}` : `noted ${formatShortDate(date)} ${time}`;
+}
+
+function setNoteIndicator(text) {
+  const indicator = document.querySelector('#saveIndicator');
+  if (indicator) indicator.textContent = text;
+}
+
+function saveNotesSoon() {
+  setNoteIndicator('Saving…');
+  clearTimeout(state.noteTimer);
+  state.noteTimer = setTimeout(saveNotesNow, 450);
+}
+
+async function saveNotesNow() {
+  clearTimeout(state.noteTimer);
+  state.noteTimer = null;
+  if (!state.activeChecklist) return;
+  await persistActive();
+  setNoteIndicator('Saved');
+  render();
+}
+
+function refreshNoteCount() {
+  const count = elements.useView.querySelector('.notes-count');
+  if (count) count.textContent = noteList(state.activeChecklist).length || '';
+}
+
+function bindNotesZone() {
+  const zone = elements.useView.querySelector('.notes-zone');
+  if (!zone) return;
+  const form = zone.querySelector('[data-note-add]');
+  const input = zone.querySelector('.note-add-input');
+  form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const text = input.value.replace(/\s+/g, ' ').trim().slice(0, NOTE_MAX);
+    if (!text) return input.focus();
+    const now = new Date().toISOString();
+    const note = { id: uid('note'), text, createdAt: now, updatedAt: now };
+    state.activeChecklist.notes = [...noteList(state.activeChecklist), note];
+    zone.querySelector('.note-list').insertAdjacentHTML('beforeend', renderNote(note));
+    input.value = '';
+    input.focus();                 // ready for the next one
+    refreshNoteCount();
+    saveNotesNow();
+  });
+
+  zone.addEventListener('input', (event) => {
+    const box = event.target.closest('[data-note-id]');
+    if (!box) return;
+    if (box.textContent.length > NOTE_MAX) box.textContent = box.textContent.slice(0, NOTE_MAX);
+    const now = new Date().toISOString();
+    let note = noteList(state.activeChecklist).find((entry) => entry.id === box.dataset.noteId);
+    if (!note) {
+      // A save made while this note was momentarily empty dropped it from the
+      // record (empty notes are not stored). The row is still here, so put it back.
+      note = { id: box.dataset.noteId, text: '', createdAt: now, updatedAt: now };
+      state.activeChecklist.notes = [...noteList(state.activeChecklist), note];
+    }
+    note.text = box.textContent;
+    note.updatedAt = now;
+    saveNotesSoon();
+  });
+
+  // Enter finishes a note instead of starting a second line.
+  zone.addEventListener('keydown', (event) => {
+    const box = event.target.closest('[data-note-id]');
+    if (!box) return;
+    if ((event.key === 'Enter' && !event.shiftKey) || event.key === 'Escape') {
+      event.preventDefault();
+      box.blur();
+    }
+  });
+
+  // Leaving a note saves it at once; leaving it empty removes it.
+  zone.addEventListener('focusout', (event) => {
+    const box = event.target.closest('[data-note-id]');
+    if (!box) return;
+    const text = box.textContent.replace(/\s+/g, ' ').trim();
+    const notes = noteList(state.activeChecklist);
+    const note = notes.find((entry) => entry.id === box.dataset.noteId);
+    if (!note) return;
+    if (!text) {
+      state.activeChecklist.notes = notes.filter((entry) => entry.id !== note.id);
+      box.closest('[data-note-row]')?.remove();
+      refreshNoteCount();
+    } else if (text !== box.textContent) {
+      note.text = text;
+      box.textContent = text;
+    }
+    if (state.noteTimer || !text) saveNotesNow();
+  });
+
+  zone.addEventListener('click', (event) => {
+    const remove = event.target.closest('[data-note-remove]');
+    if (!remove) return;
+    const id = remove.dataset.noteRemove;
+    state.activeChecklist.notes = noteList(state.activeChecklist).filter((entry) => entry.id !== id);
+    remove.closest('[data-note-row]')?.remove();
+    refreshNoteCount();
+    saveNotesNow();
+    showToast('Note deleted.');
+  });
 }
 
 /**
@@ -645,6 +798,12 @@ function writeLocalMirror() {
 
 function closeDialog() {
   clearTimeout(state.commentTimer);
+  // A note typed in the last half second must not be lost to the close button.
+  if (state.noteTimer && state.activeChecklist) {
+    clearTimeout(state.noteTimer);
+    state.noteTimer = null;
+    persistActive().then(() => render());
+  }
   if (elements.dialog.open) elements.dialog.close();
   state.activeChecklist = null;
   state.activeIsNew = false;
@@ -680,6 +839,14 @@ function normalizeChecklist(checklist) {
   const normalized = deepClone(checklist);
   normalized.comments ||= {};
   normalized.sections ||= [];
+  normalized.notes = (Array.isArray(normalized.notes) ? normalized.notes : [])
+    .filter((note) => note && typeof note.text === 'string' && note.text.trim())
+    .map((note) => ({
+      id: String(note.id || uid('note')),
+      text: note.text.slice(0, NOTE_MAX),
+      createdAt: note.createdAt || null,
+      updatedAt: note.updatedAt || note.createdAt || null
+    }));
   for (const section of normalized.sections) {
     section.id ||= uid('section');
     section.items ||= [];
@@ -713,6 +880,11 @@ function findItem(checklist, itemId) {
     if (found) return found;
   }
   return null;
+}
+
+function noteBadge(checklist) {
+  const count = noteList(checklist).length;
+  return count ? `<span class="note-badge" title="${count} note${count === 1 ? '' : 's'} for this day">\u270e ${count} note${count === 1 ? '' : 's'}</span>` : '';
 }
 
 function checklistProgress(checklist) {
@@ -752,6 +924,7 @@ function printMarkup() {
   return `<article class="paper"><span class="top">RESTRICTED</span><span class="bottom">RESTRICTED</span>
   <header><h1>${escapeHtml(checklist.title.toUpperCase())}</h1><b>REVISED ${escapeHtml(checklist.revision)}</b><p>CHECKLIST TYPE: ${escapeHtml(checklist.mode)}</p><p class="red">${escapeHtml(checklist.primaryRole)}</p><p>${escapeHtml(checklist.secondaryRole)}</p><small>${escapeHtml(state.activePeriodLabel)}</small></header>
   <div class="columns"><div>${left.map(printSection).join('')}</div><div>${right.map(printSection).join('')}</div></div>
+  ${noteList(checklist).length ? `<section class="notes"><h2>NOTES AND IDEAS</h2><ol>${noteList(checklist).map((note) => `<li><span>${escapeHtml(note.text)}</span></li>`).join('')}</ol></section>` : ''}
   <section class="comments"><h2>COMMENTS AND HANDOVER NOTES</h2>${checklist.sections.map((section) => `<div class="comment"><b>${escapeHtml(section.title.toUpperCase())}</b><p>${escapeHtml(checklist.comments?.[section.id] || '').replace(/\n/g, '<br>') || '&nbsp;'}</p></div>`).join('')}</section></article>`;
 }
 
@@ -760,7 +933,7 @@ function printSection(section) {
 }
 
 function printStyles() {
-  return `@page{size:A4;margin:12mm}*{box-sizing:border-box}body{margin:0;font-family:Arial,Helvetica,sans-serif;color:#191919}.paper{position:relative;border:4px double #191919;padding:18mm 13mm 14mm;min-height:270mm}.top,.bottom{position:absolute;font-size:7pt;letter-spacing:.32em}.top{right:5mm;top:3mm}.bottom{left:5mm;bottom:3mm}header{text-align:center;margin-bottom:10mm}h1{font-size:15pt;letter-spacing:.18em;margin:0 0 3mm}header b{font-size:7.5pt;letter-spacing:.08em}header p{font-size:8pt;margin:3mm 0 0}header p+p{margin-top:1mm}header small{display:inline-block;margin-top:4mm;border-top:1px solid #aaa;padding-top:2mm;font-size:7pt;letter-spacing:.1em;text-transform:uppercase}.columns{display:grid;grid-template-columns:1fr 1fr;gap:10mm}.columns section{break-inside:avoid;margin-bottom:4mm}h2{font-size:9pt;letter-spacing:.14em;margin:0 0 1.5mm;text-transform:uppercase}ol{margin:0;padding-left:6mm}li{font-size:8pt;line-height:1.35;padding:.4mm 0;display:list-item}li span{display:inline-block;width:calc(100% - 6mm)}li em{font-style:normal;font-size:7pt;letter-spacing:.04em;opacity:.65}li i{float:right;width:3.2mm;height:3.2mm;border:.45mm solid #191919;font-style:normal;text-align:center;line-height:2.4mm;color:#871414}.red{color:#871414}.done span{text-decoration:line-through;opacity:.6}.comments{border-top:.6mm solid #191919;margin-top:7mm;padding-top:4mm;break-before:auto}.comment{break-inside:avoid;margin-bottom:4mm}.comment>b{font-size:7.5pt;letter-spacing:.1em}.comment p{border:.3mm solid #191919;min-height:16mm;margin:1.5mm 0 0;padding:2mm;font-size:8pt;line-height:1.35}@media(max-width:700px){.columns{grid-template-columns:1fr}}`;
+  return `@page{size:A4;margin:12mm}*{box-sizing:border-box}body{margin:0;font-family:Arial,Helvetica,sans-serif;color:#191919}.paper{position:relative;border:4px double #191919;padding:18mm 13mm 14mm;min-height:270mm}.top,.bottom{position:absolute;font-size:7pt;letter-spacing:.32em}.top{right:5mm;top:3mm}.bottom{left:5mm;bottom:3mm}header{text-align:center;margin-bottom:10mm}h1{font-size:15pt;letter-spacing:.18em;margin:0 0 3mm}header b{font-size:7.5pt;letter-spacing:.08em}header p{font-size:8pt;margin:3mm 0 0}header p+p{margin-top:1mm}header small{display:inline-block;margin-top:4mm;border-top:1px solid #aaa;padding-top:2mm;font-size:7pt;letter-spacing:.1em;text-transform:uppercase}.columns{display:grid;grid-template-columns:1fr 1fr;gap:10mm}.columns section{break-inside:avoid;margin-bottom:4mm}h2{font-size:9pt;letter-spacing:.14em;margin:0 0 1.5mm;text-transform:uppercase}ol{margin:0;padding-left:6mm}li{font-size:8pt;line-height:1.35;padding:.4mm 0;display:list-item}li span{display:inline-block;width:calc(100% - 6mm)}li em{font-style:normal;font-size:7pt;letter-spacing:.04em;opacity:.65}li i{float:right;width:3.2mm;height:3.2mm;border:.45mm solid #191919;font-style:normal;text-align:center;line-height:2.4mm;color:#871414}.red{color:#871414}.done span{text-decoration:line-through;opacity:.6}.notes{border-top:.6mm solid #191919;margin-top:7mm;padding-top:4mm;break-inside:avoid}.notes li span{width:100%}.comments{border-top:.6mm solid #191919;margin-top:7mm;padding-top:4mm;break-before:auto}.comment{break-inside:avoid;margin-bottom:4mm}.comment>b{font-size:7.5pt;letter-spacing:.1em}.comment p{border:.3mm solid #191919;min-height:16mm;margin:1.5mm 0 0;padding:2mm;font-size:8pt;line-height:1.35}@media(max-width:700px){.columns{grid-template-columns:1fr}}`;
 }
 
 function exportBackup() {

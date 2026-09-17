@@ -55,12 +55,37 @@ function renderPages(checklist, periodLabel) {
     text: checklist.comments?.[section.id] || ''
   }));
 
-  if (comments.length) {
+  const notes = (Array.isArray(checklist.notes) ? checklist.notes : [])
+    .map((note) => String(note?.text || '').trim()).filter(Boolean);
+
+  if (comments.length || notes.length) {
     page = newPage();
     pages.push(page);
     drawFrame(page, pages.length);
     drawContinuationHeader(page, checklist, periodLabel, 'COMMENTS');
     let commentY = 740;
+    // Notes and ideas: a numbered list above the comment boxes, no tick boxes.
+    if (notes.length) {
+      text(page, 52, commentY, 9.5, 'NOTES AND IDEAS', true, INK, 0.7);
+      commentY -= 16;
+      notes.forEach((note, index) => {
+        const lines = wrapText(note, 455, 9);
+        if (commentY - lines.length * 11 < 65) {
+          page = newPage();
+          pages.push(page);
+          drawFrame(page, pages.length);
+          drawContinuationHeader(page, checklist, periodLabel, 'NOTES');
+          commentY = 740;
+        }
+        text(page, 52, commentY, 9, `${index + 1}.`, false, INK);
+        for (const line of lines) {
+          text(page, 70, commentY, 9, line, false, INK);
+          commentY -= 11;
+        }
+        commentY -= 3;
+      });
+      commentY -= 14;
+    }
     for (const comment of comments) {
       const lines = wrapText(comment.text || '', 475, 9);
       const height = Math.max(54, 29 + lines.length * 11);
