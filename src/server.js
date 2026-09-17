@@ -24,8 +24,8 @@ const {
 } = require('./views/admin');
 const { qrPage } = require('./views/qr');
 const { statsPage, statsResetPage } = require('./views/stats');
-const { incidentsPage, expensesPage, incidentDeletePage, EXPENSE_LABEL, HANDLER_LABEL, SCOPE_LABEL,
-  RENTAL_FIRM_LABEL } = require('./views/incidents');
+const { incidentsPage, expensesPage, incidentDeletePage, HANDLER_LABEL,
+  RENTAL_FIRM_LABEL, KIND_LABEL, kindOf } = require('./views/incidents');
 const exif = require('./exif');
 const statsLib = require('./stats');
 const { buildDriverStats } = statsLib;
@@ -897,8 +897,15 @@ function readFilters(req) {
 }
 
 /** ?ok=... carries a one-line confirmation across the redirect after a POST. */
+/* The message goes on the query, which is BEFORE any #row-12 the caller put
+   on the end -- a flash appended after the fragment would be read as part of
+   the fragment, and neither the message nor the scroll would happen. */
 function back(res, url, message) {
-  res.redirect(303, message ? `${url}${url.includes('?') ? '&' : '?'}ok=${encodeURIComponent(message)}` : url);
+  if (!message) return res.redirect(303, url);
+  const h = url.indexOf('#');
+  const [path, hash] = h >= 0 ? [url.slice(0, h), url.slice(h)] : [url, ''];
+  res.redirect(303,
+    `${path}${path.includes('?') ? '&' : '?'}ok=${encodeURIComponent(message)}${hash}`);
 }
 function flashOf(req) {
   return String(req.query.ok || '').slice(0, 200);
@@ -1331,7 +1338,8 @@ function entryProblem(data) {
  */
 function returnTo(req) {
   const r = String((req.body && req.body.ret) || '');
-  if (/^\/admin\/(expenses|incidents)(\?[\w=&%.+-]*)?$/.test(r)) return r;
+  // The optional #row-12 is how a line opened for editing keeps its place.
+  if (/^\/admin\/(expenses|incidents)(\?[\w=&%.+-]*)?(#row-\d+)?$/.test(r)) return r;
   return '/admin/expenses';
 }
 
@@ -1450,28 +1458,58 @@ async function pendingDamage() {
   return hits.filter(h => !linked.has(h.id)).reverse();
 }
 
-function incidentFilters(req) {
+/* Which kind of expense a line is, and which section's form it is entered on.
+   The Expenses page has four tabs, but the list under them is the whole
+   ledger on every one of them -- the tabs choose the form, not the view. So
+   the section (`scope`) is only ever the tab you are standing on, and what
+   narrows the list is `kind`, which is the first column of that list. */
+const KINDS = new Map([
+  ['damage', { scope: 'vehicle', category: 'damage' }],
+  ['parts', { scope: 'vehicle', category: 'parts' }],
+  ['tool', { scope: 'tool', category: '' }],
+  ['misc', { scope: 'misc', category: '' }],
+  ['rental', { scope: 'rental', category: '' }]
+]);
+
+/**
+ * @param smDefault what an absent `sm` parameter means. The page opens on
+ *   what is still waiting for the check, because that is what the Site
+ *   Manager came to do; a CSV asked for without saying defaults to the whole
+ *   ledger, because a file that quietly leaves out every approved line is a
+ *   wrong answer nobody can see is wrong.
+ */
+function incidentFilters(req, smDefault = 'no') {
   const day = s => (/^\d{4}-\d{2}-\d{2}$/.test(String(s || '')) ? String(s) : '');
-  const sm = req.query.sm === 'yes' ? 'yes' : req.query.sm === 'no' ? 'no' : '';
+  const sm = req.query.sm === 'yes' ? 'yes' : req.query.sm === 'all' ? 'all'
+    : req.query.sm === 'no' ? 'no' : smDefault;
+  /* An old bookmark still says category=parts. It meant the same thing. */
+  const legacy = EXPENSE_CATEGORIES.has(req.query.category) ? req.query.category : '';
   const f = {
     plate: normalisePlate(req.query.plate || ''),
     from: day(req.query.from),
     to: day(req.query.to),
     sm,
-    // The section; "all" only exists for the CSV.
-    scope: SCOPES.has(req.query.scope) ? req.query.scope
-      : req.query.scope === 'all' ? 'all' : 'vehicle',
-    category: EXPENSE_CATEGORIES.has(req.query.category) ? req.query.category : '',
+    // The tab: which form is shown above the list. Never filters the list.
+    scope: SCOPES.has(req.query.scope) ? req.query.scope : 'vehicle',
+    kind: KINDS.has(req.query.kind) ? req.query.kind : legacy,
     handledBy: (req.query.by === 'inhouse' ? 'own' : HANDLERS.has(req.query.by) && req.query.by ? req.query.by : '')
-      || (req.query.by === 'none' ? 'none' : '')
+      || (req.query.by === 'none' ? 'none' : ''),
+    // The one line that is open in its own editable form, if any.
+    edit: /^\d+$/.test(String(req.query.edit || '')) ? String(req.query.edit) : ''
   };
-  // Vehicle-only filters mean nothing on Tools and Misc. A rental keeps the
-  // plate filter -- it is the hire car's own registration -- but has no
-  // category and nobody repairs it.
-  if (f.scope === 'tool' || f.scope === 'misc') { f.plate = ''; f.category = ''; f.handledBy = ''; }
-  if (f.scope === 'rental') { f.category = ''; f.handledBy = ''; }
-  f.query = qsOf({ scope: f.scope, plate: f.plate, from: f.from, to: f.to, sm: f.sm,
-    category: f.category, by: f.handledBy });
+  /* OKQ8 / Own is a question only a vehicle line answers. Asked together with
+     a kind that is not a vehicle's, the two cannot both be true, and an empty
+     list with no reason given is worse than the filter being ignored. */
+  if (f.kind && KINDS.get(f.kind).scope !== 'vehicle') f.handledBy = '';
+  const params = { scope: f.scope, kind: f.kind, plate: f.plate, by: f.handledBy,
+    from: f.from, to: f.to, sm: f.sm };
+  /* `query` is what every link back to this page carries: the filters, and
+     deliberately NOT `edit` -- saving a line should close it, not reopen it. */
+  f.query = qsOf(params);
+  /* Edit opens the line on its own section's tab, keeping the filters, so
+     that closing it or saving it lands back on the same list. */
+  f.editQuery = inc => qsOf({ ...params, scope: KINDS.get(kindOf(inc)).scope,
+    edit: String(inc.id) });
   return f;
 }
 
@@ -1482,14 +1520,19 @@ function qsOf(params) {
   return s ? '?' + s : '';
 }
 
-async function incidentsFor(req) {
-  const filters = incidentFilters(req);
+async function incidentsFor(req, smDefault) {
+  const filters = incidentFilters(req, smDefault);
+  const kind = filters.kind ? KINDS.get(filters.kind) : null;
+  /* OKQ8 / Own is a question only a vehicle line answers -- a tool, a misc
+     line and a hire car have never had one. So asking it narrows the list to
+     vehicles, rather than quietly counting every hire as "not set". */
+  const scope = kind ? kind.scope : filters.handledBy ? 'vehicle' : '';
   let incidents = await db.listIncidents({
     plate: filters.plate, from: filters.from, to: filters.to,
     smOk: filters.sm === 'yes' ? true : filters.sm === 'no' ? false : null,
-    category: filters.category,
+    category: kind ? kind.category : '',
     handledBy: filters.handledBy === 'none' ? '' : filters.handledBy,
-    scope: filters.scope === 'all' ? '' : filters.scope
+    scope
   });
   // "Not set" is the empty string, which the query treats as "any".
   if (filters.handledBy === 'none') incidents = incidents.filter(i => !i.handled_by);
@@ -1498,8 +1541,14 @@ async function incidentsFor(req) {
   const totals = {
     withCost: withCost.length,
     cost: sum(withCost),
-    damageCost: sum(withCost.filter(i => i.category !== 'parts')),
-    partsCost: sum(withCost.filter(i => i.category === 'parts')),
+    /* One bucket per kind, and every line is in exactly one of them, so the
+       five add up to the total. A breakdown that does not is worse than none
+       on a page whose whole job is adding money up. */
+    damageCost: sum(withCost.filter(i => i.scope === 'vehicle' && i.category !== 'parts')),
+    partsCost: sum(withCost.filter(i => i.scope === 'vehicle' && i.category === 'parts')),
+    toolCost: sum(withCost.filter(i => i.scope === 'tool')),
+    miscCost: sum(withCost.filter(i => i.scope === 'misc')),
+    rentalCost: sum(withCost.filter(i => i.scope === 'rental')),
     waiting: incidents.filter(i => !i.sm_ok).length,
     atShop: incidents.filter(i => i.scope === 'vehicle' && i.category !== 'parts' && i.shop_in && !i.shop_out).length,
     /* Hire cars still out: no return date at all, or one still in the future
@@ -1538,7 +1587,14 @@ app.get('/admin/incidents', async (req, res, next) => {
 /* Expenses: the ledger, the SM check and the CSV. */
 app.get('/admin/expenses', async (req, res, next) => {
   try {
-    if (req.query.scope === 'all') return res.redirect(303, '/admin/expenses');
+    /* "all" was the old way of asking for every section. Every tab shows them
+       all now, so it means nothing -- but the period and the plate beside it
+       still do, and a redirect that threw those away would lose a bookmark's
+       whole question. */
+    if (req.query.scope === 'all') {
+      return res.redirect(303, '/admin/expenses' +
+        req.originalUrl.slice(req.originalUrl.indexOf('?')).replace(/([?&])scope=all\b/, '$1scope=vehicle'));
+    }
     const [{ filters, incidents, totals }, vehicles, sections] = await Promise.all([
       incidentsFor(req),
       db.listVehicles({ includeInactive: true }),
@@ -1553,6 +1609,37 @@ app.get('/admin/expenses', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+/**
+ * Where to land after adding a line: the list it was added from, with any
+ * filter that would hide the new line taken off. Nothing else is touched --
+ * the period, the tab and the rest are the user's, not ours.
+ */
+function landOn(from, data) {
+  /* Entered on Incidents, a line lives on Expenses: that page lists the
+     damage nobody has opened a case for, and the case just opened is not on
+     it. Anywhere but Expenses, go to Expenses. */
+  if (!from.startsWith('/admin/expenses')) return '/admin/expenses';
+  // Any #row-12 on the end belongs to a line being edited, not to a new one.
+  const h = from.indexOf('#');
+  if (h >= 0) from = from.slice(0, h);
+  const i = from.indexOf('?');
+  const q = new URLSearchParams(i >= 0 ? from.slice(i + 1) : '');
+  const kind = data.scope === 'vehicle' ? (data.category === 'parts' ? 'parts' : 'damage') : data.scope;
+  if (q.get('kind') && q.get('kind') !== kind) q.delete('kind');
+  if (q.get('plate') && q.get('plate') !== data.plate && q.get('plate') !== data.forPlate) q.delete('plate');
+  // A new line has nobody's name on it yet, so "Approved" would hide it.
+  if (q.get('sm') === 'yes') q.delete('sm');
+  if (q.get('by') && data.scope !== 'vehicle') q.delete('by');
+  else if (q.get('by') && q.get('by') !== (data.handledBy || 'none')) q.delete('by');
+  // The period hides a new line as effectively as anything else does. A hire
+  // still out has no end date, so only its first day has to fall inside.
+  const on = data.occurredOn || '';
+  if (q.get('from') && on && on < q.get('from')) q.delete('from');
+  if (q.get('to') && on && on > q.get('to')) q.delete('to');
+  const s = q.toString();
+  return (i >= 0 ? from.slice(0, i) : from) + (s ? '?' + s : '');
+}
+
 app.post('/admin/incidents', softUpload, async (req, res, next) => {
   try {
     const data = readIncidentBody(req.body);
@@ -1561,8 +1648,10 @@ app.post('/admin/incidents', softUpload, async (req, res, next) => {
     if (problem) return back(res, from, problem);
     const id = await db.createIncident(data);
     const files = await saveIncidentFiles(id, req.files);
-    // Wherever it was entered, it now lives on Expenses, in its own section.
-    back(res, `/admin/expenses?scope=${data.scope}`,
+    // Back to the list as it was filtered -- minus any filter that would hide
+    // the line just added, because "added" over a list it cannot be seen in is
+    // the same as no answer at all.
+    back(res, landOn(from, data),
       `${entryName(data)}${data.plate ? ' for ' + data.plate : ''} added.` +
       fileNote(files) + limitNote(req));
   } catch (err) { next(err); }
@@ -1697,12 +1786,12 @@ app.get('/admin/incidents.csv', (req, res) => {
 
 app.get('/admin/expenses.csv', async (req, res, next) => {
   try {
-    const { filters, incidents } = await incidentsFor(req);
-    /* One shape for all four sections, so "CSV, all sections" is one table
-       rather than four stapled together. A rental's dates live in the
-       workshop columns' place -- renamed in the header, because "in" and
-       "out" is what both of them are. */
-    const header = ['Id', 'Type', 'Category', 'Vehicle', 'Date / picked up', 'Description',
+    const { filters, incidents } = await incidentsFor(req, 'all');
+    /* The file is the list: one shape for all four sections, with the same
+       first column the screen has. A rental's dates live in the workshop
+       columns' place -- renamed in the header, because "in" and "out" is
+       what both of them are. */
+    const header = ['Id', 'Category', 'Vehicle', 'Date / picked up', 'Description',
       'Driver', 'Workshop in / hire from', 'Workshop out / hire to', 'Days', 'OKQ8 / Own',
       'Supplier', 'Rental firm', 'Stands in for', 'Invoice no.', 'Cost (SEK)',
       'Photos', 'Invoices', 'Agreements', 'SM check', 'SM by', 'SM time', 'Check', 'Note'];
@@ -1713,7 +1802,7 @@ app.get('/admin/expenses.csv', async (req, res, next) => {
       const dayCount = start && end
         ? Math.round((Date.parse(end) - Date.parse(start)) / 86400000) + 1 : '';
       lines.push([
-        i.id, SCOPE_LABEL[i.scope] || i.scope, EXPENSE_LABEL[i.category] || i.category,
+        i.id, KIND_LABEL[kindOf(i)],
         i.plate, i.occurred_on, i.description, i.driver_name,
         start, end, dayCount, HANDLER_LABEL[i.handled_by] || '',
         i.supplier, RENTAL_FIRM_LABEL[i.rental_firm] || '', i.for_plate, i.invoice_no,
@@ -1727,7 +1816,7 @@ app.get('/admin/expenses.csv', async (req, res, next) => {
       ].map(csvCell).join(';'));
     }
     res.type('text/csv; charset=utf-8')
-      .set('Content-Disposition', `attachment; filename="expenses-${filters.scope}.csv"`)
+      .set('Content-Disposition', `attachment; filename="expenses-${filters.kind || 'all'}.csv"`)
       .send('﻿' + lines.join('\r\n'));
   } catch (err) { next(err); }
 });

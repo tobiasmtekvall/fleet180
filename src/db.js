@@ -1197,7 +1197,10 @@ async function listIncidents({ plate = '', from = '', to = '', smOk = null,
                                category = '', handledBy = '', scope = '' } = {}) {
   const where = [];
   const args = [];
-  if (plate) { args.push(plate); where.push(`plate = $${args.length}`); }
+  /* A registration matches the line it is on AND the hires taken to cover it:
+     asking for RJC29S should show the van's own repairs and the car hired
+     while it was in the workshop, because that is one bill in the end. */
+  if (plate) { args.push(plate); where.push(`(plate = $${args.length} OR for_plate = $${args.length})`); }
   if (scope) { args.push(scope); where.push(`scope = $${args.length}`); }
   if (category) { args.push(category); where.push(`category = $${args.length}`); }
   if (handledBy) { args.push(handledBy); where.push(`handled_by = $${args.length}`); }

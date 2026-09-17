@@ -72,6 +72,24 @@ const DESC_HINT = {
   rental: 'Which car, and why it was hired'
 };
 
+/* What a line IS, in one word: the section and the vehicle category folded
+   together. It is the first column of the ledger, because somebody reading a
+   list of everything has to know what they are looking at before the rest of
+   the line means anything -- "4 350 kr, ABC123, 14 Sept" is a repair or a
+   hire or a part, and those are three different conversations. */
+const KIND_LABEL = {
+  damage: 'Damage', parts: 'Spare parts', tool: 'Tool', misc: 'Misc', rental: 'Rental car'
+};
+/**
+ * Which kind a line is. The one rule -- the server imports this rather than
+ * keeping its own copy, because the chip in the first column, the CSV's first
+ * column and the tab Edit opens on all have to agree about it.
+ */
+function kindOf(inc) {
+  if (inc.scope === 'vehicle') return inc.category === 'parts' ? 'parts' : 'damage';
+  return KIND_LABEL[inc.scope] ? inc.scope : 'misc';
+}
+
 /** 12400 -> "12 400 kr". Space as the thousands separator; the money is SEK. */
 function kr(n) {
   if (n === null || n === undefined || n === '') return '';
@@ -124,6 +142,9 @@ function fileWhen(f) {
   return { text: '', word: '', exact: false };
 }
 
+/* Careful with `.map(fileChip)` below: map hands the callback the index as a
+   second argument, so this takes exactly one. The read-only ledger line has
+   its own, iconic, version -- see ledgerFiles. */
 function fileChip(f) {
   const label = FILE_LABEL[f.kind] || 'File';
   const name = f.filename || label;
@@ -138,6 +159,33 @@ function fileChip(f) {
       <button class="filex" type="submit" title="Remove ${esc(name)}"
               formaction="/admin/incidents/file/${esc(f.id)}/delete">×</button>
     </span>`;
+}
+
+const FILE_ICON = { photo: ICON.camera, invoice: ICON.invoice, agreement: ICON.agreement };
+
+/**
+ * The files on a read-only ledger line: the icon and nothing else.
+ *
+ * A full chip carries the word and the date, and four of them are wider than
+ * the column -- which pushes the SM check and Edit out of line with their own
+ * headings on that one row. So here a file is its icon, with the name and the
+ * time in the tooltip, and the line it belongs to keeps its shape. The full
+ * chips, with the dates and the remove buttons, are on the line's own tab.
+ */
+function ledgerFiles(inc) {
+  if (!inc.files.length) return '<span class="muted" style="font-size:12px">—</span>';
+  /* Four, not five: the fifth icon leaves eight pixels for "+3", and a
+     marker saying files are hidden that is itself hidden is no marker. */
+  const shown = inc.files.slice(0, 4);
+  const rest = inc.files.length - shown.length;
+  return shown.map(f => {
+    const when = fileWhen(f);
+    const tip = [FILE_LABEL[f.kind] || 'File', f.filename || '',
+      when.text ? `${when.word.toLowerCase()} ${when.text}` : ''].filter(Boolean).join(' · ');
+    return `<a class="fileicon file-${esc(f.kind)}" href="/admin/incidents/file/${esc(f.id)}"
+       target="_blank" rel="noopener" title="${esc(tip)}">${FILE_ICON[f.kind] || ICON.invoice}</a>`;
+  }).join('') + (rest ? `<span class="filerest" title="${esc(rest)} more – open the line to see them all"
+      >+${esc(rest)}</span>` : '');
 }
 
 /** Every attached file with its own time, for the fold-out under a line. */
@@ -410,6 +458,67 @@ function otherRow(inc, scope, ret) {
 }
 
 /**
+ * One line of the ledger, whatever section it belongs to.
+ *
+ * The list under every tab is the whole ledger -- the tabs choose which form
+ * you are filling in above, not what you are looking at below. Four sections
+ * cannot share thirteen columns, so a line here shows what they have in
+ * common and says in its first column WHICH of the four it is. The Site
+ * Manager can read it and approve it from here; Edit opens the row on its own
+ * section's tab, in that section's own full line, where everything about it
+ * can be changed.
+ */
+function ledgerRow(inc, today, ret, editHref) {
+  const kind = kindOf(inc);
+  const rental = inc.scope === 'rental';
+  const back = rental && inc.rented_to && inc.rented_to <= today ? inc.rented_to : '';
+  const d = rental ? days(inc.occurred_on, back, today)
+    : (inc.scope === 'vehicle' && kind !== 'parts') ? days(inc.shop_in, inc.shop_out, today)
+    : { text: '', open: false };
+  // The counterparty, whatever it is called in that section.
+  const who = rental ? (RENTAL_FIRM_LABEL[inc.rental_firm] || '')
+    : inc.supplier || (inc.scope === 'vehicle' ? (HANDLER_LABEL[inc.handled_by] || '') : '');
+  const extra = rental && inc.for_plate ? ` (for ${inc.for_plate})` : '';
+  return `<div class="inc-line inc-read${inc.sm_ok ? ' inc-done' : ''}">
+      <form class="inc-form" method="post" action="/admin/incidents/${esc(inc.id)}/sm">
+        <input type="hidden" name="ret" value="${esc(ret)}">
+        <div class="inc-row">
+        <span class="inc-kind kind-${esc(kind)}">${esc(KIND_LABEL[kind])}</span>
+        <span class="inc-date ro">${esc(inc.occurred_on)}</span>
+        <span class="inc-plate ro mono" title="${esc(inc.plate + extra)}">${esc(inc.plate || '—')}${
+          extra ? `<em class="inc-for-note">${esc(extra)}</em>` : ''}</span>
+        <span class="inc-desc ro" title="${esc(inc.description)}">${esc(inc.description || '—')}</span>
+        <span class="inc-supplier ro" title="${esc(who)}">${esc(who || '—')}</span>
+        <span class="inc-days${d.open ? ' open' : ''}">${esc(d.text || '–')}</span>
+        <span class="inc-cost ro">${esc(kr(inc.cost_sek) || '—')}</span>
+        <span class="inc-files">${ledgerFiles(inc)}</span>
+        <span class="inc-sm">${smCell(inc)}</span>
+        <span class="inc-actions">
+          <a class="btn btn-ghost btn-sm" href="${esc(editHref)}"
+             title="Open this line on its own tab, where every field can be changed">Edit</a>
+        </span>
+        </div>
+      </form>
+  </div>`;
+}
+
+/** The headings for that one list. */
+function ledgerHead() {
+  return `<div class="inc-row inc-head">
+      <span class="inc-kind">Category</span>
+      <span class="inc-date">Date</span>
+      <span class="inc-plate">Vehicle</span>
+      <span class="inc-desc">Description</span>
+      <span class="inc-supplier">Firm / workshop</span>
+      <span class="inc-days">Days</span>
+      <span class="inc-cost">Cost</span>
+      <span class="inc-files">Files</span>
+      <span class="inc-sm">SM check</span>
+      <span class="inc-actions"></span>
+    </div>`;
+}
+
+/**
  * The column headings, one set per section.
  *
  * Built from the same widths as the line rather than as a table header: a
@@ -665,12 +774,16 @@ ${newEntry('vehicle', plates, today, '/admin/incidents')}
   });
 }
 
-/** Vehicles · Tools · Misc, each with its count and total. */
+/** Query-string name -> the property it is kept under on `filters`. */
+const keyOf = k => ({ by: 'handledBy' })[k] || k;
+
+/** Vehicles · Tools · Misc · Rental cars, each with its count and total. */
 function sectionTabs(active, sections, filters) {
-  // The period and the SM filter follow you between sections; the vehicle
-  // filters do not, they mean nothing on Tools and Misc.
-  const keep = ['from', 'to', 'sm'].filter(k => filters[k])
-    .map(k => `&${k}=${encodeURIComponent(filters[k])}`).join('');
+  // Every filter follows you between the tabs. The list below them is the same
+  // ledger whichever tab you are on, so a filter that meant something on one
+  // tab means exactly the same on the next; only the form above changes.
+  const keep = ['kind', 'plate', 'by', 'from', 'to', 'sm'].filter(k => filters[keyOf(k)])
+    .map(k => `&${k}=${encodeURIComponent(filters[keyOf(k)])}`).join('');
   return `<div class="exp-tabs no-print">${SCOPES.map(s => {
     const x = sections[s] || { n: 0, cost: 0, waiting: 0 };
     return `<a href="/admin/expenses?scope=${s}${esc(keep)}"${s === active ? ' class="on"' : ''}>
@@ -681,92 +794,116 @@ function sectionTabs(active, sections, filters) {
 
 function expensesPage({ incidents, plates, filters, totals, sections = {}, today, message, nav }) {
   const scope = filters.scope;
-  const vehicle = scope === 'vehicle';
-  const rental = scope === 'rental';
   const ret = '/admin/expenses' + (filters.query || '');
-  const rows = incidents.map(i => vehicle ? vehicleRow(i, plates, today, ret)
-    : rental ? rentalRow(i, plates, today, ret)
-    : otherRow(i, scope, ret)).join('\n');
   const opt = (v, l, cur) => `<option value="${esc(v)}"${cur === v ? ' selected' : ''}>${esc(l)}</option>`;
 
-  /* The hire car's own registration, typed rather than picked: it is not one
-     of ours, so there is no list to pick it from. */
-  const rentalFilters = rental ? `
-    <div class="f"><label for="plate">Hire car</label>
-      <input class="form-control mono" id="plate" name="plate" type="text" maxlength="16"
-             value="${esc(filters.plate)}" placeholder="REG. NO."></div>` : '';
+  /* One list, on every tab: the whole ledger, newest first. The row somebody
+     pressed Edit on is drawn in its own section's full line instead, so it
+     can actually be changed -- everything else stays a readable line. */
+  const rows = incidents.map(i => {
+    const editing = String(i.id) === String(filters.edit);
+    if (!editing) {
+      return ledgerRow(i, today, ret,
+        `/admin/expenses${filters.editQuery(i)}#row-${i.id}`);
+    }
+    /* This line's own actions come back to this line, still open: removing
+       the wrong photo from a hire should not fold the row up and send you
+       hunting for it again. "close" is how it folds up. */
+    const here = `/admin/expenses${filters.editQuery(i)}#row-${i.id}`;
+    const line = i.scope === 'vehicle' ? vehicleRow(i, plates, today, here)
+      : i.scope === 'rental' ? rentalRow(i, plates, today, here)
+      : otherRow(i, i.scope, here);
+    /* The section's own line needs the section's own widths, and the vehicle
+       line is wider than this list -- so it scrolls inside its own box
+       rather than stretching every other row to match it. */
+    return `<div class="inc-editing" id="row-${esc(i.id)}">
+      <div class="inc-editing-tag">Editing this line · ${esc(KIND_LABEL[kindOf(i)])}
+        <a href="${esc(ret)}">close</a></div>
+      <div class="inc-list${i.scope === 'vehicle' ? '' : i.scope === 'rental' ? ' inc-list-rental' : ' inc-list-other'}">
+${head(i.scope)}
+${line}
+      </div>
+    </div>`;
+  }).join('\n');
 
-  const vehicleFilters = vehicle ? `
+  const filterFields = `
+    <div class="f"><label for="kind">Category</label>
+      <select class="form-control" id="kind" name="kind">
+        ${opt('', 'All', filters.kind)}${Object.entries(KIND_LABEL).map(([v, l]) => opt(v, l, filters.kind)).join('')}
+      </select></div>
     <div class="f"><label for="plate">Vehicle</label>
-      <select class="form-control" id="plate" name="plate">
-        <option value="">All</option>
-        ${plates.map(p => opt(p, p, filters.plate)).join('')}
-      </select></div>
-    <div class="f"><label for="category">Category</label>
-      <select class="form-control" id="category" name="category">
-        ${opt('', 'All', filters.category)}${Object.entries(EXPENSE_LABEL).map(([v, l]) => opt(v, l, filters.category)).join('')}
-      </select></div>
+      <input class="form-control mono" id="plate" name="plate" type="text" maxlength="16" list="exp-plates"
+             value="${esc(filters.plate)}" placeholder="Any"
+             title="One of ours, or a hire car's own registration. A van also matches the hires taken to cover it.">
+      <datalist id="exp-plates">${plates.map(p => `<option value="${esc(p)}"></option>`).join('')}</datalist></div>
     <div class="f"><label for="by">OKQ8 / Own</label>
       <select class="form-control" id="by" name="by">
         ${opt('', 'All', filters.handledBy)}${Object.entries(HANDLER_LABEL).map(([v, l]) => opt(v, l, filters.handledBy)).join('')}${opt('none', 'Not set', filters.handledBy)}
-      </select></div>` : '';
+      </select></div>`;
 
-  const summary = vehicle
-    ? `${esc(totals.withCost)} with cost · ${esc(kr(totals.cost) || '0 kr')} total
-        (damage ${esc(kr(totals.damageCost) || '0 kr')} · spare parts ${esc(kr(totals.partsCost) || '0 kr')}) ·
-        ${esc(totals.waiting)} waiting for the SM check${totals.atShop ? ` · ${esc(totals.atShop)} at the workshop now` : ''}`
-    : rental
-    ? `${esc(totals.withCost)} with cost · ${esc(kr(totals.cost) || '0 kr')} total ·
-        ${esc(totals.waiting)} waiting for the SM check${totals.outNow ? ` · ${esc(totals.outNow)} still out` : ''}`
-    : `${esc(totals.withCost)} with cost · ${esc(kr(totals.cost) || '0 kr')} total ·
-        ${esc(totals.waiting)} waiting for the SM check`;
+  /* One figure per kind, so the five in brackets add up to the total in front
+     of them. Anything left over would be money this page cannot account for,
+     which is the one thing it must not do. */
+  const per = [['damage', totals.damageCost], ['spare parts', totals.partsCost],
+    ['tools', totals.toolCost], ['misc', totals.miscCost], ['hire', totals.rentalCost]]
+    .filter(([, v]) => v).map(([l, v]) => `${l} ${esc(kr(v))}`).join(' · ');
+  const summary = `${esc(incidents.length)} ${incidents.length === 1 ? 'line' : 'lines'} ·
+     ${esc(totals.withCost)} with cost · ${esc(kr(totals.cost) || '0 kr')} total${
+       per ? ` (${per})` : ''} ·
+     ${esc(totals.waiting)} waiting for the SM check${
+       totals.atShop ? ` · ${esc(totals.atShop)} at the workshop now` : ''}${
+       totals.outNow ? ` · ${esc(totals.outNow)} hire ${totals.outNow === 1 ? 'car' : 'cars'} still out` : ''}${
+       filters.handledBy ? ' · <em>vehicle lines only, because OKQ8 / Own is set</em>' : ''}`;
 
   const lede = {
-    vehicle: `What the vans cost, one line each: damage with its workshop visit, and spare parts
-     bought for them. New damage reports arrive on <a href="/admin/incidents">Incidents</a>.`,
-    tool: "Tools bought, repaired or replaced – one line each, with the supplier, the invoice and the Site Manager's approval.",
-    misc: 'Everything else the site pays for that is neither a vehicle nor a tool.',
-    rental: `Cars hired from OKQ8, Circle K or Skeppsbrons while one of ours is off the road:
-     the hire period, what it cost, the agreement, and photos of the car as it was handed over
-     and handed back. A line with no return date is a car that is still out.`
+    vehicle: `Add damage or a spare part above. New damage reports arrive on
+     <a href="/admin/incidents">Incidents</a>.`,
+    tool: 'Add a tool bought, repaired or replaced above.',
+    misc: 'Add anything above that is neither a vehicle nor a tool.',
+    rental: `Add a car hired from OKQ8, Circle K or Skeppsbrons above – the hire period, the
+     agreement, and photos of the car as it was handed over and handed back.`
   }[scope];
 
   const html = `  <div class="page-head">
     <h1>Expenses</h1>
-    <div class="muted">${esc(SCOPE_LABEL[scope])} · ${esc(incidents.length)} ${incidents.length === 1 ? 'entry' : 'entries'}</div>
+    <div class="muted">Every expense, all four sections · ${esc(incidents.length)} ${incidents.length === 1 ? 'line' : 'lines'}</div>
   </div>
 ${nav}
 ${message ? `<div class="ok-msg no-print">${esc(message)}</div>` : ''}
 ${sectionTabs(scope, sections, filters)}
 
-  <p class="lede">${lede} Every line can be edited at any time – the invoice often comes last
-     of all. Click the small link under a line to add ${vehicle ? 'the supplier, invoice number or a note' : 'a note'}.</p>
+  <p class="lede">${lede} The list underneath is the <strong>whole ledger</strong> – vehicles, tools,
+     misc and hire cars together, on every tab – so the Site Manager reads and approves all of it
+     in one place. Its first column says which kind each line is; <strong>Edit</strong> opens a line
+     on its own tab, in that section's own full form, where every field can be changed.</p>
 
   <form class="filters no-print" method="get" action="/admin/expenses">
-    <input type="hidden" name="scope" value="${esc(scope)}">${vehicleFilters}${rentalFilters}
+    <input type="hidden" name="scope" value="${esc(scope)}">${filterFields}
     <div class="f"><label for="from">From</label>
       <input class="form-control" type="date" id="from" name="from" value="${esc(filters.from)}"></div>
     <div class="f"><label for="to">To</label>
       <input class="form-control" type="date" id="to" name="to" value="${esc(filters.to)}"></div>
     <div class="f"><label for="sm">SM check</label>
       <select class="form-control" id="sm" name="sm">
-        ${opt('', 'All', filters.sm)}${opt('no', 'Waiting for OK', filters.sm)}${opt('yes', 'Approved', filters.sm)}
+        ${opt('no', 'Waiting for OK', filters.sm)}${opt('yes', 'Approved', filters.sm)}${opt('all', 'Both', filters.sm)}
       </select></div>
     <button class="btn btn-primary" type="submit">Show</button>
-    <a class="btn btn-ghost" href="/admin/expenses?scope=${esc(scope)}">Everything</a>
-    <a class="btn btn-secondary" href="/admin/expenses.csv${esc(filters.query)}">Download CSV</a>
-    <a class="btn btn-ghost" href="/admin/expenses.csv?scope=all" title="Vehicles, tools, misc and rental cars in one file">CSV, all sections</a>
+    <a class="btn btn-ghost" href="/admin/expenses?scope=${esc(scope)}&amp;sm=all">Everything</a>
+    <a class="btn btn-secondary" href="/admin/expenses.csv${esc(filters.query)}"
+       title="The lines below, filtered exactly as they are now">Download CSV</a>
   </form>
 
 ${newEntry(scope, plates, today, ret)}
 
   <div class="card">
-    <div class="card-header">All ${({ vehicle: 'vehicle', tool: 'tool', misc: 'misc', rental: 'rental car' })[scope]} expenses
+    <div class="card-header">All expenses
       <span class="step-tag">${summary}</span></div>
     <div class="inc-scroll">
-      <div class="inc-list${vehicle ? '' : rental ? ' inc-list-rental' : ' inc-list-other'}">
-${head(scope)}
-${rows || `<p class="muted" style="padding:20px">No entries match. Add one above${vehicle ? ' – or create one from a reported damage on Incidents' : ''}.</p>`}
+      <div class="inc-list inc-list-all">
+${ledgerHead()}
+${rows || `<p class="muted" style="padding:20px">Nothing matches. ${
+        filters.sm === 'no' ? 'This list is what is still waiting for the check – pick <em>Both</em> under SM check to include what has already been approved.'
+        : 'Add an entry above, or widen the filter.'}</p>`}
       </div>
     </div>
   </div>
@@ -781,6 +918,13 @@ ${rows || `<p class="muted" style="padding:20px">No entries match. Add one above
       <p><strong>No cost, no approval.</strong> An OK on an unknown amount is not an approval.
          And if the cost is changed afterwards, the check is reset automatically – an approval
          holds for the amount that stood there when it was given.</p>
+      <p><strong>One list, four sections.</strong> The tabs above choose which form you are
+         filling in; the list is always every expense there is. The first column says which kind
+         a line is – <em>Damage</em>, <em>Spare parts</em>, <em>Tool</em>, <em>Misc</em> or
+         <em>Rental car</em> – and the columns after it are what all four have in common.
+         Everything else about a line lives on its own tab: press <strong>Edit</strong> and it
+         opens there, in that section's full line, with the driver, the workshop dates, the hire
+         firm and the rest.</p>
       <p><strong>Vehicles</strong> carry the registration number, the driver, the workshop visit and
          <strong>OKQ8 / Own</strong>, which stays blank until somebody picks. <strong>Spare
          parts</strong> have no workshop visit, so their dates are switched off.
@@ -788,16 +932,19 @@ ${rows || `<p class="muted" style="padding:20px">No entries match. Add one above
       <p><strong>Rental cars</strong> carry the hire car's own registration – typed, because it is
          not one of ours – the firm, the hire period, and optionally the van it stands in for.
          Leave <em>Returned</em> empty while the car is still out; the Days column then counts up
-         and the section says how many are out. Each photo keeps <strong>when it was taken</strong>
-         where the camera wrote that into the file, and its upload time otherwise – open the fold-out
-         under a line to see every file with its time.</p>
+         and the summary says how many are out. Searching for one of our vans finds the hires taken
+         to cover it as well. Each photo keeps <strong>when it was taken</strong> where the camera
+         wrote that into the file, and its upload time otherwise – open a line to see every file
+         with its time.</p>
+      <p>The list opens on <strong>what is waiting for the check</strong>. Pick <em>Both</em> under
+         SM check, or press <em>Everything</em>, to see what has already been approved.</p>
       <p class="muted">Both OKs and withdrawn OKs are kept with their time. Hover over the
          SM box to see the history.</p>
     </div>
   </div>`;
 
   return page({
-    title: `Expenses – ${SCOPE_LABEL[scope]} – admin`, body: html, links: LINKS,
+    title: 'Expenses – admin', body: html, links: LINKS,
     // Wider than the rest of the app: see body.wide in app.css.
     bodyClass: 'wide', scripts: SCRIPT, lang: 'en', admin: true
   });
@@ -838,4 +985,4 @@ ${nav}
 }
 
 module.exports = { incidentsPage, expensesPage, incidentDeletePage, kr, EXPENSE_LABEL, HANDLER_LABEL,
-  SCOPE_LABEL, RENTAL_FIRM_LABEL };
+  SCOPE_LABEL, RENTAL_FIRM_LABEL, KIND_LABEL, kindOf };

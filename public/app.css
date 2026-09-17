@@ -671,3 +671,90 @@ body.wide .wrap{max-width:1720px}
 .nf-file{padding:5px}
 .nf .inc-shop:disabled{background:repeating-linear-gradient(135deg,#f3f5f8 0 6px,#e9edf2 6px 12px);color:transparent;cursor:not-allowed}
 @media (max-width:560px){.nf-half,.nf-grid > .nf-half:nth-last-child(2){grid-column:auto}}
+
+/* ---------- Expenses: one ledger, all four sections (2026-09-16) ---------- */
+/* The list under every tab is the whole ledger. A line is read-only here: it
+   can be approved, and Edit opens it on its own tab in its own full form.
+   1452 is the sum of the ten columns below, their gaps and the row padding
+   (112+118+158+170+46+88+130+262+160 fixed, 130 for the description, nine
+   6px gaps, 20 of padding). Every column is a fixed width except the
+   description, so a line with four files or a long approval name cannot shift
+   the columns on its own row out from under the headings -- which is what a
+   ledger of five kinds of expense has to get right to be readable at all.
+   Like the section lists, it scrolls sideways on a small screen. */
+.inc-list.inc-list-all{min-width:1452px}
+/* Wider than elsewhere: a hire car's line says whose van it stands in for
+   right next to its own registration, and "ABC123 (for RPH54L)" cut off after
+   the R is worse than no note at all. */
+.inc-list-all > .inc-head .inc-plate,
+.inc-list-all > .inc-read .inc-plate{width:158px;flex:0 0 158px}
+/* The child combinator matters: these widths are the LEDGER line's, and the
+   one row opened for editing carries its own section's line, with its own. */
+.inc-list-all > .inc-head .inc-files,
+.inc-list-all > .inc-read .inc-files{width:130px;flex:0 0 130px;overflow:hidden}
+/* Wide enough for the longest state this cell has: tick, name, time, Undo. */
+.inc-list-all > .inc-head .inc-sm,
+.inc-list-all > .inc-read .inc-sm{width:262px;flex:0 0 262px;min-width:0}
+/* A read-only cell. Same height as the fields it stands in for so the line
+   does not jump when one row opens for editing, but plainly not a field:
+   nothing to click, nothing to type in. */
+.inc-row .ro{
+  min-height:34px;display:flex;align-items:center;
+  font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.inc-read .inc-desc.ro{display:block;line-height:34px}
+.inc-read:hover{background:#f7f9fc}
+.inc-read.inc-done:hover{background:#eef7f0}
+/* The first column: which of the four this line is. The colour is the only
+   thing separating four kinds of money at a glance, so it is a chip rather
+   than a word, and it never wraps. */
+.inc-kind{
+  width:112px;display:inline-flex;align-items:center;justify-content:center;
+  padding:3px 8px;border-radius:999px;border:1px solid var(--border);
+  font-size:12px;font-weight:700;white-space:nowrap;background:#f4f6f9;color:#3d4a5c;
+}
+.inc-head .inc-kind{
+  background:none;border:0;padding:0;justify-content:flex-start;
+  font-weight:400;color:var(--muted);
+}
+.kind-damage{background:#fdf1ef;border-color:#f0cdc6;color:#a23b26}
+.kind-parts{background:#fbf6e8;border-color:#e8dab4;color:#8a6a15}
+.kind-tool{background:#eef4fb;border-color:#c8daee;color:#1b5ba0}
+.kind-misc{background:#f2f2f4;border-color:#d8d8de;color:#4b4b56}
+.kind-rental{background:#eef8f2;border-color:#c3e3d0;color:#1d6b42}
+/* "(for RJC29S)" on a hire car's line: the van it stands in for, said quietly
+   next to the hire car's own registration. */
+.inc-for-note{font-style:normal;font-weight:400;font-size:12px;color:var(--muted);margin-inline-start:4px}
+/* The one line somebody pressed Edit on, opened in its own section's full
+   line, with that section's headings above it. It is lifted out of the list
+   so it is obvious which row you are changing. */
+/* width:max-content so the box grows to hold the section's own line -- the
+   vehicle line is wider than this list -- instead of clipping Save and Delete
+   behind a second scrollbar inside the first. The list's own scroller then
+   reaches them. */
+.inc-editing{
+  border:2px solid var(--primary);border-radius:10px;background:#f8fbff;
+  margin:8px 0;padding:6px 8px 8px;width:max-content;min-width:100%;
+}
+.inc-editing-tag{
+  display:flex;gap:10px;align-items:baseline;
+  font-size:12px;font-weight:700;color:var(--primary);padding:4px 2px 6px;
+}
+.inc-editing-tag a{font-weight:400}
+.inc-editing .inc-head{white-space:nowrap}
+/* Files on a read-only line: icons only, see ledgerFiles(). */
+.inc-read .inc-files{gap:3px}
+.fileicon{
+  display:inline-flex;align-items:center;justify-content:center;
+  width:22px;height:22px;flex:0 0 auto;
+  border:1px solid var(--border);border-radius:6px;background:#fff;
+  color:var(--primary);text-decoration:none;
+}
+.fileicon:hover{border-color:var(--primary);background:#f3f8fd}
+.fileicon.file-invoice{color:#7a4b00}
+.fileicon.file-agreement{color:#4b3ea8}
+.filerest{font-size:11px;font-weight:700;color:var(--muted)}
+/* max-content above would otherwise let the description field stretch to the
+   whole text it holds, and drag the box a few hundred pixels wider than the
+   line needs. It grows to fill the line and stops there. */
+.inc-editing .inc-desc{max-width:300px}
