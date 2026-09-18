@@ -546,7 +546,7 @@ function otherRow(inc, scope, ret) {
  * One line of the ledger, whatever section it belongs to.
  *
  * The list under every tab is the whole ledger -- the tabs choose which form
- * you are filling in above, not what you are looking at below. Five sections
+ * you are filling in, not what you are looking at. Five sections
  * cannot share thirteen columns, so a line here shows what they have in
  * common and says in its first column WHICH of the five it is. The Site
  * Manager can read it and approve it from here; Edit opens the row on its own
@@ -1011,15 +1011,19 @@ ${line}
        totals.outNow ? ` · ${esc(totals.outNow)} hire ${totals.outNow === 1 ? 'car' : 'cars'} still out` : ''}${
        filters.handledBy ? ' · <em>vehicle lines only, because OKQ8 / Own is set</em>' : ''}`;
 
+  /* Where this tab's own form is, now that it sits UNDER the list: the Site
+     Manager comes here to read and approve, and reading should not begin with
+     scrolling past a form nobody on that errand is going to fill in. */
   const lede = {
-    vehicle: `Add damage or a spare part above. New damage reports arrive on
+    vehicle: `Damage and spare parts are added in the form under it. New damage reports arrive on
      <a href="/admin/incidents">Incidents</a>.`,
-    tool: 'Add a tool bought, repaired or replaced above.',
-    misc: 'Add anything above that is neither a vehicle nor a tool.',
-    rental: `Add a car hired from OKQ8, Circle K or Skeppsbrons above – the hire period, the
-     agreement, and photos of the car as it was handed over and handed back.`,
-    estimate: `Add a repair estimate above – the van, the workshop, the day it came in and the
-     estimate itself. What is quoted is not money spent, so it stays out of the totals.`
+    tool: 'A tool bought, repaired or replaced is added in the form under it.',
+    misc: 'Anything that is neither a vehicle nor a tool is added in the form under it.',
+    rental: `A car hired from OKQ8, Circle K or Skeppsbrons is added in the form under it – the
+     hire period, the agreement, and photos of the car as it was handed over and handed back.`,
+    estimate: `A repair estimate is added in the form under it – the van, the workshop, the day
+     it came in and the estimate itself. What is quoted is not money spent, so it stays out of
+     the totals.`
   }[scope];
 
   const html = `  <div class="page-head">
@@ -1030,11 +1034,11 @@ ${nav}
 ${message ? `<div class="ok-msg no-print">${esc(message)}</div>` : ''}
 ${sectionTabs(scope, sections, filters)}
 
-  <p class="lede">${lede} The list underneath is the <strong>whole ledger</strong> – vehicles,
-     tools, misc, hire cars and estimates together, on every tab – so the Site Manager reads and
-     approves all of it in one place. Its first column says which kind each line is;
-     <strong>Edit</strong> opens a line on its own tab, in that section's own full form, where every
-     field can be changed.</p>
+  <p class="lede">The list below is the <strong>whole ledger</strong> – vehicles, tools, misc,
+     hire cars and estimates together, on every tab – so the Site Manager reads and approves all
+     of it in one place. Its first column says which kind each line is; <strong>Edit</strong> opens
+     a line on its own tab, in that section's own full form, where every field can be changed.
+     ${lede}</p>
 
   <form class="filters no-print" method="get" action="/admin/expenses">
     <input type="hidden" name="scope" value="${esc(scope)}">${filterFields}
@@ -1050,9 +1054,9 @@ ${sectionTabs(scope, sections, filters)}
     <a class="btn btn-ghost" href="/admin/expenses?scope=${esc(scope)}&amp;sm=all">Everything</a>
     <a class="btn btn-secondary" href="/admin/expenses.csv${esc(filters.query)}"
        title="The lines below, filtered exactly as they are now">Download CSV</a>
+    <a class="btn btn-ghost" href="#new"
+       title="Jump to the form for adding a new one">Add new ↓</a>
   </form>
-
-${newEntry(scope, plates, today, ret)}
 
   <div class="card">
     <div class="card-header">All expenses
@@ -1062,9 +1066,13 @@ ${newEntry(scope, plates, today, ret)}
 ${ledgerHead()}
 ${rows || `<p class="muted" style="padding:20px">Nothing matches. ${
         filters.sm === 'no' ? 'This list is what is still waiting for the check – pick <em>Both</em> under SM check to include what has already been approved.'
-        : 'Add an entry above, or widen the filter.'}</p>`}
+        : 'Add an entry in the form below, or widen the filter.'}</p>`}
       </div>
     </div>
+  </div>
+
+  <div id="new">
+${newEntry(scope, plates, today, ret)}
   </div>
 
   <div class="card">
