@@ -501,6 +501,89 @@ CREATE INDEX IF NOT EXISTS incident_files_idx ON incident_files (incident_id, id
 -- needs it added, like every other column in this file.
 ALTER TABLE incident_files ADD COLUMN IF NOT EXISTS taken_at TIMESTAMPTZ;
 
+-- 2026-09-18: Wheels. Tyres are not an expense and not a check -- they are a
+-- thing every van has two sets of, and the question asked of them is always
+-- the same one: how much tread is left. A set is one vehicle's tyres for one
+-- season; a reading is one measurement of one axle on one day, and readings
+-- are KEPT rather than overwritten, because two of them are what says whether
+-- a van needs tyres this month or after the summer.
+CREATE TABLE IF NOT EXISTS wheel_sets (
+  id         BIGSERIAL PRIMARY KEY,
+  plate      TEXT NOT NULL,
+  -- 'summer' or 'winter'. Two rows per van, made on demand, never both ways.
+  season     TEXT NOT NULL,
+  make       TEXT NOT NULL DEFAULT '',
+  model      TEXT NOT NULL DEFAULT '',
+  -- 235/65 R16C and the like, as written on the tyre wall.
+  size       TEXT NOT NULL DEFAULT '',
+  -- Studded or friction, which is a winter question and left empty otherwise.
+  tyre_type  TEXT NOT NULL DEFAULT '',
+  -- The DOT code's four digits: week and year of manufacture, e.g. 2321.
+  -- Rubber ages whether or not it is driven on, so this is worth keeping.
+  dot        TEXT NOT NULL DEFAULT '',
+  note       TEXT NOT NULL DEFAULT '',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+-- When this set came off for good. Null is the set the van has NOW; a date is
+-- a set that has been replaced, kept with its own readings, its own make and
+-- its own DOT code. Without this, new tyres in April would either be measured
+-- into the old set's history -- one row describing two different pieces of
+-- rubber -- or bought at the price of deleting the old one.
+ALTER TABLE wheel_sets ADD COLUMN IF NOT EXISTS retired_on DATE;
+-- One LIVE set per van per season. Retired ones are unlimited, and are what
+-- makes a history a history. (The plain index came first; dropping it is a
+-- no-op on every boot after the first.)
+DROP INDEX IF EXISTS wheel_sets_idx;
+CREATE UNIQUE INDEX IF NOT EXISTS wheel_sets_live_idx
+  ON wheel_sets (plate, season) WHERE retired_on IS NULL;
+-- Tyres belong to a van. Without the key, renaming a registration strands
+-- every reading and every photo invisibly, and deleting the van leaves blobs
+-- nothing can reach. Orphans are cleared first so the constraint can be added
+-- to a database that already has some.
+DELETE FROM wheel_sets ws WHERE NOT EXISTS (
+  SELECT 1 FROM vehicles v WHERE v.plate = ws.plate);
+DO $wheels$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'wheel_sets_plate_fk') THEN
+    ALTER TABLE wheel_sets ADD CONSTRAINT wheel_sets_plate_fk
+      FOREIGN KEY (plate) REFERENCES vehicles(plate) ON UPDATE CASCADE ON DELETE CASCADE;
+  END IF;
+END $wheels$;
+
+CREATE TABLE IF NOT EXISTS wheel_readings (
+  id          BIGSERIAL PRIMARY KEY,
+  set_id      BIGINT NOT NULL REFERENCES wheel_sets(id) ON DELETE CASCADE,
+  -- 'front' or 'back'. One figure per axle, which is how it is measured.
+  position    TEXT NOT NULL,
+  depth_mm    NUMERIC(4,1) NOT NULL,
+  measured_on DATE NOT NULL,
+  measured_by TEXT NOT NULL DEFAULT '',
+  note        TEXT NOT NULL DEFAULT '',
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS wheel_readings_idx
+  ON wheel_readings (set_id, position, measured_on DESC, id DESC);
+
+-- Pictures of a tyre: a cut, a bulge, uneven wear. Beside the set rather than
+-- beside a reading, because what they show is the tyre, not the day.
+CREATE TABLE IF NOT EXISTS wheel_files (
+  id          BIGSERIAL PRIMARY KEY,
+  set_id      BIGINT      NOT NULL REFERENCES wheel_sets(id) ON DELETE CASCADE,
+  position    TEXT        NOT NULL DEFAULT '',
+  filename    TEXT,
+  mime        TEXT        NOT NULL,
+  bytes       BYTEA       NOT NULL,
+  byte_size   INTEGER     NOT NULL DEFAULT 0,
+  uploaded_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  taken_at    TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS wheel_files_idx ON wheel_files (set_id, id);
+
+-- Which set is ON the van right now, and since when. On the vehicle because
+-- that is what it is a fact about: a van is on winter tyres, a set is not.
+ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS fitted_season TEXT NOT NULL DEFAULT '';
+ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS fitted_since  DATE;
+
 -- Every time the Site Manager signs off or takes it back. The incident row
 -- carries the current state; this carries how it got there, because an
 -- approval that was withdrawn is exactly the thing somebody will ask about.
@@ -1062,7 +1145,7 @@ async function init() {
  * ------------------------------------------------------------------ */
 
 const VEHICLE_COLS = `id, plate, owner, fleet, note, active, form_id, sort_order, model_key,
-                      manual_file`;
+                      manual_file, fitted_season, fitted_since`;
 
 async function listVehicles({ includeInactive = false } = {}) {
   const where = includeInactive ? '' : 'WHERE active';
@@ -1981,6 +2064,155 @@ async function deleteSubmission(id) {
   return r.rows[0] || null;
 }
 
+/* ------------------------------------------------------------------ *
+ * Wheels                                                              *
+ * ------------------------------------------------------------------ */
+
+const SEASONS = new Set(['summer', 'winter']);
+const POSITIONS = new Set(['front', 'back']);
+
+/**
+ * Every set, with its readings and its files, in three queries.
+ *
+ * The page draws every van and both seasons whether or not anything has been
+ * recorded, so this returns what EXISTS and the page fills the gaps -- a set
+ * row is created the first time somebody writes something into it, and an
+ * empty tile is the honest picture of a tyre nobody has measured.
+ */
+async function listWheelSets() {
+  const sets = (await pool.query(
+    `SELECT id, plate, season, make, model, size, tyre_type, dot, note,
+            retired_on, created_at, updated_at
+       FROM wheel_sets ORDER BY plate, season, (retired_on IS NULL) DESC, retired_on DESC`)).rows;
+  if (!sets.length) return [];
+  const ids = sets.map(r => Number(r.id));
+  const readings = (await pool.query(
+    `SELECT id, set_id, position, depth_mm, measured_on, measured_by, note, created_at
+       FROM wheel_readings WHERE set_id = ANY($1::bigint[])
+      ORDER BY measured_on, id`, [ids])).rows;
+  const files = (await pool.query(
+    `SELECT id, set_id, position, filename, mime, byte_size, uploaded_at, taken_at
+       FROM wheel_files WHERE set_id = ANY($1::bigint[]) ORDER BY id`, [ids])).rows;
+
+  const by = new Map(sets.map(r => [String(r.id), { readings: [], files: [] }]));
+  for (const r of readings) {
+    by.get(String(r.set_id)).readings.push({ ...r, depth_mm: Number(r.depth_mm),
+      measured_on: dayOf(r.measured_on) });
+  }
+  for (const f of files) by.get(String(f.set_id)).files.push(f);
+  return sets.map(r => ({ ...r, retired_on: dayOf(r.retired_on), ...by.get(String(r.id)) }));
+}
+
+/** The set for this van and season, made the first time it is written to. */
+/* Both of these target the LIVE set. The unique index is partial --
+   (plate, season) WHERE retired_on IS NULL -- so that is what ON CONFLICT
+   resolves against, and a retired set is never written to again. */
+async function upsertWheelSet(plate, season, data) {
+  if (!SEASONS.has(season)) return null;
+  const r = await pool.query(
+    `INSERT INTO wheel_sets (plate, season, make, model, size, tyre_type, dot, note)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+     ON CONFLICT (plate, season) WHERE retired_on IS NULL DO UPDATE SET
+       make = EXCLUDED.make, model = EXCLUDED.model, size = EXCLUDED.size,
+       tyre_type = EXCLUDED.tyre_type, dot = EXCLUDED.dot, note = EXCLUDED.note,
+       updated_at = now()
+     RETURNING id`,
+    [plate, season, data.make || '', data.model || '', data.size || '',
+     data.tyreType || '', data.dot || '', data.note || '']);
+  return String(r.rows[0].id);
+}
+
+/**
+ * The live set's id, making an empty one if this van has never had this
+ * season. DO UPDATE SET plate = EXCLUDED.plate rather than DO NOTHING: the
+ * latter returns no row at all on a conflict, and the caller needs the id.
+ */
+async function wheelSetId(plate, season) {
+  if (!SEASONS.has(season)) return null;
+  const r = await pool.query(
+    `INSERT INTO wheel_sets (plate, season) VALUES ($1, $2)
+     ON CONFLICT (plate, season) WHERE retired_on IS NULL
+       DO UPDATE SET plate = EXCLUDED.plate
+     RETURNING id`, [plate, season]);
+  return String(r.rows[0].id);
+}
+
+/**
+ * New tyres on that end of the van.
+ *
+ * The old set is stamped with the day it came off and keeps everything it had
+ * -- its readings, its make, its DOT code -- and a fresh, empty set takes its
+ * place. This is the only way a reading history stays honest across a change
+ * of rubber, and it is why nothing on this page ever offers to "reset" a set.
+ */
+async function replaceWheelSet(plate, season, on) {
+  if (!SEASONS.has(season)) return null;
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const old = await client.query(
+      `UPDATE wheel_sets SET retired_on = $3, updated_at = now()
+        WHERE plate = $1 AND season = $2 AND retired_on IS NULL
+        RETURNING id, make, model`, [plate, season, on]);
+    const fresh = await client.query(
+      `INSERT INTO wheel_sets (plate, season) VALUES ($1, $2) RETURNING id`, [plate, season]);
+    await client.query('COMMIT');
+    return { retired: old.rows[0] || null, id: String(fresh.rows[0].id) };
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+async function addWheelReading(setId, { position, depthMm, measuredOn, measuredBy, note }) {
+  if (!POSITIONS.has(position)) return null;
+  const r = await pool.query(
+    `INSERT INTO wheel_readings (set_id, position, depth_mm, measured_on, measured_by, note)
+     VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
+    [setId, position, depthMm, measuredOn, measuredBy || '', note || '']);
+  return String(r.rows[0].id);
+}
+
+/** A mistyped reading is deleted, not corrected: the history is a history. */
+async function deleteWheelReading(id) {
+  if (!/^\d+$/.test(String(id))) return null;
+  const r = await pool.query(
+    `DELETE FROM wheel_readings WHERE id = $1
+     RETURNING id, set_id, position, depth_mm, measured_on`, [id]);
+  return r.rows[0] || null;
+}
+
+async function setFitted(plate, season, since) {
+  const r = await pool.query(
+    `UPDATE vehicles SET fitted_season = $2, fitted_since = $3 WHERE plate = $1 RETURNING id`,
+    [plate, SEASONS.has(season) ? season : '', since || null]);
+  return r.rows.length > 0;
+}
+
+async function addWheelFile(setId, { position, filename, mime, buffer, takenAt }) {
+  const r = await pool.query(
+    `INSERT INTO wheel_files (set_id, position, filename, mime, bytes, byte_size, taken_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
+    [setId, POSITIONS.has(position) ? position : '', filename || null, mime,
+     buffer, buffer.length, takenAt || null]);
+  return String(r.rows[0].id);
+}
+
+async function getWheelFile(id) {
+  if (!/^\d+$/.test(String(id))) return null;
+  const r = await pool.query(
+    'SELECT id, set_id, filename, mime, bytes FROM wheel_files WHERE id = $1', [id]);
+  return r.rows[0] || null;
+}
+
+async function deleteWheelFile(id) {
+  if (!/^\d+$/.test(String(id))) return null;
+  const r = await pool.query('DELETE FROM wheel_files WHERE id = $1 RETURNING id', [id]);
+  return r.rows[0] || null;
+}
+
 module.exports = {
   init,
   listVehicles, getVehicle, getVehicleById, createVehicle, updateVehicle,
@@ -1995,5 +2227,7 @@ module.exports = {
   listIncidents, getIncident, createIncident, updateIncident, deleteIncident, incidentCounts, expenseSections,
   signOffIncident, addIncidentFile, getIncidentFile, deleteIncidentFile,
   submissionsWithIncident,
+  listWheelSets, upsertWheelSet, wheelSetId, replaceWheelSet, addWheelReading, deleteWheelReading,
+  setFitted, addWheelFile, getWheelFile, deleteWheelFile,
   get pool() { return pool; }
 };

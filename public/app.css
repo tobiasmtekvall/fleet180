@@ -780,3 +780,182 @@ body.wide .wrap{max-width:1720px}
 }
 .filechip.file-estimate a{color:#5233a8}
 .fileicon.file-estimate{color:#5233a8}
+
+/* ---------- Wheels: tyres, two sets per van (2026-09-18) ---------- */
+/* One colour scale, used by the number, the tile it sits in, the picture of
+   the tyre and the stripe down the side of the van's row -- so that a bald
+   tyre is red in four places and can be found by scrolling fast rather than
+   by reading. */
+.band-critical{--wb:#c0392b;--wbg:#fdf0ee;--wbd:#f0c6bf}
+.band-soon    {--wb:#a86b00;--wbg:#fdf7e8;--wbd:#ecd9a6}
+.band-ok      {--wb:#1e7e34;--wbg:#f1f9f3;--wbd:#c4e3cd}
+.band-new     {--wb:#1b6ec2;--wbg:#eff5fc;--wbd:#c6dbf2}
+.band-unknown {--wb:#8a8f98;--wbg:#f6f7f9;--wbd:var(--border)}
+
+.wrow{
+  border:1px solid var(--border);border-inline-start:5px solid var(--wb);
+  border-radius:12px;background:#fff;margin:0 0 14px;overflow:hidden;
+}
+.wrow-head{
+  display:flex;align-items:center;gap:12px;flex-wrap:wrap;
+  padding:10px 14px;border-bottom:1px solid var(--border);background:#fafbfc;
+}
+.wplate{font-size:18px;font-weight:700;text-decoration:none;color:inherit}
+.wplate:hover{color:var(--primary)}
+.wnote{font-size:13px;color:var(--muted);flex:1 1 120px;min-width:0;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.wfitted-now{font-size:13px}
+.wfitted{display:flex;gap:6px;align-items:center}
+.wfitted .form-control{height:32px;padding:4px 7px;font-size:13px;width:auto}
+
+/* Summer and winter, always in that order, always the same place on the row. */
+/* minmax(0,1fr), not 1fr: a plain 1fr track will not go below the min-content
+   of what is in it, so on a phone the two season blocks would keep the row as
+   wide as their widest tile and the whole page would scroll sideways. */
+.wseasons{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0}
+.wseason{padding:12px 14px;background:var(--wbg);min-width:0}
+.wseason + .wseason{border-inline-start:1px solid var(--border)}
+/* The set that is actually on the van, said with a line rather than a colour:
+   the colours on this page all mean tread, and only tread. */
+.wseason.fitted{box-shadow:inset 0 3px 0 var(--primary)}
+.wseason-head{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+.wseason-art{color:var(--wb);display:flex;align-items:center}
+.tyreart{display:block}
+.wseason-name{font-weight:700;font-size:15px}
+.wfitted-tag{
+  font-style:normal;font-size:11px;font-weight:700;color:var(--primary);
+  background:#eaf2fb;border:1px solid #c6dbf2;border-radius:999px;
+  padding:1px 7px;margin-inline-start:6px;white-space:nowrap;
+}
+.wseason-spec{font-size:12px;color:var(--muted);flex:1 1 auto;min-width:0;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:end}
+
+/* Two across where there is room, one where there is not, decided by the tiles
+   themselves: minmax(180px,1fr) with min-width:0 on the tile gives a phone one
+   column without a media query having to guess the width at which "Change now"
+   and a 28px number stop fitting side by side. align-items:start so opening
+   one tyre does not stretch the one next to it to match. */
+.wtyres{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));
+  gap:10px;align-items:start}
+/* The tile IS the summary, so the whole thing is the click target -- which is
+   what makes this usable with gloves on, in a yard, on a phone. */
+.tyre{border:1px solid var(--wbd);border-radius:10px;background:#fff;min-width:0}
+.tyre > summary{
+  list-style:none;cursor:pointer;display:grid;
+  grid-template-columns:1fr auto;grid-template-areas:"pos mm" "band mm";
+  align-items:center;gap:0 10px;padding:10px 12px;min-height:64px;
+}
+.tyre > summary::-webkit-details-marker{display:none}
+.tyre > summary:hover{background:var(--wbg)}
+.tyre[open] > summary{border-bottom:1px solid var(--wbd);background:var(--wbg)}
+/* The tile has a fourth thing to say now: when this was measured. It is the
+   quietest line on the tile until the reading goes stale, and then it is the
+   loudest -- because a colour built on a year-old number is worse than no
+   colour at all. */
+.tyre > summary{grid-template-areas:"pos mm" "band mm" "when mm"}
+.tyre-when{
+  grid-area:when;font-size:11px;color:var(--muted);
+  font-variant-numeric:tabular-nums;white-space:nowrap;
+}
+.tyre-when em{
+  font-style:normal;font-weight:700;color:#a86b00;background:#fdf7e8;
+  border:1px solid #ecd9a6;border-radius:999px;padding:0 5px;margin-inline-start:4px;
+}
+.tyre.stale{border-style:dashed}
+.tyre.stale > summary .tyre-mm{opacity:.72}
+.tyre-pos{grid-area:pos;font-weight:700;font-size:13px}
+.tyre-band{grid-area:band;font-size:11px;color:var(--wb);font-weight:700}
+.tyre-mm{
+  grid-area:mm;font-size:28px;font-weight:700;color:var(--wb);
+  line-height:1;font-variant-numeric:tabular-nums;white-space:nowrap;
+}
+.tyre-mm em{font-style:normal;font-size:12px;font-weight:600;margin-inline-start:3px}
+.tyre-none{color:var(--muted);font-weight:400}
+.tyre-body{padding:10px 12px}
+.tyre-form{display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap}
+.tyre-form label{display:flex;flex-direction:column;gap:3px;margin:0}
+.tyre-form label > span{font-size:11px;font-weight:600;color:var(--muted)}
+.tyre-form .form-control{height:34px;padding:5px 7px;font-size:14px;width:110px;max-width:100%}
+.tyre-form label{min-width:0}
+
+.tyre-hist{list-style:none;margin:10px 0 0;padding:0;font-size:12px}
+.tyre-hist li{display:flex;align-items:center;gap:8px;padding:3px 0;
+  border-top:1px solid var(--border)}
+.tyre-hist form{margin:0 0 0 auto}
+.th-mm{font-weight:700;color:var(--wb);font-variant-numeric:tabular-nums;min-width:58px}
+.th-on{color:var(--muted);font-variant-numeric:tabular-nums}
+.th-by{color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.linkx{background:none;border:0;color:var(--muted);cursor:pointer;font-size:14px;padding:0 4px}
+.linkx:hover{color:#c0392b}
+.tyre-wear{margin:8px 0 0;font-size:12px;color:var(--muted)}
+.tyre-wear.warn{color:#a23b26;background:#fdf1ef;border:1px solid #f0cdc6;
+  border-radius:8px;padding:6px 8px}
+.tyre-note{flex:1 1 180px}
+.tyre-note .form-control{width:100%}
+.tyre-hist-empty{margin:8px 0 0;font-size:12px}
+
+/* Make, size, DOT, note and photos: read once a year, so folded away. */
+.wset{margin-top:10px}
+/* max-width so the summary of a well-filled-in set -- make, size, DOT, photos
+   -- shortens itself on a phone instead of widening the page. */
+.wset > summary{
+  /* display:block, because a summary is a list-item by default and a
+     list-item does not clip its overflow the way this needs it to. */
+  display:block;cursor:pointer;font-size:12px;color:var(--primary);padding:2px 0;
+  width:max-content;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.wset > summary::before{content:'\25b8 ';display:inline-block;transition:transform .12s}
+.wset[open] > summary::before{transform:rotate(90deg)}
+.wset[open] > summary{margin-bottom:8px}
+.wset-form{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end}
+.wset-form label{display:flex;flex-direction:column;gap:3px;margin:0;width:150px}
+.wset-form label.wgrow{flex:1 1 260px;width:auto}
+.wset-form label > span{font-size:11px;font-weight:600;color:var(--muted)}
+.wset-form .form-control{height:34px;padding:5px 7px;font-size:14px;width:100%}
+.wfileinput{padding:5px}
+.wset-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.wfiles{display:flex;gap:4px;flex-wrap:wrap}
+.wfile{display:inline-flex;align-items:center;border:1px solid var(--border);
+  border-radius:999px;background:#fff;font-size:12px;overflow:hidden}
+.wfile a{display:flex;align-items:center;gap:4px;padding:2px 6px;color:var(--primary);text-decoration:none}
+.wfile em{font-style:normal}
+
+/* New tyres, and the sets that came before them. */
+.wnewset{display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;margin-top:10px;
+  padding-top:10px;border-top:1px dashed var(--border)}
+.wnewset label{display:flex;flex-direction:column;gap:3px;margin:0}
+.wnewset label > span{font-size:11px;font-weight:600;color:var(--muted)}
+.wnewset .form-control{height:34px;padding:5px 7px;font-size:14px;width:150px}
+.wnewset-hint{font-size:11px;flex:1 1 200px;min-width:0}
+.wfiles-form{margin-top:8px}
+.wpast{margin-top:8px}
+.wpast > summary{
+  display:block;cursor:pointer;font-size:12px;color:var(--muted);padding:2px 0;
+  width:max-content;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.wpast > summary::before{content:'\25b8 ';display:inline-block}
+.wpast[open] > summary::before{transform:rotate(90deg)}
+.wpast-list{list-style:none;margin:6px 0 0;padding:0;font-size:12px}
+.wpast-list li{
+  display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;
+  padding:5px 8px;border-inline-start:3px solid var(--wb);
+  background:#fff;border-radius:6px;margin-bottom:4px;
+}
+.ps-when{font-weight:700;font-variant-numeric:tabular-nums;white-space:nowrap}
+.ps-spec{flex:1 1 140px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ps-last{color:var(--wb);font-weight:600;white-space:nowrap}
+.ps-n{color:var(--muted);white-space:nowrap}
+
+.wtallies{display:flex;gap:8px;flex-wrap:wrap}
+.wtally-stale{
+  border:1px dashed #ecd9a6;background:#fdf7e8;color:#a86b00;
+  border-radius:999px;padding:2px 10px;font-size:12px;font-weight:700;
+}
+.wtally{
+  border:1px solid var(--wbd);background:var(--wbg);color:var(--wb);
+  border-radius:999px;padding:2px 10px;font-size:12px;font-weight:700;
+}
+@media (max-width:900px){
+  .wseasons{grid-template-columns:minmax(0,1fr)}
+  .wseason + .wseason{border-inline-start:0;border-top:1px solid var(--border)}
+}

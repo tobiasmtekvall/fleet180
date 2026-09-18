@@ -20,6 +20,8 @@ const TABS = [
   { href: '/admin/incidents', text: 'Incidents', key: 'incidents' },
   // The ledger, the SM check and the CSV, split off Incidents 2026-09-15.
   { href: '/admin/expenses', text: 'Expenses', key: 'expenses' },
+  // Tyres: both sets, four tread readings per van (2026-09-18).
+  { href: '/admin/wheels', text: 'Wheels', key: 'wheels' },
   { href: '/admin/stats', text: 'Statistics', key: 'stats' },
   { href: '/admin/daily-summary', text: 'Daily email', key: 'mail' },
   // Not an /admin page -- it is the Checklist Calendar, mounted whole at

@@ -28,6 +28,8 @@ const { incidentsPage, expensesPage, incidentDeletePage, HANDLER_LABEL,
   RENTAL_FIRM_LABEL, ESTIMATE_SHOP_LABEL, KIND_LABEL, kindOf } = require('./views/incidents');
 const exif = require('./exif');
 const expenses = require('./expenses');
+const wheels = require('./wheels');
+const { wheelsPage } = require('./views/wheels');
 const statsLib = require('./stats');
 const { buildDriverStats } = statsLib;
 const { badgeText } = require('./badges');
@@ -1357,14 +1359,19 @@ function entryProblem(data) {
 }
 
 /**
- * Where a row action lands afterwards. The Expenses page posts its own URL
- * (filters included) so a save does not throw the filter away; anything that
- * is not one of our two pages falls back to Expenses -- never an open redirect.
+ * Where a row action lands afterwards. These pages post their own URL (filters
+ * included) so a save does not throw the filter away; anything that is not one
+ * of them falls back to Expenses -- never an open redirect.
+ *
+ * The fragment is how a page keeps your place: #row-12 is the expense line
+ * opened for editing, #v-ABC12D is a van on Wheels and #t-ABC12D-winter-front
+ * is one tyre on it. Nothing else is allowed through, here or in the path.
  */
 function returnTo(req) {
   const r = String((req.body && req.body.ret) || '');
-  // The optional #row-12 is how a line opened for editing keeps its place.
-  if (/^\/admin\/(expenses|incidents)(\?[\w=&%.+-]*)?(#row-\d+)?$/.test(r)) return r;
+  if (/^\/admin\/(expenses|incidents|wheels)(\?[\w=&%.+-]*)?(#(row-\d+|v-[\w-]+|t-[\w-]+))?$/.test(r)) {
+    return r;
+  }
   return '/admin/expenses';
 }
 
@@ -1844,6 +1851,345 @@ app.get('/admin/expenses.csv', async (req, res, next) => {
     res.type('text/csv; charset=utf-8')
       .set('Content-Disposition', `attachment; filename="expenses-${filters.kind || 'all'}.csv"`)
       .send('﻿' + lines.join('\r\n'));
+  } catch (err) { next(err); }
+});
+
+/* ------------------------------ wheels ------------------------------ *
+ * Tyres. Every van has two sets and every set has two axles, and the only
+ * question ever asked of them is how much tread is left -- so the page is
+ * four numbers per van and the routes are the four things you can do to one:
+ * write a reading down, say what the tyres are, say which set is on the van,
+ * and undo a number typed wrong.
+ * ------------------------------------------------------------------- */
+
+/* An anchor is only meaningful on the page it names. returnTo() falls back to
+   Expenses for anything it does not recognise, and hanging #v-ABC12D off that
+   would be a fragment pointing at nothing. */
+function atWheels(to, fragment) {
+  return to.startsWith('/admin/wheels') ? to + fragment : to;
+}
+
+const WHEEL_SEASONS = new Set(['summer', 'winter']);
+const WHEEL_POSITIONS = new Set(['front', 'back']);
+const TYRE_TYPES = new Set(['', 'studded', 'friction']);
+/** What a photo of a tyre may be. Raster only -- see the note at the upload. */
+const WHEEL_PHOTO_MIME = /^image\/(jpeg|png|webp|gif|heic|heif)$/i;
+
+/** A depth, or a sentence saying what is wrong with it. */
+function readDepth(raw) {
+  const t = String(raw ?? '').replace(/\s|mm/gi, '').replace(',', '.').trim();
+  if (!t) return { problem: 'Type the tread depth in millimetres.' };
+  const n = Number(t);
+  if (!Number.isFinite(n)) return { problem: 'The tread depth has to be a number, in millimetres.' };
+  if (n < 0) return { problem: 'A tread depth cannot be negative.' };
+  /* A new van tyre is 8-9 mm and nothing road-legal is near 20. A number
+     above it is the tyre WIDTH read off the wall by somebody in a hurry, and
+     letting 235 through would paint the van green for the next six months. */
+  if (n > wheels.MAX_MM) {
+    return { problem: `${n} mm is not a tread depth – a new tyre is about 8 mm. Did you type the tyre width?` };
+  }
+  return { depth: Math.round(n * 10) / 10 };
+}
+
+/**
+ * A real calendar day, or ''.
+ *
+ * The shape test every other page uses lets 2026-02-31 and 2026-13-01
+ * through, and Postgres then raises "date/time field value out of range" --
+ * a 500 where every other bad input on this page gets a sentence. So the day
+ * is rebuilt from the parts and has to come back the same.
+ */
+function calendarDay(raw) {
+  const t = String(raw || '');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(t)) return '';
+  const d = new Date(t + 'T00:00:00Z');
+  return Number.isNaN(d.getTime()) || wheels.dayKey(d) !== t ? '' : t;
+}
+
+function wheelFilters(req) {
+  const bands = new Set([...wheels.BANDS.map(b => b.key), 'unknown', 'attention', 'stale']);
+  const f = {
+    plate: normalisePlate(req.query.plate || ''),
+    band: bands.has(req.query.band) ? req.query.band : '',
+    fitted: WHEEL_SEASONS.has(req.query.fitted) ? req.query.fitted
+      : req.query.fitted === 'none' ? 'none' : ''
+  };
+  f.query = qsOf({ plate: f.plate, band: f.band, fitted: f.fitted });
+  return f;
+}
+
+/** The latest reading for one axle of one set, or null. */
+function latestReading(set, position) {
+  const rows = (set.readings || []).filter(r => r.position === position);
+  return rows.length ? rows[rows.length - 1] : null;
+}
+
+/** Every depth a van has on record, both seasons, for filtering and counting. */
+function depthsOf(plate, byKey) {
+  const out = [];
+  for (const season of ['summer', 'winter']) {
+    const set = byKey.get(`${plate}|${season}`);
+    for (const position of ['front', 'back']) {
+      const last = set && latestReading(set, position);
+      out.push({ season, position, depth: last ? last.depth_mm : null, last, set });
+    }
+  }
+  return out;
+}
+
+async function wheelsFor(req) {
+  const filters = wheelFilters(req);
+  /* Vans in service only. A decommissioned van has no tyres to buy, and four
+     "not measured" tiles apiece would put a dozen ghosts in the fleet tally
+     and make the heading count vans nobody drives. Their history is kept --
+     it is only hidden from this page. */
+  const [all, sets] = await Promise.all([
+    db.listVehicles(),
+    db.listWheelSets()
+  ]);
+  // The tiles read the live set; a retired one is history, not a tyre.
+  const byKey = new Map(sets.filter(s => !s.retired_on).map(s => [`${s.plate}|${s.season}`, s]));
+
+  let vehicles = all;
+  if (filters.plate) vehicles = vehicles.filter(v => v.plate === filters.plate);
+  if (filters.fitted) {
+    vehicles = vehicles.filter(v => filters.fitted === 'none'
+      ? !v.fitted_season : v.fitted_season === filters.fitted);
+  }
+  const today = summaryLib.dayKey();
+  if (filters.band) {
+    vehicles = vehicles.filter(v => depthsOf(v.plate, byKey).some(d => {
+      const key = wheels.bandOf(d.depth).key;
+      if (filters.band === 'attention') return key === 'critical' || key === 'soon';
+      // "Old" is not a band: it is a measurement that has stopped being one.
+      if (filters.band === 'stale') {
+        return Boolean(d.last) && wheels.isStale(d.last.measured_on, today);
+      }
+      return key === filters.band;
+    }));
+  }
+
+  /* The tally counts TYRES on the vans shown, not vans: "three under 3 mm" is
+     three tyres to buy, which is the number somebody acts on. */
+  const tally = { critical: 0, soon: 0, ok: 0, new: 0, unknown: 0, stale: 0 };
+  for (const v of vehicles) {
+    for (const d of depthsOf(v.plate, byKey)) {
+      tally[wheels.bandOf(d.depth).key]++;
+      if (d.last && wheels.isStale(d.last.measured_on, today)) tally.stale++;
+    }
+  }
+  return { filters, vehicles, sets, byKey, tally };
+}
+
+app.get('/admin/wheels', async (req, res, next) => {
+  try {
+    const { filters, vehicles, sets, tally } = await wheelsFor(req);
+    res.send(wheelsPage({
+      vehicles, sets, tally, filters,
+      today: summaryLib.dayKey(),
+      message: flashOf(req), nav: adminNav('wheels')
+    }));
+  } catch (err) { next(err); }
+});
+
+/** A reading. The one thing on this page anybody does twice in a morning. */
+app.post('/admin/wheels/:plate/:season/reading', upload, async (req, res, next) => {
+  try {
+    const to = returnTo(req);
+    const plate = normalisePlate(req.params.plate);
+    const season = req.params.season;
+    if (!WHEEL_SEASONS.has(season)) return back(res, to, 'Unknown season.');
+    const position = WHEEL_POSITIONS.has(req.body.position) ? req.body.position : '';
+    if (!position) return back(res, to, 'Say whether that is the front or the back.');
+    const vehicle = await db.getVehicle(plate);
+    if (!vehicle) return back(res, to, 'That vehicle is not in the fleet.');
+
+    const { depth, problem } = readDepth(req.body.depthMm);
+    if (problem) return back(res, to, problem);
+    const today = summaryLib.dayKey();
+    const on = calendarDay(req.body.measuredOn) || today;
+    if (req.body.measuredOn && !calendarDay(req.body.measuredOn)) {
+      return back(res, to, 'That is not a date. Use the date box, or type it as 2026-09-18.');
+    }
+    // A gauge cannot be read tomorrow.
+    if (on > today) return back(res, to, 'A reading cannot be dated in the future.');
+
+    const setId = await db.wheelSetId(plate, season);
+    await db.addWheelReading(setId, {
+      position, depthMm: depth, measuredOn: on,
+      measuredBy: String(req.body.measuredBy || '').trim().slice(0, 120),
+      note: String(req.body.note || '').trim().slice(0, 500)
+    });
+    const band = wheels.bandOf(depth);
+    back(res, atWheels(to, `#t-${plate}-${season}-${position}`),
+      `${plate} ${season} ${position}: ${wheels.mm(depth)} mm – ${band.label.toLowerCase()}.`);
+  } catch (err) { next(err); }
+});
+
+/* Before /:plate/:season, which would otherwise match "fitted" as a season and
+   answer a perfectly good request with "Unknown season." Express takes the
+   first route that matches, so the specific one has to be written first. */
+/** Which set is on the van, and since when. */
+app.post('/admin/wheels/:plate/fitted', upload, async (req, res, next) => {
+  try {
+    const to = returnTo(req);
+    const plate = normalisePlate(req.params.plate);
+    const season = WHEEL_SEASONS.has(req.body.season) ? req.body.season : '';
+    const today = summaryLib.dayKey();
+    let since = calendarDay(req.body.since);
+    if (req.body.since && !since) {
+      return back(res, to, 'That is not a date. Use the date box, or type it as 2026-09-18.');
+    }
+    if (since > today) return back(res, to, 'Tyres cannot have been fitted in the future.');
+    if (season && !since) since = today;
+    if (!season) since = '';
+    const ok = await db.setFitted(plate, season, since || null);
+    if (!ok) return back(res, to, 'That vehicle is not in the fleet.');
+    back(res, atWheels(to, `#v-${plate}`), season
+      ? `${plate} is on ${season} tyres since ${since}.`
+      : `${plate}: which set is on it is no longer recorded.`);
+  } catch (err) { next(err); }
+});
+
+/** What the tyres ARE: make, model, size, type, DOT, note and photos. */
+app.post('/admin/wheels/:plate/:season', softUpload, async (req, res, next) => {
+  try {
+    const to = returnTo(req);
+    const plate = normalisePlate(req.params.plate);
+    const season = req.params.season;
+    if (!WHEEL_SEASONS.has(season)) return back(res, to, 'Unknown season.');
+    const vehicle = await db.getVehicle(plate);
+    if (!vehicle) return back(res, to, 'That vehicle is not in the fleet.');
+
+    const text = (v, n) => String(v || '').trim().slice(0, n);
+    const dot = text(req.body.dot, 8).replace(/\D/g, '');
+    if (dot && dot.length !== 4) {
+      return back(res, to, 'A DOT code is four digits: the week and the year, e.g. 2321.');
+    }
+    const setId = await db.upsertWheelSet(plate, season, {
+      make: text(req.body.make, 80),
+      model: text(req.body.model, 80),
+      size: text(req.body.size, 40),
+      tyreType: TYRE_TYPES.has(req.body.tyreType) ? req.body.tyreType : '',
+      dot,
+      note: text(req.body.note, 500)
+    });
+    const position = WHEEL_POSITIONS.has(req.body.photoPosition) ? req.body.photoPosition : '';
+    let added = 0, skipped = 0;
+    for (const f of req.files || []) {
+      if (f.fieldname !== 'photos') continue;
+      /* Named formats, not /^image\//: that would admit image/svg+xml, and an
+         SVG is a document that can carry script, served back inline from this
+         app's own origin. A photo of a tyre is a photograph. */
+      if (!WHEEL_PHOTO_MIME.test(f.mimetype)) { skipped++; continue; }
+      await db.addWheelFile(setId, {
+        position,
+        filename: (f.originalname || '').slice(0, 200),
+        mime: f.mimetype,
+        buffer: f.buffer,
+        takenAt: exif.takenAt(f.buffer, f.mimetype)
+      });
+      added++;
+    }
+    back(res, to, `Saved.${added ? ` ${added} photo(s) attached.` : ''}${
+      skipped ? ` ${skipped} file(s) skipped – pictures only.` : ''}${limitNote(req)}`);
+  } catch (err) { next(err); }
+});
+
+/**
+ * New tyres on this end of the van.
+ *
+ * The set that was there is stamped with the day it came off and keeps
+ * everything it had; an empty one takes its place. The alternative -- going on
+ * measuring into the same history -- makes one row describe two different
+ * pieces of rubber, and makes every wear figure and every DOT code on the page
+ * a lie from that day on.
+ */
+app.post('/admin/wheels/:plate/:season/replace', upload, async (req, res, next) => {
+  try {
+    const to = returnTo(req);
+    const plate = normalisePlate(req.params.plate);
+    const season = req.params.season;
+    if (!WHEEL_SEASONS.has(season)) return back(res, to, 'Unknown season.');
+    const vehicle = await db.getVehicle(plate);
+    if (!vehicle) return back(res, to, 'That vehicle is not in the fleet.');
+    const today = summaryLib.dayKey();
+    const on = calendarDay(req.body.on) || today;
+    if (req.body.on && !calendarDay(req.body.on)) {
+      return back(res, to, 'That is not a date. Use the date box, or type it as 2026-09-18.');
+    }
+    if (on > today) return back(res, to, 'Tyres cannot have been fitted in the future.');
+    const { retired } = await db.replaceWheelSet(plate, season, on);
+    back(res, atWheels(to, `#v-${plate}`), retired
+      ? `${plate}: the ${season} set${retired.make ? ' (' + retired.make + ')' : ''} was put aside as of ${on}, with its readings. The new set is empty.`
+      : `${plate}: a new ${season} set was started. There was nothing recorded on the old one.`);
+  } catch (err) { next(err); }
+});
+
+/** A number typed wrong. Not a tyre that changed -- that is a new set. */
+app.post('/admin/wheels/reading/:id/delete', upload, async (req, res, next) => {
+  try {
+    const gone = await db.deleteWheelReading(req.params.id);
+    back(res, returnTo(req), gone
+      ? `The reading of ${wheels.mm(gone.depth_mm)} mm from ${wheels.asDay(gone.measured_on)} was deleted.`
+      : 'That reading no longer exists.');
+  } catch (err) { next(err); }
+});
+
+app.get('/admin/wheels/file/:id', async (req, res, next) => {
+  try {
+    const f = await db.getWheelFile(req.params.id);
+    if (!f) return res.status(404).type('text/plain').send('File not found.');
+    res.type(f.mime)
+      .set('Content-Disposition', `inline; filename="${encodeURIComponent(f.filename || 'file')}"`)
+      .set('Cache-Control', 'private, max-age=3600')
+      .send(f.bytes);
+  } catch (err) { next(err); }
+});
+
+/* softUpload, and the chips live in their own <form>: the remove button used
+   to sit inside the set form next to its file input, so picking photos and
+   then removing a different one posted the picked files to the delete route,
+   which throws them away without a word. */
+app.post('/admin/wheels/file/:id/delete', softUpload, async (req, res, next) => {
+  try {
+    const gone = await db.deleteWheelFile(req.params.id);
+    back(res, returnTo(req), gone ? 'Photo removed.' : 'That photo no longer exists.');
+  } catch (err) { next(err); }
+});
+
+app.get('/admin/wheels.csv', async (req, res, next) => {
+  try {
+    const { vehicles, byKey } = await wheelsFor(req);
+    const today = summaryLib.dayKey();
+    const header = ['Vehicle', 'On the van', 'Fitted since', 'Season', 'Position', 'Tread (mm)',
+      'Band', 'Measured', 'Measured by', 'Readings', 'Wear (mm/month)', '3 mm around',
+      'Make', 'Model', 'Size', 'Type', 'DOT', 'Photos', 'Note'];
+    const lines = [header.map(csvCell).join(';')];
+    for (const v of vehicles) {
+      for (const d of depthsOf(v.plate, byKey)) {
+        const set = d.set;
+        const history = set ? set.readings.filter(r => r.position === d.position) : [];
+        const wear = wheels.wearOf(history, today);
+        lines.push([
+          v.plate, v.fitted_season, wheels.asDay(v.fitted_since),
+          d.season, d.position,
+          d.depth === null || d.depth === undefined ? '' : String(d.depth).replace('.', ','),
+          wheels.bandOf(d.depth).label,
+          d.last ? wheels.asDay(d.last.measured_on) : '', d.last ? d.last.measured_by : '',
+          history.length,
+          wear ? String(Math.round(wear.perMonth * 100) / 100).replace('.', ',') : '',
+          wear && wear.reaches3 ? wear.reaches3 : '',
+          set ? set.make : '', set ? set.model : '', set ? set.size : '',
+          set ? set.tyre_type : '', set ? set.dot : '',
+          set ? set.files.filter(f => !f.position || f.position === d.position).length : 0,
+          set ? set.note : ''
+        ].map(csvCell).join(';'));
+      }
+    }
+    res.type('text/csv; charset=utf-8')
+      .set('Content-Disposition', 'attachment; filename="wheels.csv"')
+      .send('\ufeff' + lines.join('\r\n'));
   } catch (err) { next(err); }
 });
 
