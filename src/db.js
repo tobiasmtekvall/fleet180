@@ -469,6 +469,15 @@ CREATE INDEX IF NOT EXISTS incidents_scope_idx ON incidents (scope, occurred_on 
 ALTER TABLE incidents ADD COLUMN IF NOT EXISTS rental_firm TEXT NOT NULL DEFAULT '';
 ALTER TABLE incidents ADD COLUMN IF NOT EXISTS rented_to   DATE;
 ALTER TABLE incidents ADD COLUMN IF NOT EXISTS for_plate   TEXT NOT NULL DEFAULT '';
+-- 2026-09-18: Estimat (Reparation), the fifth section. A quote from one of
+-- three workshops for work not done yet, so it carries no cost_sek at all:
+-- quoted_sek is what somebody asked for, and it is deliberately a separate
+-- column -- here and on incident_sm_events -- so that no sum of cost_sek
+-- anywhere can mistake a quote for money spent. occurred_on is the day the
+-- estimate came in; sm_ok/sm_by/
+-- sm_at carry "accepted, we are going ahead" on these rows.
+ALTER TABLE incidents ADD COLUMN IF NOT EXISTS estimate_shop TEXT NOT NULL DEFAULT '';
+ALTER TABLE incidents ADD COLUMN IF NOT EXISTS quoted_sek    NUMERIC(12,2);
 
 -- Photos of the damage and invoices from the workshop, in the database beside
 -- everything else so a backup is a backup of the whole case.
@@ -504,6 +513,11 @@ CREATE TABLE IF NOT EXISTS incident_sm_events (
   happened_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS incident_sm_events_idx ON incident_sm_events (incident_id, id);
+-- 2026-09-18: on an estimate this same signature means "accepted", and the
+-- figure it was given against is a quote. It gets its own column here for the
+-- same reason it has one on the incident: cost_sek must stay summable as
+-- money spent, and an accepted quote is not that.
+ALTER TABLE incident_sm_events ADD COLUMN IF NOT EXISTS quoted_sek NUMERIC(12,2);
 
 `;
 
@@ -1171,6 +1185,7 @@ async function countsBefore(date) {
 const INCIDENT_COLS = `id, plate, occurred_on, description, driver_name,
   category, handled_by, scope, supplier, invoice_no, note, shop_in, shop_out, cost_sek, sm_ok, sm_by, sm_at, submission_id,
   rental_firm, rented_to, for_plate,
+  estimate_shop, quoted_sek,
   created_at, updated_at`;
 
 /** Dates come back as Date objects; the page wants 2026-09-14. */
@@ -1189,6 +1204,7 @@ function shapeIncident(row, files = [], events = []) {
     shop_out: dayOf(row.shop_out),
     rented_to: dayOf(row.rented_to),
     cost_sek: row.cost_sek === null || row.cost_sek === undefined ? null : Number(row.cost_sek),
+    quoted_sek: row.quoted_sek === null || row.quoted_sek === undefined ? null : Number(row.quoted_sek),
     files, events
   };
 }
@@ -1220,7 +1236,7 @@ async function listIncidents({ plate = '', from = '', to = '', smOk = null,
     `SELECT id, incident_id, kind, filename, mime, byte_size, uploaded_at, taken_at
        FROM incident_files WHERE incident_id = ANY($1::bigint[]) ORDER BY id`, [ids])).rows;
   const events = (await pool.query(
-    `SELECT id, incident_id, action, who, cost_sek, happened_at
+    `SELECT id, incident_id, action, who, cost_sek, quoted_sek, happened_at
        FROM incident_sm_events WHERE incident_id = ANY($1::bigint[]) ORDER BY id`, [ids])).rows;
 
   const byId = new Map(rows.map(r => [String(r.id), { files: [], events: [] }]));
@@ -1237,7 +1253,7 @@ async function getIncident(id) {
     `SELECT id, incident_id, kind, filename, mime, byte_size, uploaded_at, taken_at
        FROM incident_files WHERE incident_id = $1 ORDER BY id`, [id])).rows;
   const events = (await pool.query(
-    `SELECT id, incident_id, action, who, cost_sek, happened_at
+    `SELECT id, incident_id, action, who, cost_sek, quoted_sek, happened_at
        FROM incident_sm_events WHERE incident_id = $1 ORDER BY id`, [id])).rows;
   return shapeIncident(r.rows[0], files, events);
 }
@@ -1247,15 +1263,17 @@ async function createIncident(data) {
     `INSERT INTO incidents
        (plate, occurred_on, description, driver_name, shop_in, shop_out, cost_sek, submission_id,
         category, handled_by, scope, supplier, invoice_no, note,
-        rental_firm, rented_to, for_plate)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING id`,
+        rental_firm, rented_to, for_plate, estimate_shop, quoted_sek)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19) RETURNING id`,
     [data.plate, data.occurredOn, data.description || '', data.driverName || '',
      data.shopIn || null, data.shopOut || null,
      data.cost === null || data.cost === undefined ? null : data.cost,
      data.submissionId || null,
      data.category ?? 'damage', data.handledBy || '',
      data.scope || 'vehicle', data.supplier || '', data.invoiceNo || '', data.note || '',
-     data.rentalFirm || '', data.rentedTo || null, data.forPlate || '']);
+     data.rentalFirm || '', data.rentedTo || null, data.forPlate || '',
+     data.estimateShop || '',
+     data.quoted === null || data.quoted === undefined ? null : data.quoted]);
   return String(r.rows[0].id);
 }
 
@@ -1264,42 +1282,60 @@ async function createIncident(data) {
  *
  * `sm_ok`, `sm_by` and `sm_at` are deliberately not writable here: they change
  * only through signOff(), which records why. What this does do is clear the
- * approval when the cost changes -- an OK is an OK of an amount, and a figure
- * edited after the fact would otherwise carry yesterday's signature.
+ * approval when the amount changes -- an OK is an OK of an amount, and a
+ * figure edited after the fact would otherwise carry yesterday's signature.
+ * On an estimate the amount is the quote and the signature means "accepted",
+ * so the same rule applies to it: a quote that changed is a quote nobody has
+ * said yes to yet.
  */
 async function updateIncident(id, data) {
-  const before = await pool.query('SELECT cost_sek, sm_ok FROM incidents WHERE id = $1', [id]);
+  const before = await pool.query(
+    'SELECT cost_sek, quoted_sek, scope, estimate_shop, sm_ok FROM incidents WHERE id = $1', [id]);
   if (!before.rows.length) return null;
-  const oldCost = before.rows[0].cost_sek === null ? null : Number(before.rows[0].cost_sek);
-  const newCost = data.cost === null || data.cost === undefined ? null : Number(data.cost);
-  const costChanged = before.rows[0].sm_ok && oldCost !== newCost;
+  const num = v => (v === null || v === undefined ? null : Number(v));
+  const estimate = before.rows[0].scope === 'estimate';
+  const oldCost = num(estimate ? before.rows[0].quoted_sek : before.rows[0].cost_sek);
+  const newCost = num(estimate ? data.quoted : data.cost);
+  /* What was accepted on an estimate is one workshop's quote, so pointing the
+     row at a different workshop invalidates the tick exactly as changing the
+     figure does: nobody has said yes to Malte Mansson's price for a line that
+     was accepted as STS's. */
+  const shopChanged = estimate && (before.rows[0].estimate_shop || '') !== (data.estimateShop || '');
+  const reason = oldCost !== newCost ? (estimate ? 'quote' : 'cost') : shopChanged ? 'workshop' : '';
+  const costChanged = Boolean(before.rows[0].sm_ok && reason);
 
   await pool.query(
     `UPDATE incidents SET plate = $2, occurred_on = $3, description = $4, driver_name = $5,
             shop_in = $6, shop_out = $7, cost_sek = $8, category = $9, handled_by = $10,
             scope = $11, supplier = $12, invoice_no = $13, note = $14,
-            rental_firm = $15, rented_to = $16, for_plate = $17, updated_at = now()
+            rental_firm = $15, rented_to = $16, for_plate = $17,
+            estimate_shop = $18, quoted_sek = $19, updated_at = now()
       WHERE id = $1`,
     [id, data.plate, data.occurredOn, data.description || '', data.driverName || '',
-     data.shopIn || null, data.shopOut || null, newCost,
+     data.shopIn || null, data.shopOut || null, num(data.cost),
      data.category ?? 'damage', data.handledBy || '',
      data.scope || 'vehicle', data.supplier || '', data.invoiceNo || '', data.note || '',
-     data.rentalFirm || '', data.rentedTo || null, data.forPlate || '']);
+     data.rentalFirm || '', data.rentedTo || null, data.forPlate || '',
+     data.estimateShop || '', num(data.quoted)]);
 
   if (costChanged) {
     await pool.query(
       `UPDATE incidents SET sm_ok = false, sm_by = '', sm_at = NULL WHERE id = $1`, [id]);
     await pool.query(
-      `INSERT INTO incident_sm_events (incident_id, action, who, cost_sek)
-       VALUES ($1, 'cleared-by-cost-change', '', $2)`, [id, newCost]);
+      `INSERT INTO incident_sm_events (incident_id, action, who, cost_sek, quoted_sek)
+       VALUES ($1, $2, '', $3, $4)`,
+      [id, !estimate ? 'cleared-by-cost-change'
+        : reason === 'workshop' ? 'cleared-by-workshop-change' : 'cleared-by-quote-change',
+       estimate ? null : newCost, estimate ? newCost : null]);
   }
-  return { costChanged };
+  return { costChanged, reason };
 }
 
 /** Count and total per section, for the sub-tab labels on Expenses. */
 async function expenseSections() {
   const r = await pool.query(
     `SELECT scope, count(*)::int AS n, coalesce(sum(cost_sek), 0)::float AS cost,
+            coalesce(sum(quoted_sek), 0)::float AS quoted,
             count(*) FILTER (WHERE NOT sm_ok)::int AS waiting
        FROM incidents GROUP BY scope`);
   const out = {};
@@ -1332,15 +1368,23 @@ async function deleteIncident(id) {
  * becomes afterwards.
  */
 async function signOffIncident(id, { ok, who }) {
-  const cur = await pool.query('SELECT cost_sek FROM incidents WHERE id = $1', [id]);
+  /* The history keeps the figure the signature was given against -- "approved
+     WHAT" is the question it exists to answer. On an estimate that figure is
+     a quote and the signature means "accepted", so it is written to its own
+     column: cost_sek in this table has to stay summable as money somebody
+     approved spending, and an accepted quote is not that. */
+  const cur = await pool.query(
+    'SELECT scope, cost_sek, quoted_sek FROM incidents WHERE id = $1', [id]);
   if (!cur.rows.length) return null;
+  const estimate = cur.rows[0].scope === 'estimate';
   await pool.query(
     `UPDATE incidents SET sm_ok = $2, sm_by = $3, sm_at = $4, updated_at = now() WHERE id = $1`,
     [id, !!ok, ok ? who : '', ok ? new Date() : null]);
   await pool.query(
-    `INSERT INTO incident_sm_events (incident_id, action, who, cost_sek)
-     VALUES ($1, $2, $3, $4)`,
-    [id, ok ? 'ok' : 'withdrawn', who || '', cur.rows[0].cost_sek]);
+    `INSERT INTO incident_sm_events (incident_id, action, who, cost_sek, quoted_sek)
+     VALUES ($1, $2, $3, $4, $5)`,
+    [id, ok ? 'ok' : 'withdrawn', who || '',
+     estimate ? null : cur.rows[0].cost_sek, estimate ? cur.rows[0].quoted_sek : null]);
   return getIncident(id);
 }
 

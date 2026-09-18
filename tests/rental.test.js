@@ -14,8 +14,9 @@ const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
 const { expensesPage, incidentDeletePage, RENTAL_FIRM_LABEL, SCOPE_LABEL,
-  KIND_LABEL } = require('../src/views/incidents');
+  ESTIMATE_SHOP_LABEL, KIND_LABEL } = require('../src/views/incidents');
 const exif = require('../src/exif');
+const { totalsOf } = require('../src/expenses');
 
 let fails = 0;
 const check = (what, fn) => {
@@ -44,6 +45,12 @@ function filters(over = {}) {
     edit: '', query: '', editQuery: i => `?scope=${i.scope}&edit=${i.id}`, ...over
   };
 }
+/** A repair estimate, shaped as db.shapeIncident hands it over. */
+function estimateLine(over = {}) {
+  return { ...row(), scope: 'estimate', plate: 'ODW03R', rental_firm: '', for_plate: '',
+    rented_to: '', supplier: '', invoice_no: 'EST-4471', description: 'Ny sidodorr',
+    cost_sek: null, estimate_shop: 'malte-mansson', quoted_sek: 18400, ...over };
+}
 function render(rows, over = {}) {
   return expensesPage({
     incidents: rows, plates: PLATES, today: TODAY, message: '', nav: '',
@@ -61,11 +68,12 @@ function editing(rows, id = 1) {
 }
 
 console.log('\n1. the section');
-check('Expenses has four sections and Rental cars is one of them', () => {
-  assert.deepStrictEqual(Object.keys(SCOPE_LABEL), ['vehicle', 'tool', 'misc', 'rental']);
+check('Expenses has five sections and Rental cars is one of them', () => {
+  assert.deepStrictEqual(Object.keys(SCOPE_LABEL),
+    ['vehicle', 'tool', 'misc', 'rental', 'estimate']);
   assert.strictEqual(SCOPE_LABEL.rental, 'Rental cars');
   const html = render([row()]);
-  ['Vehicles', 'Tools', 'Misc', 'Rental cars'].forEach(t =>
+  ['Vehicles', 'Tools', 'Misc', 'Rental cars', 'Estimat (Reparation)'].forEach(t =>
     assert.ok(html.includes(`<strong>${t}</strong>`), 'no tab for ' + t));
 });
 check('the four firms, and only those four', () => {
@@ -189,20 +197,23 @@ const LEDGER = [
   { ...row({ id: 4 }), scope: 'tool', plate: '', rental_firm: '', for_plate: '',
     supplier: 'Verktygsboden', description: 'Momentnyckel', cost_sek: 899 },
   { ...row({ id: 5 }), scope: 'misc', plate: '', rental_firm: '', for_plate: '',
-    supplier: 'Willys', description: 'Kaffe', cost_sek: 260 }
+    supplier: 'Willys', description: 'Kaffe', cost_sek: 260 },
+  estimateLine({ id: 6 })
 ];
 const kindsIn = html => (html.match(/class="inc-kind kind-(\w+)"/g) || [])
   .map(m => m.match(/kind-(\w+)/)[1]);
 
-check('every tab shows all five kinds, in the same order', () => {
-  for (const scope of ['vehicle', 'tool', 'misc', 'rental']) {
+check('every tab shows all six kinds, in the same order', () => {
+  for (const scope of ['vehicle', 'tool', 'misc', 'rental', 'estimate']) {
     const html = render(LEDGER, { filters: { scope } });
-    assert.deepStrictEqual(kindsIn(html), ['rental', 'damage', 'parts', 'tool', 'misc'],
+    assert.deepStrictEqual(kindsIn(html),
+      ['rental', 'damage', 'parts', 'tool', 'misc', 'estimate'],
       'the ' + scope + ' tab does not show the whole ledger');
   }
 });
-check('the first column names the kind, and only the five exist', () => {
-  assert.deepStrictEqual(Object.keys(KIND_LABEL), ['damage', 'parts', 'tool', 'misc', 'rental']);
+check('the first column names the kind, and only the six exist', () => {
+  assert.deepStrictEqual(Object.keys(KIND_LABEL),
+    ['damage', 'parts', 'tool', 'misc', 'rental', 'estimate']);
   const html = render(LEDGER);
   Object.values(KIND_LABEL).forEach(l =>
     assert.ok(html.includes(`>${l}</span>`), 'the ledger never says ' + l));
@@ -216,10 +227,10 @@ check('the category is the FIRST column, before the date', () => {
 });
 check('a line can be read and approved from here, and Edit opens it on its own tab', () => {
   const html = render(LEDGER);
-  assert.strictEqual((html.match(/class="inc-line inc-read/g) || []).length, 5, 'five lines');
+  assert.strictEqual((html.match(/class="inc-line inc-read/g) || []).length, 6, 'six lines');
   assert.strictEqual(
     (html.match(/<form class="inc-form" method="post" action="\/admin\/incidents\/\d+\/sm"/g) || []).length,
-    5, 'every line should be approvable from the ledger');
+    6, 'every line should be approvable from the ledger');
   assert.ok(html.includes('href="/admin/expenses?scope=vehicle&amp;edit=2#row-2"'),
     'no Edit link to the damage line');
   assert.ok(html.includes('href="/admin/expenses?scope=rental&amp;edit=1#row-1"'),
@@ -232,7 +243,7 @@ check('a line can be read and approved from here, and Edit opens it on its own t
 });
 check('opening one line leaves the others alone', () => {
   const html = editing(LEDGER, 2);
-  assert.deepStrictEqual(kindsIn(html), ['rental', 'parts', 'tool', 'misc'],
+  assert.deepStrictEqual(kindsIn(html), ['rental', 'parts', 'tool', 'misc', 'estimate'],
     'the opened line should be drawn as its section\u2019s line, not as a ledger line');
   assert.ok(html.includes('id="row-2"'), 'the opened line has no anchor');
   assert.ok(html.includes('>Workshop in</span>'), 'a vehicle opens with the workshop columns');
@@ -268,6 +279,89 @@ check('a line with more files than fit says so', () => {
   const html = render([row({ files: many })]);
   assert.strictEqual((html.match(/class="fileicon/g) || []).length, 4, 'four icons, no more');
   assert.ok(html.includes('>+2</span>'), 'nothing says two files are not shown');
+});
+
+console.log('\n7. Estimat (Reparation)');
+/* A quote for work nobody has done yet. The thing that must never break: the
+   quoted figure is not money spent, and nothing on the page adds it to money
+   that was. */
+const estFilters = { scope: 'estimate' };
+
+check('three workshops, and only those three', () => {
+  assert.deepStrictEqual(Object.values(ESTIMATE_SHOP_LABEL),
+    ['STS', 'Malte M\u00e5nsson', 'Skeppsbrons']);
+  const html = render([estimateLine()], { filters: estFilters });
+  Object.entries(ESTIMATE_SHOP_LABEL).forEach(([v, l]) =>
+    assert.ok(html.includes(`<option value="${v}"`) && html.includes(l), 'missing workshop ' + l));
+  assert.ok(html.includes('name="estimateShop"'), 'no workshop picker');
+});
+check('the form asks for exactly what he asked for', () => {
+  const html = render([], { filters: estFilters });
+  assert.ok(html.includes('New estimate'), 'no estimate form');
+  ['Vehicle *', 'Workshop *', 'Estimate received *', 'Description *']
+    .forEach(l => assert.ok(html.includes(`>${l}</span>`), 'the form does not ask for ' + l));
+  assert.ok(html.includes('name="estimates"'), 'nowhere to upload the estimate itself');
+  assert.ok(html.includes('name="quoted"'), 'no quoted amount');
+  assert.ok(!/name="cost"[^>]*>[\s\S]{0,200}Add estimate/.test(html),
+    'an estimate must not have a cost box');
+});
+check('its own columns: no days, no workshop visit, no OKQ8 / Own', () => {
+  const html = render([estimateLine({ id: 1 })], { filters: { scope: 'estimate', edit: '1' } });
+  ['Vehicle', 'Workshop', 'Estimate received', 'Estimate no.', 'Quoted', 'Accepted']
+    .forEach(h => assert.ok(html.includes(`>${h}</span>`), 'no column ' + h));
+  assert.ok(!html.includes('>Workshop in</span>'), 'an estimate is not a workshop visit');
+  assert.ok(!html.includes('name="handledBy"'), 'nobody has done the work yet');
+  assert.ok(!html.includes('name="rentedTo"'), 'an estimate is not a hire');
+});
+/* THE rule. totalsOf() is the code that decides it -- the page only renders
+   what it is handed -- so the check calls it directly, over the real ledger. */
+check('a quote is in no total, and the five buckets add up to the total', () => {
+  const totals = totalsOf(LEDGER, TODAY);
+  const spent = LEDGER.filter(i => i.scope !== 'estimate' && i.cost_sek !== null)
+    .reduce((n, i) => n + i.cost_sek, 0);
+  assert.strictEqual(totals.cost, spent, 'the total is not the money actually spent');
+  assert.strictEqual(totals.quoted, 18400, 'the quote is not counted as quoted');
+  assert.ok(!Object.entries(totals).some(([k, v]) => k.endsWith('Cost') && v === 18400),
+    'the quote landed in one of the cost buckets: ' + JSON.stringify(totals));
+  assert.strictEqual(
+    totals.damageCost + totals.partsCost + totals.toolCost + totals.miscCost + totals.rentalCost,
+    totals.cost, 'the five buckets do not add up to the total');
+  assert.strictEqual(totals.withCost, LEDGER.length - 1, 'the estimate was counted as a cost');
+  assert.strictEqual(totals.toAccept, 1);
+  assert.strictEqual(totals.waiting,
+    LEDGER.filter(i => i.scope !== 'estimate' && !i.sm_ok).length,
+    'an estimate cannot be waiting for the SM check');
+});
+check('a quote with no figure, and a ledger of nothing but estimates', () => {
+  assert.strictEqual(totalsOf([estimateLine({ quoted_sek: null })], TODAY).quoted, 0);
+  const only = totalsOf([estimateLine(), estimateLine({ id: 2, quoted_sek: 500 })], TODAY);
+  assert.strictEqual(only.cost, 0, 'quotes alone must total nothing spent');
+  assert.strictEqual(only.quoted, 18900);
+  assert.strictEqual(only.withCost, 0);
+});
+check('the quoted figure is drawn apart from the costs on the line', () => {
+  const html = render([estimateLine()], { totals: totalsOf([estimateLine()], TODAY),
+    filters: estFilters });
+  assert.ok(html.includes('class="inc-quote"'), 'the quote is drawn as an ordinary cost');
+  assert.ok(/18.400 kr/.test(html), 'the quoted figure is missing');
+  assert.ok(/0 kr total/.test(html), 'the quote leaked into the total on the page');
+  assert.ok(/quoted and not spent/.test(html), 'nothing says the quote is not spent');
+});
+check('the tick means accepted, and needs a figure to be given against', () => {
+  const html = render([estimateLine()], { filters: estFilters });
+  assert.ok(/>Accept<\/button>/.test(html), 'the button should say Accept, not OK');
+  const none = render([estimateLine({ quoted_sek: null })], { filters: estFilters });
+  assert.ok(none.includes('Waiting for the quote'),
+    'accepting an unknown figure is not accepting');
+  const done = render([estimateLine({ sm_ok: true, sm_by: 'Simon Bergman',
+    sm_at: '2026-09-18T07:00:00Z' })], { filters: estFilters });
+  assert.ok(done.includes('Accepted by Simon Bergman'), 'no who on an accepted estimate');
+  assert.ok(done.includes('/sm/withdraw'), 'an acceptance must be undoable');
+});
+check('the delete page names the workshop', () => {
+  const html = incidentDeletePage({ inc: estimateLine(), ret: '/admin/expenses', nav: '' });
+  assert.ok(html.includes('Estimat (Reparation)'));
+  assert.ok(html.includes('Malte M\u00e5nsson'));
 });
 
 console.log(fails ? `\n${fails} FAILED\n` : '\nall green\n');

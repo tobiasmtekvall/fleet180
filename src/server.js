@@ -25,8 +25,9 @@ const {
 const { qrPage } = require('./views/qr');
 const { statsPage, statsResetPage } = require('./views/stats');
 const { incidentsPage, expensesPage, incidentDeletePage, HANDLER_LABEL,
-  RENTAL_FIRM_LABEL, KIND_LABEL, kindOf } = require('./views/incidents');
+  RENTAL_FIRM_LABEL, ESTIMATE_SHOP_LABEL, KIND_LABEL, kindOf } = require('./views/incidents');
 const exif = require('./exif');
+const expenses = require('./expenses');
 const statsLib = require('./stats');
 const { buildDriverStats } = statsLib;
 const { badgeText } = require('./badges');
@@ -1245,10 +1246,12 @@ function parseCost(raw) {
 const EXPENSE_CATEGORIES = new Set(['damage', 'parts']);
 /** Who did the work. '' = nobody has said; never guessed from the owner. */
 const HANDLERS = new Set(['', 'okq8', 'own']);
-/** Vehicles, Tools, Misc, Rental cars: the four sections of Expenses. */
-const SCOPES = new Set(['vehicle', 'tool', 'misc', 'rental']);
+/** The five sections of Expenses. */
+const SCOPES = new Set(['vehicle', 'tool', 'misc', 'rental', 'estimate']);
 /** The firms we hire from. A fixed list, on Tobias's instruction. */
 const RENTAL_FIRMS = new Set(Object.keys(RENTAL_FIRM_LABEL));
+/** The workshops that write us estimates. A fixed list, for the same reason. */
+const ESTIMATE_SHOPS = new Set(Object.keys(ESTIMATE_SHOP_LABEL));
 
 function readIncidentBody(body) {
   const day = s => (/^\d{4}-\d{2}-\d{2}$/.test(String(s || '')) ? String(s) : null);
@@ -1262,7 +1265,8 @@ function readIncidentBody(body) {
     invoiceNo: text(body.invoiceNo, 80),
     note: text(body.note, 2000),
     cost: parseCost(body.cost),
-    rentalFirm: '', rentedTo: null, forPlate: ''
+    rentalFirm: '', rentedTo: null, forPlate: '',
+    estimateShop: '', quoted: null
   };
   /* A hire car. `plate` is the HIRE CAR's registration, which is not one of
      ours, so it is typed rather than picked -- normalised the same way as
@@ -1279,6 +1283,20 @@ function readIncidentBody(body) {
       rentalFirm: RENTAL_FIRMS.has(body.rentalFirm) ? body.rentalFirm : '',
       rentedTo: day(body.rentedTo),
       forPlate: normalisePlate(body.forPlate)
+    };
+  }
+  /* An estimate. The van is one of ours, so it is picked; the workshop is one
+     of three. `quoted` is what is being ASKED and goes in its own field --
+     `cost` is forced to null here, because a quote that reached the cost
+     column would be counted as money spent on every total in the app. */
+  if (scope === 'estimate') {
+    return {
+      ...common,
+      cost: null,
+      plate: normalisePlate(body.plate),
+      driverName: '', category: '', handledBy: '', shopIn: null, shopOut: null,
+      estimateShop: ESTIMATE_SHOPS.has(body.estimateShop) ? body.estimateShop : '',
+      quoted: parseCost(body.quoted)
     };
   }
   // Tools and misc belong to no van: no plate, driver, category, OKQ8/Own
@@ -1310,6 +1328,7 @@ function entryName(data) {
   if (data.scope === 'tool') return 'Tool expense';
   if (data.scope === 'misc') return 'Misc expense';
   if (data.scope === 'rental') return 'Rental car';
+  if (data.scope === 'estimate') return 'Estimate';
   return data.category === 'parts' ? 'Spare part' : 'Incident';
 }
 
@@ -1325,6 +1344,12 @@ function entryProblem(data) {
     if (data.rentedTo && data.rentedTo < data.occurredOn) {
       return 'The car cannot go back before it was picked up.';
     }
+    return null;
+  }
+  if (data.scope === 'estimate') {
+    if (!data.plate) return 'Choose which vehicle the estimate is for.';
+    if (!data.estimateShop) return 'Choose which workshop wrote the estimate.';
+    if (!data.description) return 'Say what the estimate is for.';
     return null;
   }
   if (data.scope !== 'vehicle' && !data.description) return 'Say what the expense was for.';
@@ -1375,7 +1400,8 @@ function limitNote(req) {
 }
 
 /** Photos, invoices and rental agreements off a multipart post. */
-const FILE_KIND = { photos: 'photo', invoices: 'invoice', agreements: 'agreement' };
+const FILE_KIND = { photos: 'photo', invoices: 'invoice', agreements: 'agreement',
+  estimates: 'estimate' };
 
 async function saveIncidentFiles(incidentId, files) {
   let n = 0, skipped = 0;
@@ -1459,7 +1485,7 @@ async function pendingDamage() {
 }
 
 /* Which kind of expense a line is, and which section's form it is entered on.
-   The Expenses page has four tabs, but the list under them is the whole
+   The Expenses page has five tabs, but the list under them is the whole
    ledger on every one of them -- the tabs choose the form, not the view. So
    the section (`scope`) is only ever the tab you are standing on, and what
    narrows the list is `kind`, which is the first column of that list. */
@@ -1468,7 +1494,8 @@ const KINDS = new Map([
   ['parts', { scope: 'vehicle', category: 'parts' }],
   ['tool', { scope: 'tool', category: '' }],
   ['misc', { scope: 'misc', category: '' }],
-  ['rental', { scope: 'rental', category: '' }]
+  ['rental', { scope: 'rental', category: '' }],
+  ['estimate', { scope: 'estimate', category: '' }]
 ]);
 
 /**
@@ -1536,28 +1563,7 @@ async function incidentsFor(req, smDefault) {
   });
   // "Not set" is the empty string, which the query treats as "any".
   if (filters.handledBy === 'none') incidents = incidents.filter(i => !i.handled_by);
-  const withCost = incidents.filter(i => i.cost_sek !== null);
-  const sum = list => list.reduce((n, i) => n + i.cost_sek, 0);
-  const totals = {
-    withCost: withCost.length,
-    cost: sum(withCost),
-    /* One bucket per kind, and every line is in exactly one of them, so the
-       five add up to the total. A breakdown that does not is worse than none
-       on a page whose whole job is adding money up. */
-    damageCost: sum(withCost.filter(i => i.scope === 'vehicle' && i.category !== 'parts')),
-    partsCost: sum(withCost.filter(i => i.scope === 'vehicle' && i.category === 'parts')),
-    toolCost: sum(withCost.filter(i => i.scope === 'tool')),
-    miscCost: sum(withCost.filter(i => i.scope === 'misc')),
-    rentalCost: sum(withCost.filter(i => i.scope === 'rental')),
-    waiting: incidents.filter(i => !i.sm_ok).length,
-    atShop: incidents.filter(i => i.scope === 'vehicle' && i.category !== 'parts' && i.shop_in && !i.shop_out).length,
-    /* Hire cars still out: no return date at all, or one still in the future
-       (a booked return). A car handed back TODAY is back -- ">=" would have
-       counted every car returned this morning as still out, which is the one
-       number on this line somebody acts on. */
-    outNow: incidents.filter(i => i.scope === 'rental' &&
-      (!i.rented_to || i.rented_to > summaryLib.dayKey())).length
-  };
+  const totals = expenses.totalsOf(incidents, summaryLib.dayKey());
   return { filters, incidents, totals };
 }
 
@@ -1671,8 +1677,11 @@ app.post('/admin/incidents/:id', softUpload, async (req, res, next) => {
     back(res, to, 'Saved.' + fileNote(files) + limitNote(req) +
       (data.scope === 'vehicle' && data.category === 'parts' && (inc.shop_in || inc.shop_out)
         ? ' Spare parts have no workshop dates, so those were cleared.' : '') +
-      (result && result.costChanged
-        ? ' The cost changed, so the SM check was reset and needs to be given again.' : ''));
+      (result && result.costChanged ? ({
+        quote: ' The quoted amount changed, so the acceptance was cleared and has to be given again.',
+        workshop: ' The workshop changed, so the acceptance was cleared – it was given for the other one’s quote.',
+        cost: ' The cost changed, so the SM check was reset and needs to be given again.'
+      })[result.reason] || '' : ''));
   } catch (err) { next(err); }
 });
 
@@ -1690,17 +1699,24 @@ app.post('/admin/incidents/:id/sm', upload, async (req, res, next) => {
     const inc = await db.getIncident(req.params.id);
     if (!inc) return back(res, to, 'That entry no longer exists.');
     const who = String(req.body.smBy || '').trim().slice(0, 120);
+    /* On an estimate this same tick means "accepted, we are going ahead", and
+       the amount it is given against is the quote rather than a cost. The
+       rule is the one rule either way: no figure, no signature. */
+    const estimate = inc.scope === 'estimate';
+    const amount = estimate ? inc.quoted_sek : inc.cost_sek;
     if (who.length < 2) {
-      return back(res, to,
-        'Type your name in the SM box before approving – the approval is saved under that name.');
+      return back(res, to, estimate
+        ? 'Type your name before accepting – the acceptance is saved under that name.'
+        : 'Type your name in the SM box before approving – the approval is saved under that name.');
     }
-    if (inc.cost_sek === null) {
-      return back(res, to,
-        'Fill in the cost first. An OK on an unknown amount is not an approval.');
+    if (amount === null || amount === undefined) {
+      return back(res, to, estimate
+        ? 'Fill in the quoted amount first. Accepting an unknown figure is not accepting.'
+        : 'Fill in the cost first. An OK on an unknown amount is not an approval.');
     }
     const after = await db.signOffIncident(inc.id, { ok: true, who });
-    console.log(`[admin] SM check ${inc.plate} ${inc.occurred_on} by ${who} (${inc.cost_sek} kr)`);
-    back(res, to, `Approved by ${who} ${fmtDateTime(after.sm_at)}.`);
+    console.log(`[admin] ${estimate ? 'estimate accepted' : 'SM check'} ${inc.plate} ${inc.occurred_on} by ${who} (${amount} kr)`);
+    back(res, to, `${estimate ? 'Accepted' : 'Approved'} by ${who} ${fmtDateTime(after.sm_at)}.`);
   } catch (err) { next(err); }
 });
 
@@ -1711,8 +1727,10 @@ app.post('/admin/incidents/:id/sm/withdraw', upload, async (req, res, next) => {
     if (!inc) return back(res, to, 'That entry no longer exists.');
     const who = String(req.body.smBy || '').trim().slice(0, 120);
     await db.signOffIncident(inc.id, { ok: false, who });
+    // An estimate is accepted, not approved, and undoing it has to say so.
     back(res, to,
-      `The approval for ${inc.plate ? inc.plate + ' ' : 'the entry from '}${inc.occurred_on} was withdrawn. The history is kept.`);
+      `The ${inc.scope === 'estimate' ? 'acceptance' : 'approval'} for ${
+        inc.plate ? inc.plate + ' ' : 'the entry from '}${inc.occurred_on} was withdrawn. The history is kept.`);
   } catch (err) { next(err); }
 });
 
@@ -1787,14 +1805,16 @@ app.get('/admin/incidents.csv', (req, res) => {
 app.get('/admin/expenses.csv', async (req, res, next) => {
   try {
     const { filters, incidents } = await incidentsFor(req, 'all');
-    /* The file is the list: one shape for all four sections, with the same
+    /* The file is the list: one shape for all five sections, with the same
        first column the screen has. A rental's dates live in the workshop
        columns' place -- renamed in the header, because "in" and "out" is
        what both of them are. */
-    const header = ['Id', 'Category', 'Vehicle', 'Date / picked up', 'Description',
+    const header = ['Id', 'Category', 'Vehicle', 'Date / picked up / received', 'Description',
       'Driver', 'Workshop in / hire from', 'Workshop out / hire to', 'Days', 'OKQ8 / Own',
-      'Supplier', 'Rental firm', 'Stands in for', 'Invoice no.', 'Cost (SEK)',
-      'Photos', 'Invoices', 'Agreements', 'SM check', 'SM by', 'SM time', 'Check', 'Note'];
+      'Supplier', 'Hire firm / estimating workshop', 'Stands in for', 'Invoice / estimate no.',
+      'Cost (SEK)', 'Quoted (SEK)',
+      'Photos', 'Invoices', 'Agreements', 'Estimates', 'SM check / accepted', 'SM by', 'SM time',
+      'Check', 'Note'];
     const lines = [header.map(csvCell).join(';')];
     for (const i of incidents) {
       const rental = i.scope === 'rental';
@@ -1805,12 +1825,18 @@ app.get('/admin/expenses.csv', async (req, res, next) => {
         i.id, KIND_LABEL[kindOf(i)],
         i.plate, i.occurred_on, i.description, i.driver_name,
         start, end, dayCount, HANDLER_LABEL[i.handled_by] || '',
-        i.supplier, RENTAL_FIRM_LABEL[i.rental_firm] || '', i.for_plate, i.invoice_no,
-        // Decimal comma: the file is ;-separated for a Swedish Excel.
+        i.supplier,
+        RENTAL_FIRM_LABEL[i.rental_firm] || ESTIMATE_SHOP_LABEL[i.estimate_shop] || '',
+        i.for_plate, i.invoice_no,
+        // Decimal comma: the file is ;-separated for a Swedish Excel. Cost and
+        // Quoted are two columns on purpose -- summing them would be wrong.
         i.cost_sek === null ? '' : String(i.cost_sek).replace('.', ','),
+        i.quoted_sek === null || i.quoted_sek === undefined ? ''
+          : String(i.quoted_sek).replace('.', ','),
         i.files.filter(f => f.kind === 'photo').length,
         i.files.filter(f => f.kind === 'invoice').length,
         i.files.filter(f => f.kind === 'agreement').length,
+        i.files.filter(f => f.kind === 'estimate').length,
         i.sm_ok ? 'YES' : 'NO', i.sm_by, i.sm_at ? fmtDateTime(i.sm_at) : '',
         i.submission_id || '', i.note
       ].map(csvCell).join(';'));

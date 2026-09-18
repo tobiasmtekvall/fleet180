@@ -672,15 +672,16 @@ body.wide .wrap{max-width:1720px}
 .nf .inc-shop:disabled{background:repeating-linear-gradient(135deg,#f3f5f8 0 6px,#e9edf2 6px 12px);color:transparent;cursor:not-allowed}
 @media (max-width:560px){.nf-half,.nf-grid > .nf-half:nth-last-child(2){grid-column:auto}}
 
-/* ---------- Expenses: one ledger, all four sections (2026-09-16) ---------- */
-/* The list under every tab is the whole ledger. A line is read-only here: it
+/* ---------- Expenses: one ledger, every section (2026-09-16) ---------- */
+/* The list under every tab is the whole ledger – all five sections. A line
+   is read-only here: it
    can be approved, and Edit opens it on its own tab in its own full form.
    1452 is the sum of the ten columns below, their gaps and the row padding
    (112+118+158+170+46+88+130+262+160 fixed, 130 for the description, nine
    6px gaps, 20 of padding). Every column is a fixed width except the
    description, so a line with four files or a long approval name cannot shift
    the columns on its own row out from under the headings -- which is what a
-   ledger of five kinds of expense has to get right to be readable at all.
+   ledger of six kinds of expense has to get right to be readable at all.
    Like the section lists, it scrolls sideways on a small screen. */
 .inc-list.inc-list-all{min-width:1452px}
 /* Wider than elsewhere: a hire car's line says whose van it stands in for
@@ -705,8 +706,8 @@ body.wide .wrap{max-width:1720px}
 .inc-read .inc-desc.ro{display:block;line-height:34px}
 .inc-read:hover{background:#f7f9fc}
 .inc-read.inc-done:hover{background:#eef7f0}
-/* The first column: which of the four this line is. The colour is the only
-   thing separating four kinds of money at a glance, so it is a chip rather
+/* The first column: which of the six this line is. The colour is the only
+   thing separating six kinds of money at a glance, so it is a chip rather
    than a word, and it never wraps. */
 .inc-kind{
   width:112px;display:inline-flex;align-items:center;justify-content:center;
@@ -758,3 +759,24 @@ body.wide .wrap{max-width:1720px}
    whole text it holds, and drag the box a few hundred pixels wider than the
    line needs. It grows to fill the line and stops there. */
 .inc-editing .inc-desc{max-width:300px}
+
+/* ---------- Expenses: Estimat (Reparation), the fifth section (2026-09-18) ---------- */
+/* 1462 is the sum of the nine columns on an estimate's own line, their gaps
+   and the row padding (96+170+118+130+120+88+250+262+160, eight 6px gaps, 20
+   of padding). Narrower than a hire in columns -- no return date, no days, no
+   van it stands in for -- and the two that grow with what is in them are
+   pinned here, so the description is the only thing that stretches and the
+   headings stay over their fields at every width. */
+.inc-list.inc-list-estimate{min-width:1462px}
+.inc-list-estimate .inc-files{width:250px;flex:0 0 250px;flex-wrap:wrap}
+.inc-list-estimate .inc-sm{width:262px;flex:0 0 262px;min-width:0}
+.kind-estimate{background:#f1eefb;border-color:#d3c9ef;color:#5233a8}
+/* A quoted figure is not a cost. It sits in the Cost column because that is
+   where money is read, but it is never in a total under this list, and it has
+   to look different from the amounts that are. */
+.inc-quote{
+  font-style:normal;color:#5233a8;background:#f1eefb;
+  border:1px dashed #c8bce9;border-radius:6px;padding:1px 6px;font-size:13px;
+}
+.filechip.file-estimate a{color:#5233a8}
+.fileicon.file-estimate{color:#5233a8}

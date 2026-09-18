@@ -40,7 +40,14 @@ const ICON = {
   agreement: '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">' +
     '<path d="M5.5 3.5h13v17h-13z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>' +
     '<path d="M8.5 8h7M8.5 11.5h7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>' +
-    '<path d="M8.5 16.5c1.5-2 2.5 1.5 4 0s2-1 3 .5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>'
+    '<path d="M8.5 16.5c1.5-2 2.5 1.5 4 0s2-1 3 .5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>',
+  // A sheet with a price tag: a quote for work not done yet, which is a
+  // different thing again from an invoice for work that was.
+  estimate: '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">' +
+    '<path d="M4.5 3.5h9v9h-9z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>' +
+    '<path d="M7 6.5h4M7 9.5h4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>' +
+    '<path d="M11.5 12.5h5.5a2.5 2.5 0 0 1 2.5 2.5v5.5h-8z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/>' +
+    '<circle cx="16.8" cy="16" r="1.1" fill="currentColor"/></svg>'
 };
 
 const LINKS = [
@@ -62,14 +69,23 @@ const RENTAL_FIRM_LABEL = {
   'circlek-osterangen': 'Circle K Österängen',
   'skeppsbrons': 'Skeppsbrons'
 };
-// The four sections of Expenses. Only Vehicles has workshops; Vehicles and
-// Rental cars have a registration, and a rental's is not one of ours.
-const SCOPE_LABEL = { vehicle: 'Vehicles', tool: 'Tools', misc: 'Misc', rental: 'Rental cars' };
+/* Who writes us repair estimates. A fixed list for the same reason the hire
+   firms are one: the same workshop typed three ways is three workshops. */
+const ESTIMATE_SHOP_LABEL = {
+  'sts': 'STS',
+  'malte-mansson': 'Malte Månsson',
+  'skeppsbrons': 'Skeppsbrons'
+};
+// The five sections of Expenses. Only Vehicles has workshop dates; Vehicles,
+// Rental cars and Estimates have a registration, and a rental's is not ours.
+const SCOPE_LABEL = { vehicle: 'Vehicles', tool: 'Tools', misc: 'Misc', rental: 'Rental cars',
+  estimate: 'Estimat (Reparation)' };
 const SCOPES = Object.keys(SCOPE_LABEL);
 const DESC_HINT = {
   damage: 'What happened?', parts: 'Which part?',
   tool: 'Which tool? e.g. torque wrench, repaired', misc: 'What was it for?',
-  rental: 'Which car, and why it was hired'
+  rental: 'Which car, and why it was hired',
+  estimate: 'What the estimate is for'
 };
 
 /* What a line IS, in one word: the section and the vehicle category folded
@@ -78,7 +94,8 @@ const DESC_HINT = {
    the line means anything -- "4 350 kr, ABC123, 14 Sept" is a repair or a
    hire or a part, and those are three different conversations. */
 const KIND_LABEL = {
-  damage: 'Damage', parts: 'Spare parts', tool: 'Tool', misc: 'Misc', rental: 'Rental car'
+  damage: 'Damage', parts: 'Spare parts', tool: 'Tool', misc: 'Misc', rental: 'Rental car',
+  estimate: 'Estimat'
 };
 /**
  * Which kind a line is. The one rule -- the server imports this rather than
@@ -125,7 +142,8 @@ function days(inDate, outDate, today) {
   return { text: outDate ? `${n} d` : `${n} d…`, open: !outDate, n };
 }
 
-const FILE_LABEL = { invoice: 'Invoice', agreement: 'Agreement', photo: 'Photo' };
+const FILE_LABEL = { invoice: 'Invoice', agreement: 'Agreement', photo: 'Photo',
+  estimate: 'Estimate' };
 
 /**
  * When a file happened.
@@ -161,7 +179,8 @@ function fileChip(f) {
     </span>`;
 }
 
-const FILE_ICON = { photo: ICON.camera, invoice: ICON.invoice, agreement: ICON.agreement };
+const FILE_ICON = { photo: ICON.camera, invoice: ICON.invoice, agreement: ICON.agreement,
+  estimate: ICON.estimate };
 
 /**
  * The files on a read-only ledger line: the icon and nothing else.
@@ -210,29 +229,47 @@ function fileTimes(inc) {
  * disagreement three months from now actually needs.
  */
 function smCell(inc) {
+  /* An estimate is accepted, not approved, and its figure is a quote -- so
+     the history over the cell says that too. A tooltip reading "reset (the
+     cost changed)" on a row whose own heading says Quoted is the kind of
+     small lie that makes somebody distrust the rest of the page. */
+  const estimate = inc.scope === 'estimate';
+  const WORD = estimate
+    ? { ok: 'accepted', withdrawn: 'acceptance withdrawn',
+        'cleared-by-quote-change': 'cleared (the quote changed)',
+        'cleared-by-workshop-change': 'cleared (the workshop changed)',
+        'cleared-by-cost-change': 'cleared (the quote changed)' }
+    : { ok: 'OK', withdrawn: 'withdrawn',
+        'cleared-by-cost-change': 'reset (the cost changed)' };
   const history = inc.events && inc.events.length
     ? inc.events.map(e => {
-        const what = e.action === 'ok' ? 'OK' :
-          e.action === 'withdrawn' ? 'withdrawn' : 'reset (the cost changed)';
+        const what = WORD[e.action] || (estimate ? 'cleared' : 'reset');
         return `${fmtDateTime(e.happened_at)} ${what}${e.who ? ' – ' + e.who : ''}`;
       }).join('\n')
     : '';
   const histAttr = history ? ` title="${esc(history)}"` : '';
 
+  /* An estimate is not money spent, so nobody approves a cost on it -- what
+     this cell carries there is the decision to go ahead with the quote. Same
+     machinery (a name, a time, an undo and the history), because "we accepted
+     it" needs exactly the same things of it, and the word on the button is
+     what tells the two apart. */
+  const amount = estimate ? inc.quoted_sek : inc.cost_sek;
+
   if (inc.sm_ok) {
     return `<div class="sm sm-ok"${histAttr}>
         <span class="sm-tick" aria-hidden="true">✓</span>
-        <span class="sm-who">${esc(inc.sm_by || 'OK')}</span>
+        <span class="sm-who" title="${estimate ? 'Accepted by' : 'Approved by'} ${esc(inc.sm_by)}">${esc(inc.sm_by || 'OK')}</span>
         <span class="sm-when">${esc(fmtDateTime(inc.sm_at))}</span>
         <button class="btn btn-ghost btn-sm" type="submit"
                 formaction="/admin/incidents/${esc(inc.id)}/sm/withdraw">Undo</button>
       </div>`;
   }
 
-  // No cost, no signature: approving an unknown amount is not an approval.
-  if (inc.cost_sek === null) {
+  // No amount, no signature: saying yes to an unknown figure is not saying yes.
+  if (amount === null || amount === undefined) {
     return `<div class="sm sm-blocked"${histAttr}>
-        <span class="muted">Waiting for cost</span>
+        <span class="muted">${estimate ? 'Waiting for the quote' : 'Waiting for cost'}</span>
       </div>`;
   }
 
@@ -240,7 +277,8 @@ function smCell(inc) {
       <input class="form-control sm-name" type="text" name="smBy" placeholder="Your name"
              autocomplete="name" maxlength="120">
       <button class="btn btn-primary btn-sm" type="submit"
-              formaction="/admin/incidents/${esc(inc.id)}/sm">OK</button>
+              title="${estimate ? 'We are going ahead with this estimate' : 'Approve this cost'}"
+              formaction="/admin/incidents/${esc(inc.id)}/sm">${estimate ? 'Accept' : 'OK'}</button>
     </div>`;
 }
 
@@ -282,13 +320,14 @@ function shopDates(inc, ids = ['', '']) {
 
 function filesCell(inc, scope) {
   const of = k => inc.files.filter(f => (f.kind || 'photo') === k);
-  const rental = scope === 'rental';
-  const agreement = rental ? `
-          <label class="addfile" title="Add the rental agreement – choose a file, then press Save">${ICON.agreement}<input type="file" name="agreements" accept="application/pdf,image/*" multiple hidden></label>` : '';
+  const extra = scope === 'rental' ? `
+          <label class="addfile" title="Add the rental agreement – choose a file, then press Save">${ICON.agreement}<input type="file" name="agreements" accept="application/pdf,image/*" multiple hidden></label>`
+    : scope === 'estimate' ? `
+          <label class="addfile" title="Add the estimate itself – choose a file, then press Save">${ICON.estimate}<input type="file" name="estimates" accept="application/pdf,image/*" multiple hidden></label>` : '';
   return `<span class="inc-files">
-          ${of('agreement').map(fileChip).join('')}${of('photo').map(fileChip).join('')}${of('invoice').map(fileChip).join('')}
+          ${of('estimate').map(fileChip).join('')}${of('agreement').map(fileChip).join('')}${of('photo').map(fileChip).join('')}${of('invoice').map(fileChip).join('')}
           <label class="addfile" title="Add photo – choose a file, then press Save">${ICON.camera}<input type="file" name="photos" accept="image/*" multiple hidden></label>
-          <label class="addfile" title="Add invoice – choose a file, then press Save">${ICON.invoice}<input type="file" name="invoices" accept="application/pdf,image/*" multiple hidden></label>${agreement}
+          <label class="addfile" title="Add invoice – choose a file, then press Save">${ICON.invoice}<input type="file" name="invoices" accept="application/pdf,image/*" multiple hidden></label>${extra}
         </span>`;
 }
 
@@ -357,6 +396,16 @@ function forSelect(plates, current, id = '') {
             title="The van of ours it stands in for, if any">${opts}</select>`;
 }
 
+/** Which of the three workshops wrote the estimate. */
+function shopSelect(current, id = '') {
+  const opts = [['', 'Workshop…'], ...Object.entries(ESTIMATE_SHOP_LABEL)];
+  return `<select class="form-control inc-firm" name="estimateShop"${id ? ` id="${id}"` : ''}
+            title="Which workshop wrote the estimate" required>${
+    opts.map(([v, l]) =>
+      `<option value="${esc(v)}"${v === (current || '') ? ' selected' : ''}>${esc(l)}</option>`).join('')
+  }</select>`;
+}
+
 /**
  * One hire car.
  *
@@ -394,6 +443,42 @@ function rentalRow(inc, plates, today, ret) {
         <input class="form-control inc-cost" type="number" name="cost" step="0.01" min="0"
                value="${esc(numValue(inc.cost_sek))}" placeholder="kr" title="What the hire cost in total, in SEK">
         ${filesCell(inc, 'rental')}
+        <span class="inc-sm">${smCell(inc)}</span>
+        ${actionsCell(inc)}
+        </div>
+        ${moreCell(inc, false)}
+      </form>
+  </div>`;
+}
+
+/**
+ * One repair estimate.
+ *
+ * A quote for work nobody has done yet, so it has no cost: the figure on it
+ * is what the workshop is ASKING, and it lives in its own column and its own
+ * database column so that nothing summing costs can mistake it for money
+ * spent. The date is the day the estimate came in, and the tick at the end
+ * means we are going ahead with it.
+ */
+function estimateRow(inc, plates, ret) {
+  return `<div class="inc-line${inc.sm_ok ? ' inc-done' : ''}">
+      <form class="inc-form" method="post" enctype="multipart/form-data"
+            action="/admin/incidents/${esc(inc.id)}">
+        <input type="hidden" name="ret" value="${esc(ret)}">
+        <input type="hidden" name="scope" value="estimate">
+        <div class="inc-row">
+        ${plateSelect('plate', plates, inc.plate)}
+        ${shopSelect(inc.estimate_shop)}
+        <input class="form-control inc-date" type="date" name="occurredOn" value="${esc(inc.occurred_on)}"
+               required title="The day the estimate came in">
+        <input class="form-control inc-desc" type="text" name="description" maxlength="600" required
+               value="${esc(inc.description)}" placeholder="${DESC_HINT.estimate}" title="${esc(inc.description)}">
+        <input class="form-control inc-inv" type="text" name="invoiceNo" maxlength="80"
+               value="${esc(inc.invoice_no)}" placeholder="Estimate no." title="${esc(inc.invoice_no)}">
+        <input class="form-control inc-cost" type="number" name="quoted" step="0.01" min="0"
+               value="${esc(numValue(inc.quoted_sek))}" placeholder="kr"
+               title="What the workshop is asking, in SEK. A quote, not a cost -- it is not counted as money spent.">
+        ${filesCell(inc, 'estimate')}
         <span class="inc-sm">${smCell(inc)}</span>
         ${actionsCell(inc)}
         </div>
@@ -461,9 +546,9 @@ function otherRow(inc, scope, ret) {
  * One line of the ledger, whatever section it belongs to.
  *
  * The list under every tab is the whole ledger -- the tabs choose which form
- * you are filling in above, not what you are looking at below. Four sections
+ * you are filling in above, not what you are looking at below. Five sections
  * cannot share thirteen columns, so a line here shows what they have in
- * common and says in its first column WHICH of the four it is. The Site
+ * common and says in its first column WHICH of the five it is. The Site
  * Manager can read it and approve it from here; Edit opens the row on its own
  * section's tab, in that section's own full line, where everything about it
  * can be changed.
@@ -471,14 +556,24 @@ function otherRow(inc, scope, ret) {
 function ledgerRow(inc, today, ret, editHref) {
   const kind = kindOf(inc);
   const rental = inc.scope === 'rental';
+  const estimate = inc.scope === 'estimate';
   const back = rental && inc.rented_to && inc.rented_to <= today ? inc.rented_to : '';
   const d = rental ? days(inc.occurred_on, back, today)
     : (inc.scope === 'vehicle' && kind !== 'parts') ? days(inc.shop_in, inc.shop_out, today)
     : { text: '', open: false };
   // The counterparty, whatever it is called in that section.
   const who = rental ? (RENTAL_FIRM_LABEL[inc.rental_firm] || '')
+    : estimate ? (ESTIMATE_SHOP_LABEL[inc.estimate_shop] || '')
     : inc.supplier || (inc.scope === 'vehicle' ? (HANDLER_LABEL[inc.handled_by] || '') : '');
   const extra = rental && inc.for_plate ? ` (for ${inc.for_plate})` : '';
+  /* An estimate's figure goes in the Cost column because that is where money
+     is read, but it is set apart and says so: it is what somebody is asking
+     for work not done, and it is in none of the totals under this list. */
+  const money = estimate
+    ? (inc.quoted_sek === null || inc.quoted_sek === undefined
+      ? '<span class="muted">not quoted</span>'
+      : `<em class="inc-quote" title="Quoted, not spent – this is not in any total below">${esc(kr(inc.quoted_sek))}</em>`)
+    : esc(kr(inc.cost_sek) || '—');
   return `<div class="inc-line inc-read${inc.sm_ok ? ' inc-done' : ''}">
       <form class="inc-form" method="post" action="/admin/incidents/${esc(inc.id)}/sm">
         <input type="hidden" name="ret" value="${esc(ret)}">
@@ -490,7 +585,7 @@ function ledgerRow(inc, today, ret, editHref) {
         <span class="inc-desc ro" title="${esc(inc.description)}">${esc(inc.description || '—')}</span>
         <span class="inc-supplier ro" title="${esc(who)}">${esc(who || '—')}</span>
         <span class="inc-days${d.open ? ' open' : ''}">${esc(d.text || '–')}</span>
-        <span class="inc-cost ro">${esc(kr(inc.cost_sek) || '—')}</span>
+        <span class="inc-cost ro">${money}</span>
         <span class="inc-files">${ledgerFiles(inc)}</span>
         <span class="inc-sm">${smCell(inc)}</span>
         <span class="inc-actions">
@@ -526,6 +621,19 @@ function ledgerHead() {
  * order, one place to change.
  */
 function head(scope) {
+  if (scope === 'estimate') {
+    return `<div class="inc-row inc-head">
+      <span class="inc-plate">Vehicle</span>
+      <span class="inc-firm">Workshop</span>
+      <span class="inc-date">Estimate received</span>
+      <span class="inc-desc">Description</span>
+      <span class="inc-inv">Estimate no.</span>
+      <span class="inc-cost">Quoted</span>
+      <span class="inc-files">Files</span>
+      <span class="inc-sm">Accepted</span>
+      <span class="inc-actions"></span>
+    </div>`;
+  }
   if (scope === 'rental') {
     return `<div class="inc-row inc-head">
       <span class="inc-plate">Hire car</span>
@@ -626,8 +734,48 @@ function newRental(plates, today, ret) {
  * rather than one cramped line. Vehicles ask for the van, the category, the
  * driver, the workshop visit and OKQ8/Own; Tools and Misc do not.
  */
+/**
+ * The form for a repair estimate.
+ *
+ * No cost box: an estimate is what somebody is asking for work not done yet,
+ * and the moment that figure sits in the same column as the repairs it would
+ * be added to them. It is "Quoted", it has its own column, and it stays out
+ * of every total on the page until the work is actually done and booked as a
+ * Damage line with its own invoice.
+ */
+function newEstimate(plates, today, ret) {
+  return `<div class="card nf-card">
+    <div class="card-header">New estimate
+      <span class="step-tag">A repair quote from a workshop · fields marked * are required</span></div>
+    <div class="card-body">
+      <form class="nf" method="post" action="/admin/incidents" enctype="multipart/form-data">
+        <input type="hidden" name="ret" value="${esc(ret)}">
+        <input type="hidden" name="scope" value="estimate">
+        <div class="nf-grid">
+          ${field('Vehicle *', plateSelect('plate', plates, ''))}
+          ${field('Workshop *', shopSelect('', 'nf-shop'))}
+          ${field('Estimate received *', `<input class="form-control" type="date" name="occurredOn" value="${esc(today)}" required>`)}
+          ${field('Estimate no.', `<input class="form-control" type="text" name="invoiceNo" maxlength="80">`)}
+          ${field('Quoted (SEK)', `<input class="form-control" type="number" name="quoted" step="0.01" min="0" placeholder="kr">`)}
+          ${field('The estimate (PDF or photo)', `<input class="form-control nf-file" type="file" name="estimates" accept="application/pdf,image/*" multiple>`)}
+          ${field('Photos', `<input class="form-control nf-file" type="file" name="photos" accept="image/*" multiple>`)}
+          ${field('Description *',
+            `<textarea class="form-control nf-desc" name="description" rows="3" maxlength="600"
+                      placeholder="${DESC_HINT.estimate}" required></textarea>`, 'nf-half')}
+          ${field('Note', `<textarea class="form-control" name="note" rows="3" maxlength="2000"
+                      placeholder="Anything else worth keeping – who asked for it, how long it holds"></textarea>`, 'nf-half')}
+        </div>
+        <div class="actions" style="justify-content:flex-start;margin-top:14px">
+          <button class="btn btn-primary" type="submit">Add estimate</button>
+        </div>
+      </form>
+    </div>
+  </div>`;
+}
+
 function newEntry(scope, plates, today, ret) {
   if (scope === 'rental') return newRental(plates, today, ret);
+  if (scope === 'estimate') return newEstimate(plates, today, ret);
   const vehicle = scope === 'vehicle';
   const u = scope;   // keeps ids unique if two forms ever share a page
   const [shopIn, shopOut] = shopDates({ category: 'damage', shop_in: '', shop_out: '' },
@@ -777,7 +925,7 @@ ${newEntry('vehicle', plates, today, '/admin/incidents')}
 /** Query-string name -> the property it is kept under on `filters`. */
 const keyOf = k => ({ by: 'handledBy' })[k] || k;
 
-/** Vehicles · Tools · Misc · Rental cars, each with its count and total. */
+/** Vehicles · Tools · Misc · Rental cars · Estimat, each with its count and total. */
 function sectionTabs(active, sections, filters) {
   // Every filter follows you between the tabs. The list below them is the same
   // ledger whichever tab you are on, so a filter that meant something on one
@@ -785,10 +933,14 @@ function sectionTabs(active, sections, filters) {
   const keep = ['kind', 'plate', 'by', 'from', 'to', 'sm'].filter(k => filters[keyOf(k)])
     .map(k => `&${k}=${encodeURIComponent(filters[keyOf(k)])}`).join('');
   return `<div class="exp-tabs no-print">${SCOPES.map(s => {
-    const x = sections[s] || { n: 0, cost: 0, waiting: 0 };
+    const x = sections[s] || { n: 0, cost: 0, quoted: 0, waiting: 0 };
+    // An estimate has no cost, only a quote, and nobody approves it -- they
+    // accept it. The tab says what its own section actually holds.
+    const est = s === 'estimate';
+    const money = est ? `${kr(x.quoted) || '0 kr'} quoted` : (kr(x.cost) || '0 kr');
     return `<a href="/admin/expenses?scope=${s}${esc(keep)}"${s === active ? ' class="on"' : ''}>
       <strong>${esc(SCOPE_LABEL[s])}</strong>
-      <span>${esc(x.n)} · ${esc(kr(x.cost) || '0 kr')}${x.waiting ? ` · <em>${esc(x.waiting)} to approve</em>` : ''}</span></a>`;
+      <span>${esc(x.n)} · ${esc(money)}${x.waiting ? ` · <em>${esc(x.waiting)} to ${est ? 'accept' : 'approve'}</em>` : ''}</span></a>`;
   }).join('')}</div>`;
 }
 
@@ -812,6 +964,7 @@ function expensesPage({ incidents, plates, filters, totals, sections = {}, today
     const here = `/admin/expenses${filters.editQuery(i)}#row-${i.id}`;
     const line = i.scope === 'vehicle' ? vehicleRow(i, plates, today, here)
       : i.scope === 'rental' ? rentalRow(i, plates, today, here)
+      : i.scope === 'estimate' ? estimateRow(i, plates, here)
       : otherRow(i, i.scope, here);
     /* The section's own line needs the section's own widths, and the vehicle
        line is wider than this list -- so it scrolls inside its own box
@@ -819,7 +972,8 @@ function expensesPage({ incidents, plates, filters, totals, sections = {}, today
     return `<div class="inc-editing" id="row-${esc(i.id)}">
       <div class="inc-editing-tag">Editing this line · ${esc(KIND_LABEL[kindOf(i)])}
         <a href="${esc(ret)}">close</a></div>
-      <div class="inc-list${i.scope === 'vehicle' ? '' : i.scope === 'rental' ? ' inc-list-rental' : ' inc-list-other'}">
+      <div class="inc-list${i.scope === 'vehicle' ? '' : i.scope === 'rental' ? ' inc-list-rental'
+        : i.scope === 'estimate' ? ' inc-list-estimate' : ' inc-list-other'}">
 ${head(i.scope)}
 ${line}
       </div>
@@ -851,6 +1005,8 @@ ${line}
      ${esc(totals.withCost)} with cost · ${esc(kr(totals.cost) || '0 kr')} total${
        per ? ` (${per})` : ''} ·
      ${esc(totals.waiting)} waiting for the SM check${
+       totals.quoted ? ` · <em>${esc(kr(totals.quoted))} quoted and not spent</em>` : ''}${
+       totals.toAccept ? ` · ${esc(totals.toAccept)} ${totals.toAccept === 1 ? 'estimate' : 'estimates'} not accepted yet` : ''}${
        totals.atShop ? ` · ${esc(totals.atShop)} at the workshop now` : ''}${
        totals.outNow ? ` · ${esc(totals.outNow)} hire ${totals.outNow === 1 ? 'car' : 'cars'} still out` : ''}${
        filters.handledBy ? ' · <em>vehicle lines only, because OKQ8 / Own is set</em>' : ''}`;
@@ -861,21 +1017,24 @@ ${line}
     tool: 'Add a tool bought, repaired or replaced above.',
     misc: 'Add anything above that is neither a vehicle nor a tool.',
     rental: `Add a car hired from OKQ8, Circle K or Skeppsbrons above – the hire period, the
-     agreement, and photos of the car as it was handed over and handed back.`
+     agreement, and photos of the car as it was handed over and handed back.`,
+    estimate: `Add a repair estimate above – the van, the workshop, the day it came in and the
+     estimate itself. What is quoted is not money spent, so it stays out of the totals.`
   }[scope];
 
   const html = `  <div class="page-head">
     <h1>Expenses</h1>
-    <div class="muted">Every expense, all four sections · ${esc(incidents.length)} ${incidents.length === 1 ? 'line' : 'lines'}</div>
+    <div class="muted">Every expense, all five sections · ${esc(incidents.length)} ${incidents.length === 1 ? 'line' : 'lines'}</div>
   </div>
 ${nav}
 ${message ? `<div class="ok-msg no-print">${esc(message)}</div>` : ''}
 ${sectionTabs(scope, sections, filters)}
 
-  <p class="lede">${lede} The list underneath is the <strong>whole ledger</strong> – vehicles, tools,
-     misc and hire cars together, on every tab – so the Site Manager reads and approves all of it
-     in one place. Its first column says which kind each line is; <strong>Edit</strong> opens a line
-     on its own tab, in that section's own full form, where every field can be changed.</p>
+  <p class="lede">${lede} The list underneath is the <strong>whole ledger</strong> – vehicles,
+     tools, misc, hire cars and estimates together, on every tab – so the Site Manager reads and
+     approves all of it in one place. Its first column says which kind each line is;
+     <strong>Edit</strong> opens a line on its own tab, in that section's own full form, where every
+     field can be changed.</p>
 
   <form class="filters no-print" method="get" action="/admin/expenses">
     <input type="hidden" name="scope" value="${esc(scope)}">${filterFields}
@@ -918,10 +1077,11 @@ ${rows || `<p class="muted" style="padding:20px">Nothing matches. ${
       <p><strong>No cost, no approval.</strong> An OK on an unknown amount is not an approval.
          And if the cost is changed afterwards, the check is reset automatically – an approval
          holds for the amount that stood there when it was given.</p>
-      <p><strong>One list, four sections.</strong> The tabs above choose which form you are
+      <p><strong>One list, five sections.</strong> The tabs above choose which form you are
          filling in; the list is always every expense there is. The first column says which kind
-         a line is – <em>Damage</em>, <em>Spare parts</em>, <em>Tool</em>, <em>Misc</em> or
-         <em>Rental car</em> – and the columns after it are what all four have in common.
+         a line is – <em>Damage</em>, <em>Spare parts</em>, <em>Tool</em>, <em>Misc</em>,
+         <em>Rental car</em> or <em>Estimat</em> – and the columns after it are what they all
+         have in common.
          Everything else about a line lives on its own tab: press <strong>Edit</strong> and it
          opens there, in that section's full line, with the driver, the workshop dates, the hire
          firm and the rest.</p>
@@ -936,10 +1096,20 @@ ${rows || `<p class="muted" style="padding:20px">Nothing matches. ${
          to cover it as well. Each photo keeps <strong>when it was taken</strong> where the camera
          wrote that into the file, and its upload time otherwise – open a line to see every file
          with its time.</p>
-      <p>The list opens on <strong>what is waiting for the check</strong>. Pick <em>Both</em> under
-         SM check, or press <em>Everything</em>, to see what has already been approved.</p>
-      <p class="muted">Both OKs and withdrawn OKs are kept with their time. Hover over the
-         SM box to see the history.</p>
+      <p><strong>Estimat (Reparation)</strong> is a quote for work nobody has done yet: the van,
+         the workshop (STS, Malte Månsson or Skeppsbrons), the day the estimate came in, the
+         estimate itself as a file, and what is being asked for it. That figure is
+         <strong>quoted, not spent</strong> – it is shown apart from the costs and is in none of
+         the totals, because adding a quote to the money that has actually gone out would say the
+         van cost twice what it did. The tick at the end of the line means <strong>accepted – we
+         are going ahead</strong>, and like the SM check it keeps who and when, can be undone, and
+         is cleared if the quoted figure is changed afterwards. When the work is done it is booked
+         as a <em>Damage</em> line, with the real invoice.</p>
+      <p>The list opens on <strong>what is waiting for the check</strong> – and on estimates
+         nobody has accepted yet. Pick <em>Both</em> under SM check, or press <em>Everything</em>,
+         to see what has already been approved.</p>
+      <p class="muted">Every OK, acceptance and withdrawal is kept with its time. Hover over
+         the SM box to see the history of that line.</p>
     </div>
   </div>`;
 
@@ -956,8 +1126,10 @@ function incidentDeletePage({ inc, ret, nav }) {
   const html = `  <div class="page-head">
     <h1>Delete this entry?</h1>
     <div class="muted mono">${esc([
-      ({ vehicle: 'Vehicle', tool: 'Tool', misc: 'Misc', rental: 'Rental car' })[inc.scope],
-      inc.plate, EXPENSE_LABEL[inc.category], RENTAL_FIRM_LABEL[inc.rental_firm],
+      ({ vehicle: 'Vehicle', tool: 'Tool', misc: 'Misc', rental: 'Rental car',
+        estimate: 'Estimat (Reparation)' })[inc.scope],
+      inc.plate, inc.scope === 'vehicle' ? EXPENSE_LABEL[inc.category] : '',
+      RENTAL_FIRM_LABEL[inc.rental_firm], ESTIMATE_SHOP_LABEL[inc.estimate_shop],
       inc.occurred_on].filter(Boolean).join(' · '))}</div>
   </div>
 ${nav}
@@ -985,4 +1157,4 @@ ${nav}
 }
 
 module.exports = { incidentsPage, expensesPage, incidentDeletePage, kr, EXPENSE_LABEL, HANDLER_LABEL,
-  SCOPE_LABEL, RENTAL_FIRM_LABEL, KIND_LABEL, kindOf };
+  SCOPE_LABEL, RENTAL_FIRM_LABEL, ESTIMATE_SHOP_LABEL, KIND_LABEL, kindOf };
