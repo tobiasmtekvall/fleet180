@@ -362,6 +362,18 @@ ALTER TABLE submissions ADD COLUMN IF NOT EXISTS driver_changed  BOOLEAN NOT NUL
 ALTER TABLE submissions ADD COLUMN IF NOT EXISTS change_approver TEXT;
 CREATE INDEX IF NOT EXISTS submissions_plate_time_idx ON submissions (plate, submitted_at DESC);
 CREATE INDEX IF NOT EXISTS submissions_time_idx ON submissions (submitted_at DESC);
+-- 2026-09-19: a fingerprint of the snapshot above, so that a page reading
+-- months of checks can tell which of them were filed against the same form
+-- without decompressing 30 kB of JSON apiece to find out. See
+-- checksForAttention(); the attention report went from reading 60 MB to
+-- reading a few hundred kB because of this one column.
+-- Filled at insert and backfilled here for everything that predates it. The
+-- UPDATE is written to do nothing at all once every row has one, so it is
+-- safe on every boot like the rest of this file.
+ALTER TABLE submissions ADD COLUMN IF NOT EXISTS questions_hash TEXT;
+UPDATE submissions SET questions_hash = md5(questions::text)
+ WHERE questions_hash IS NULL AND questions IS NOT NULL;
+CREATE INDEX IF NOT EXISTS submissions_qhash_idx ON submissions (questions_hash);
 
 -- Who was expected to check which vehicle, per day. Pushed from the Route
 -- Suite's assigner; this app never decides an assignment itself.
@@ -601,6 +613,42 @@ CREATE INDEX IF NOT EXISTS incident_sm_events_idx ON incident_sm_events (inciden
 -- same reason it has one on the incident: cost_sek must stay summable as
 -- money spent, and an accepted quote is not that.
 ALTER TABLE incident_sm_events ADD COLUMN IF NOT EXISTS quoted_sek NUMERIC(12,2);
+
+-- 2026-09-19: the attention report (src/attention.js, /admin/attention).
+--
+-- The report itself is DERIVED -- what needs doing to a van is worked out
+-- from the checks, the assignments, the incidents and the tread readings
+-- every time the page is drawn, so nothing has to have been written at the
+-- time a driver reported a fault for that fault to be on the list today, and
+-- a question whose polarity is corrected next month re-reads correctly all
+-- the way back. The only thing stored is the one thing that cannot be
+-- derived: a person saying an item has been dealt with.
+--
+-- One row per act of clearing, never updated in place and never deleted.
+-- covers_to is the sighting the page was showing when the button was
+-- pressed, not the moment it was pressed: a check that lands while somebody
+-- is reading the page must not be signed off by a click that never saw it,
+-- and anything reported after that instant reopens the item by itself.
+-- title is what the item said at the time, so a cleared item is still
+-- legible after the question it came from has been rephrased or deleted.
+CREATE TABLE IF NOT EXISTS attention_clears (
+  id           BIGSERIAL PRIMARY KEY,
+  item_key     TEXT        NOT NULL,
+  plate        TEXT        NOT NULL DEFAULT '',
+  kind         TEXT        NOT NULL DEFAULT '',
+  title        TEXT        NOT NULL DEFAULT '',
+  covers_to    TIMESTAMPTZ NOT NULL,
+  cleared_by   TEXT        NOT NULL,
+  cleared_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  note         TEXT        NOT NULL DEFAULT '',
+  -- Taking it back. The row stays: "signed off on Tuesday and withdrawn on
+  -- Thursday" is exactly the thing somebody will ask about later, and a
+  -- DELETE would leave the page unable to answer.
+  withdrawn_at TIMESTAMPTZ,
+  withdrawn_by TEXT        NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS attention_clears_key_idx ON attention_clears (item_key, id);
+CREATE INDEX IF NOT EXISTS attention_clears_when_idx ON attention_clears (cleared_at DESC);
 
 `;
 
@@ -1527,6 +1575,19 @@ async function submissionsWithIncident(ids) {
   return new Set(r.rows.map(x => String(x.submission_id)));
 }
 
+/**
+ * Which case each of these checks was turned into, as submission id -> case
+ * id. The attention report uses it to say where a reported dent is already
+ * being handled; submissionsWithIncident above only answers whether, which
+ * is all the pending list needs.
+ */
+async function incidentBySubmission(ids) {
+  if (!ids.length) return new Map();
+  const r = await pool.query(
+    'SELECT id, submission_id FROM incidents WHERE submission_id = ANY($1::bigint[])', [ids]);
+  return new Map(r.rows.map(x => [String(x.submission_id), String(x.id)]));
+}
+
 /* ------------------------------------------------------------------ *
  * Forms                                                               *
  * ------------------------------------------------------------------ */
@@ -1752,8 +1813,13 @@ async function saveSubmission({
          (plate, owner, form_key, form_id, form_title, driver_name, route, odometer,
           answers, questions, photo_count, user_agent, client_ip, lang, public_key,
           assigned_driver, assigned_route, driver_changed, change_approver,
-          opened_at, fill_seconds)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
+          opened_at, fill_seconds, questions_hash)
+       -- The fingerprint is taken from the same parameter the snapshot is
+       -- stored from, by the database, in the same statement: computing it
+       -- here in JavaScript would mean two renderings of the same JSON that
+       -- could disagree about key order and quietly stop matching.
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,
+               md5($10::jsonb::text))
        RETURNING id, submitted_at, public_key`,
       [
         plate, owner || '', form.key, form.id, form.title,
@@ -2213,6 +2279,135 @@ async function deleteWheelFile(id) {
   return r.rows[0] || null;
 }
 
+
+/* ------------------------------------------------------------------ *
+ * The attention report                                                *
+ *                                                                     *
+ * Only the sign-offs are stored; see the table's own comment in        *
+ * SCHEMA and the header of src/attention.js for why.                   *
+ * ------------------------------------------------------------------ */
+
+/**
+ * The checks the attention report reads, for a window measured in months
+ * rather than in days.
+ *
+ * submissionsBetween() would do, and did, but it carries every check's whole
+ * form SNAPSHOT: 21 questions with their follow-up lists and four languages
+ * apiece, about 30 kB of JSON per check. Ninety days of a 22-van fleet is
+ * some 1400 checks, so the page was fetching and parsing the better part of
+ * 40 MB to find a handful of flagged answers -- on every refresh, on a small
+ * Railway instance.
+ *
+ * Nearly all of those snapshots are byte-for-byte the same: a snapshot is a
+ * copy of the form as it stood, and the form changes a few times a year. So
+ * the checks come back WITHOUT their snapshot and with a hash of it, the
+ * distinct snapshots come back once each in a second query, and they are put
+ * back together here. Same rows, same answers, a few hundred kB.
+ *
+ * jsonb renders canonically (keys sorted, whitespace fixed), so two checks
+ * filed against the same form always hash alike -- which is what makes this
+ * a deduplication rather than a guess. The hash is a stored column
+ * (questions_hash, written at insert and backfilled in SCHEMA) rather than
+ * something computed here: md5 over the text of every snapshot in the window
+ * costs half a second by itself, which is the cost this was meant to avoid.
+ */
+async function checksForAttention(fromDate, toDate) {
+  const window = `submitted_at >= ($1::date AT TIME ZONE 'Europe/Stockholm')
+                  AND submitted_at <  (($2::date + 1) AT TIME ZONE 'Europe/Stockholm')`;
+  const rows = (await pool.query(
+    `SELECT id, plate, submitted_at, driver_name, route, odometer, answers, photo_count,
+            lang, assigned_driver, driver_changed, change_approver, questions_hash
+       FROM submissions WHERE ${window}
+      ORDER BY submitted_at`, [fromDate, toDate])).rows;
+  if (!rows.length) return [];
+
+  /* One snapshot per distinct form, fetched by hash rather than by scanning
+     the window again: the list above is already everything in it. */
+  const hashes = [...new Set(rows.map(r => r.questions_hash).filter(Boolean))];
+  const byHash = new Map();
+  if (hashes.length) {
+    const shapes = (await pool.query(
+      `SELECT DISTINCT ON (questions_hash) questions_hash, questions
+         FROM submissions WHERE questions_hash = ANY($1::text[])`, [hashes])).rows;
+    for (const s of shapes) byHash.set(s.questions_hash, s.questions);
+  }
+  /* A row whose hash is missing gets its own snapshot fetched by id. That
+     should never happen -- the column is written at insert and backfilled at
+     boot -- but "never happens" is how a check quietly loses the polarity it
+     was filed with, and the answer here is one extra query for the rows it
+     applies to rather than a silent fallback to today's form. */
+  const unhashed = rows.filter(r => !r.questions_hash).map(r => Number(r.id));
+  const byId = new Map();
+  if (unhashed.length) {
+    const own = (await pool.query(
+      'SELECT id, questions FROM submissions WHERE id = ANY($1::bigint[])', [unhashed])).rows;
+    for (const o of own) byId.set(String(o.id), o.questions);
+  }
+
+  // A check with no snapshot at all keeps the empty array it has always had,
+  // and attention.js falls back to the form as it stands today.
+  return rows.map(r => ({
+    ...r,
+    questions: byHash.get(r.questions_hash) || byId.get(String(r.id)) || []
+  }));
+}
+
+/**
+ * Every clear ever recorded, oldest first.
+ *
+ * The whole table rather than a filtered slice: it grows by one row per
+ * fault dealt with -- a few hundred a year -- and the report needs both the
+ * clear in force for each item and the history behind it, which a WHERE on
+ * "still current" could not give it. Ordered by id so the reader can take
+ * the last row per key and be right.
+ */
+async function listAttentionClears() {
+  const r = await pool.query(
+    `SELECT id, item_key, plate, kind, title, covers_to, cleared_by, cleared_at,
+            note, withdrawn_at, withdrawn_by
+       FROM attention_clears ORDER BY id`);
+  return r.rows;
+}
+
+/**
+ * Somebody says an item is dealt with.
+ *
+ * `coversTo` comes off the page (the last sighting it was showing), never
+ * from now(), and is clamped to now so a doctored form cannot sign off
+ * reports that have not happened yet.
+ */
+async function clearAttentionItem({ itemKey, plate = '', kind = '', title = '',
+                                    coversTo, by, note = '' }) {
+  const who = String(by || '').trim();
+  if (!itemKey || who.length < 2) return null;
+  const r = await pool.query(
+    `INSERT INTO attention_clears (item_key, plate, kind, title, covers_to, cleared_by, note)
+     VALUES ($1,$2,$3,$4, LEAST($5::timestamptz, now()), $6, $7)
+     RETURNING id, item_key, covers_to, cleared_by, cleared_at`,
+    [String(itemKey).slice(0, 400), plate, kind, String(title).slice(0, 400),
+     coversTo, who.slice(0, 120), String(note || '').slice(0, 500)]);
+  return r.rows[0] || null;
+}
+
+/**
+ * Taking a sign-off back.
+ *
+ * An UPDATE of the row rather than a new one: what is being undone is this
+ * particular clear, and an already-withdrawn row is left alone so two people
+ * pressing Reopen do not rewrite who did it first.
+ */
+async function withdrawAttentionClear(id, by) {
+  if (!/^\d+$/.test(String(id))) return null;
+  const who = String(by || '').trim();
+  if (who.length < 2) return null;
+  const r = await pool.query(
+    `UPDATE attention_clears
+        SET withdrawn_at = now(), withdrawn_by = $2
+      WHERE id = $1 AND withdrawn_at IS NULL
+      RETURNING id, item_key, plate, title`, [id, who.slice(0, 120)]);
+  return r.rows[0] || null;
+}
+
 module.exports = {
   init,
   listVehicles, getVehicle, getVehicleById, createVehicle, updateVehicle,
@@ -2226,8 +2421,9 @@ module.exports = {
   getSetting, setSetting, getStatsEpoch, setStatsEpoch, countsBefore,
   listIncidents, getIncident, createIncident, updateIncident, deleteIncident, incidentCounts, expenseSections,
   signOffIncident, addIncidentFile, getIncidentFile, deleteIncidentFile,
-  submissionsWithIncident,
+  submissionsWithIncident, incidentBySubmission,
   listWheelSets, upsertWheelSet, wheelSetId, replaceWheelSet, addWheelReading, deleteWheelReading,
   setFitted, addWheelFile, getWheelFile, deleteWheelFile,
+  checksForAttention, listAttentionClears, clearAttentionItem, withdrawAttentionClear,
   get pool() { return pool; }
 };

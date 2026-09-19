@@ -14,6 +14,10 @@ const LINKS = [
 
 const TABS = [
   { href: '/admin', text: 'Checks', key: 'checks' },
+  /* First after Checks on purpose: it is the answer to the question the
+     checks are collected in order to ask (2026-09-19). */
+  { href: '/admin/attention', text: 'Attention', key: 'attention',
+    title: 'Everything still outstanding on the vans' },
   { href: '/admin/vehicles', text: 'Vehicles', key: 'vehicles' },
   { href: '/admin/forms', text: 'Forms', key: 'forms' },
   { href: '/admin/drivers', text: 'Drivers', key: 'drivers' },

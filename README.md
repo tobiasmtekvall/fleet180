@@ -244,6 +244,68 @@ men sammanfattningen finns alltid att läsa på `/admin/daily-summary`, där det
 också går att skicka dagens mejl direkt. En `jobs`-rad i databasen gör att en
 omstart eller en andra instans inte kan skicka samma dag två gånger.
 
+## Åtgärdsrapporten
+
+`/admin/attention` – fliken **Attention**, direkt efter Checks. Dagsmejlet
+svarar på "vad hände idag"; den här sidan svarar på **vad är fortfarande fel
+på bilarna**, vilket är en annan fråga: en trasig lampa som rapporterades på
+måndagen är trasig också på tisdagen, men tisdagens mejl nämner den inte om
+inte någon råkar rapportera den igen – och nästa förare i bilen är en annan
+person som inte vet att det redan är sagt.
+
+Rapporten är **härledd**, inte lagrad. Varje gång sidan ritas räknas den fram
+ur kontrollerna, tilldelningarna, händelserna och mönsterdjupen, så ingenting
+behövde skrivas när föraren rapporterade för att felet ska synas idag, och en
+fråga vars larmpolaritet rättas nästa månad läses om rätt hela vägen bakåt.
+
+**En post är inte en rapport.** Samma trasiga lampa rapporterad av tre förare
+på tre dagar är *en* post med tre observationer, öppen sedan den första.
+Nyckeln är `check|REGNR|frågans namn|valt alternativ` – frågans **namn**, aldrig
+dess text, eftersom en fråga kan skrivas om i formulärredigeraren; och det
+valda alternativet, så att höger halvljus och vänster bromsljus är två poster
+som lagas var för sig. Det föraren skriver i kommentaren håller ihop posten,
+det delar inte upp den.
+
+**Ingenting stänger sig självt.** En post ligger kvar tills någon skriver sitt
+namn och trycker *Mark as done*. En senare kontroll som svarar "ja, fungerar"
+stänger den alltså **inte** – en förare som bockar av utan att gå runt bilen
+ska inte kunna radera ett verkligt fel. Signeringen täcker observationerna
+*till och med den sidan visade* (`covers_to`), inte "till nu", så en kontroll
+som kommer in medan sidan ligger uppe på ett skrivbord blir inte bortsignerad
+av ett klick som aldrig såg den – och en ny rapport öppnar posten igen av sig
+själv. Varje signering och varje återtagande sparas i `attention_clears`;
+inget uppdateras på plats och inget raderas.
+
+Fem källor, sorterade värst först:
+
+| Vad | Blir en post när | Stängs av |
+|---|---|---|
+| Flaggade svar | `alert_on` slår till på svaret | någon markerar den klar |
+| Varningslampa | frågan med `comment_source = 'lights'` flaggar | dito (röd direkt) |
+| Skada | frågan med rollen `damage` flaggar | dito – länkas till ärendet på Expenses om ett finns |
+| Ingen kontroll | bilen var tilldelad en dag som är slut och ingen kontroll kom in | dito (idag räknas aldrig – se nedan) |
+| Däck | mönsterdjup under 3 mm, 3–5 mm, eller en mätning äldre än 90 dagar | en ny mätning, eller någon som markerar den klar |
+| På verkstad | ett ärende med `shop_in` men utan `shop_out` | att utdatumet fylls i på Expenses (ingen knapp här – två ställen att stänga samma sak är två ställen som är oense på fredag) |
+
+**Dagens bilar räknas aldrig som fel.** En bil som är tilldelad klockan sju och
+vars förare inte skannat ännu är inget fel klockan halv åtta; en rapport som
+ropar varg varje morgon är en rapport ingen läser på torsdagen. Dagens
+osignerade kontroller står som en rad högst upp i stället. Saknade kontroller
+matchas på **registreringsnumret**, inte på föraren – dagsmejlet frågar om
+personen gjorde sin kontroll, den här sidan frågar om någon gick runt bilen.
+
+Tre rapporter på tre olika dagar höjer posten till röd av sig själv: felet är
+inte värre, men det har stått olöst tre gånger, och det är vad sidan handlar om.
+
+Sidan läser **90 dagar** bakåt (`WINDOW_DAYS` i `src/attention.js`) och skriver
+ut det längst upp – en lista som tyst tappar gamla poster är sämre än ingen
+lista. `/admin/attention.csv` ger samma sak som fil.
+
+Prestanda: kontrollerna hämtas via `checksForAttention()`, som plockar ut varje
+kontroll **utan** sin formulär-snapshot och sedan hämtar de distinkta
+snapshotarna en gång var (kolumnen `submissions.questions_hash`). Tre månaders
+kontroller är annars ~60 MB JSON att packa upp vid varje sidvisning.
+
 ## API
 
 Alla `/api`-vägar kräver `API_TOKEN`, skickad som `X-Api-Key` (eller `?key=`
@@ -330,6 +392,7 @@ src/server.js        alla routes, uppladdning, admin-auth, CSV, QR
 src/db.js            anslutning, schema, alla frågor mot databasen
 src/seed.js          vad en tom databas fylls med första gången
 src/fields.js        frågetyperna: hur ett svar läses, valideras och visas
+src/attention.js     åtgärdsrapporten: vad som fortfarande är fel på bilarna
 src/plate.js         normalisering av reg.nr
 src/views/           HTML-mallar (layout, formulär, kvitto, admin, QR)
 public/app.css       utseendet, hämtat från originalsidan

@@ -12,24 +12,36 @@ const { normName } = require('./stats');
 
 const STOCKHOLM = 'Europe/Stockholm';
 
+/* Built once, not per call.
+ *
+ * `new Intl.DateTimeFormat(...)` is expensive -- it loads a locale and builds
+ * a pattern -- and these three are called once per check by every page that
+ * reads a range of them. The attention report, which reads three months at a
+ * time, spent most of a second on nothing else. A formatter is immutable and
+ * has no state between calls, so hoisting it changes nothing but the cost.
+ */
+const DAY_FMT = new Intl.DateTimeFormat('sv-SE', {
+  timeZone: STOCKHOLM, year: 'numeric', month: '2-digit', day: '2-digit'
+});
+const TIME_FMT = new Intl.DateTimeFormat('sv-SE', {
+  timeZone: STOCKHOLM, hour: '2-digit', minute: '2-digit'
+});
+const HOUR_FMT = new Intl.DateTimeFormat('sv-SE', {
+  timeZone: STOCKHOLM, hour: '2-digit', hour12: false
+});
+
 /** YYYY-MM-DD for a date in Swedish local time, not UTC. */
 function dayKey(d = new Date()) {
-  return new Intl.DateTimeFormat('sv-SE', {
-    timeZone: STOCKHOLM, year: 'numeric', month: '2-digit', day: '2-digit'
-  }).format(d);
+  return DAY_FMT.format(d);
 }
 
 function clockTime(d) {
-  return new Intl.DateTimeFormat('sv-SE', {
-    timeZone: STOCKHOLM, hour: '2-digit', minute: '2-digit'
-  }).format(new Date(d));
+  return TIME_FMT.format(new Date(d));
 }
 
 /** The hour, 0-23, in Swedish local time. */
 function localHour(d = new Date()) {
-  return Number(new Intl.DateTimeFormat('sv-SE', {
-    timeZone: STOCKHOLM, hour: '2-digit', hour12: false
-  }).format(d));
+  return Number(HOUR_FMT.format(d));
 }
 
 /**

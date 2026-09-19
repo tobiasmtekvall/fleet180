@@ -26,6 +26,8 @@ const { qrPage } = require('./views/qr');
 const { statsPage, statsResetPage } = require('./views/stats');
 const { incidentsPage, expensesPage, incidentDeletePage, HANDLER_LABEL,
   RENTAL_FIRM_LABEL, ESTIMATE_SHOP_LABEL, KIND_LABEL, kindOf } = require('./views/incidents');
+const attentionLib = require('./attention');
+const { attentionPage } = require('./views/attention');
 const exif = require('./exif');
 const expenses = require('./expenses');
 const wheels = require('./wheels');
@@ -1112,6 +1114,140 @@ app.post('/admin/daily-summary/send', async (req, res, next) => {
 });
 
 
+/* ------------------------ the attention report -------------------- */
+/*
+ * What is still wrong with the vans, as opposed to what happened today.
+ * The calculation is in src/attention.js and nothing here duplicates it:
+ * these routes fetch, narrow and render, and the only thing they write is
+ * somebody's signature against an item.
+ */
+
+const ATTENTION_SHOW = new Set(['', 'high', 'action', 'new']);
+
+function attentionFilters(req) {
+  return {
+    plate: normalisePlate(req.query.plate || ''),
+    show: ATTENTION_SHOW.has(String(req.query.show || '')) ? String(req.query.show || '') : ''
+  };
+}
+
+/**
+ * Everything the report is built from, in one round of queries.
+ *
+ * `listVehicles()` without inactive ones on purpose: a van that has left the
+ * fleet has no faults anybody can fix, and its checks are still on the Checks
+ * tab. attention.js drops sightings for plates that are not in this list.
+ */
+async function attentionReport() {
+  const today = summaryLib.dayKey();
+  const from = assignmentLib.shiftDay(today, -(attentionLib.WINDOW_DAYS - 1));
+  const [vehicles, submissions, assignments, incidents, wheelSets, clears, fallback] =
+    await Promise.all([
+      db.listVehicles(),
+      db.checksForAttention(from, today),
+      db.assignmentsBetween(from, today),
+      db.listIncidents({ scope: 'vehicle' }),
+      db.listWheelSets(),
+      db.listAttentionClears(),
+      fallbackFields()
+    ]);
+  const cases = await db.incidentBySubmission(submissions.map(s => Number(s.id)));
+  return attentionLib.buildAttention({
+    today, vehicles, submissions, assignments, incidents, wheelSets, clears, fallback,
+    cases, lang: 'en'
+  });
+}
+
+app.get('/admin/attention', async (req, res, next) => {
+  try {
+    const filters = attentionFilters(req);
+    const report = await attentionReport();
+    res.send(attentionPage({
+      report: attentionLib.narrow(report, filters),
+      filters, message: flashOf(req), nav: adminNav('attention')
+    }));
+  } catch (err) { next(err); }
+});
+
+/**
+ * Somebody deals with an item.
+ *
+ * Three rules, all enforced here and not only in the page:
+ *
+ * 1. A NAME, at least two characters. One shared admin login cannot say who
+ *    pressed the button, so the typed name is the only thing that makes this
+ *    somebody's. Same rule as the SM check on Expenses, and for the same
+ *    reason.
+ * 2. The clear covers what the PAGE was showing, not now(): `covers` is the
+ *    last sighting the reader could see, so a check filed while the page sat
+ *    open on a desk stays open instead of being signed off by a click that
+ *    never saw it. A missing or unparseable value is refused rather than
+ *    quietly turned into now, which would be the silent version of the bug.
+ * 3. Nothing is deleted and nothing is updated in place; the row is the
+ *    record, and a later report reopens the item on its own.
+ */
+app.post('/admin/attention/clear', upload, async (req, res, next) => {
+  try {
+    const to = returnTo(req, '/admin/attention');
+    const key = String(req.body.key || '').trim();
+    const who = String(req.body.who || '').trim();
+    const covers = String(req.body.covers || '').trim();
+    if (!key) return back(res, to, 'That item is no longer on the page.');
+    if (who.length < 2) return back(res, to, 'Type your name before marking something done.');
+    if (!covers || !Number.isFinite(Date.parse(covers))) {
+      return back(res, to, 'The page was out of date – reload it and try again.');
+    }
+    const row = await db.clearAttentionItem({
+      itemKey: key,
+      plate: normalisePlate(req.body.plate || ''),
+      kind: String(req.body.kind || '').slice(0, 40),
+      title: String(req.body.title || ''),
+      coversTo: covers,
+      by: who,
+      note: String(req.body.note || '')
+    });
+    if (!row) return back(res, to, 'That could not be saved.');
+    back(res, atAttention(to, `#v-${normalisePlate(req.body.plate || '')}`),
+      `Marked done by ${who}. It comes back if a driver reports it again.`);
+  } catch (err) { next(err); }
+});
+
+/** Taking a sign-off back. The row stays; the item is open again at once. */
+app.post('/admin/attention/clear/:id/withdraw', upload, async (req, res, next) => {
+  try {
+    const to = returnTo(req, '/admin/attention');
+    const who = String(req.body.who || '').trim();
+    if (who.length < 2) return back(res, to, 'Type your name before reopening an item.');
+    const row = await db.withdrawAttentionClear(req.params.id, who);
+    if (!row) return back(res, to, 'That sign-off has already been taken back.');
+    back(res, atAttention(to, `#v-${row.plate}`), `Open again: ${row.title}`);
+  } catch (err) { next(err); }
+});
+
+function atAttention(to, fragment) {
+  return to.startsWith('/admin/attention') ? to + fragment : to;
+}
+
+app.get('/admin/attention.csv', async (req, res, next) => {
+  try {
+    const filters = attentionFilters(req);
+    const report = attentionLib.narrow(await attentionReport(), filters);
+    const header = ['Reg. no.', 'Priority', 'Kind', 'What', 'Open since', 'Days open',
+      'Last reported', 'Reports', 'Days reported', 'Reported by', 'Latest wording',
+      'Note', 'Reported again after clearing', 'Case'];
+    const lines = [header.map(csvCell).join(';')];
+    for (const r of attentionLib.flatten(report)) {
+      lines.push([r.plate, r.severityLabel, r.kind, r.title, r.openSince, r.ageDays,
+        r.lastReported, r.reports, r.days, r.reportedBy, r.latest, r.note, r.reopened, r.case]
+        .map(csvCell).join(';'));
+    }
+    res.type('text/csv; charset=utf-8')
+      .set('Content-Disposition', `attachment; filename="attention-${report.today}.csv"`)
+      .send('﻿' + lines.join('\r\n'));
+  } catch (err) { next(err); }
+});
+
+
 /* ---------------------------- statistics -------------------------- */
 
 /**
@@ -1367,12 +1503,15 @@ function entryProblem(data) {
  * opened for editing, #v-ABC12D is a van on Wheels and #t-ABC12D-winter-front
  * is one tyre on it. Nothing else is allowed through, here or in the path.
  */
-function returnTo(req) {
+function returnTo(req, fallback = '/admin/expenses') {
   const r = String((req.body && req.body.ret) || '');
-  if (/^\/admin\/(expenses|incidents|wheels)(\?[\w=&%.+-]*)?(#(row-\d+|v-[\w-]+|t-[\w-]+))?$/.test(r)) {
+  if (/^\/admin\/(expenses|incidents|wheels|attention)(\?[\w=&%.+-]*)?(#(row-\d+|v-[\w-]+|t-[\w-]+))?$/.test(r)) {
     return r;
   }
-  return '/admin/expenses';
+  /* The fallback is the page the caller came from, not always Expenses: a
+     Fixed button whose `ret` did not survive the round trip must not land the
+     reader in the ledger wondering what they just did. */
+  return fallback;
 }
 
 /**
