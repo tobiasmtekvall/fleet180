@@ -838,7 +838,13 @@ function adminAuth(req, res, next) {
     if (idx > -1) {
       const user = decoded.slice(0, idx);
       const pass = decoded.slice(idx + 1);
-      if (safeEqual(user, process.env.ADMIN_USER || 'admin') && safeEqual(pass, password)) return next();
+      if (safeEqual(user, process.env.ADMIN_USER || 'admin') && safeEqual(pass, password)) {
+        /* Which login this was. Not a person -- the admin login is shared --
+           but it costs nothing to record and it is what the attention page
+           writes against a sign-off now that it no longer asks for a name. */
+        req.adminUser = user;
+        return next();
+      }
     }
   }
   res.set('WWW-Authenticate', 'Basic realm="Fleet 180 admin", charset="UTF-8"')
@@ -1141,7 +1147,7 @@ function attentionFilters(req) {
 async function attentionReport() {
   const today = summaryLib.dayKey();
   const from = assignmentLib.shiftDay(today, -(attentionLib.WINDOW_DAYS - 1));
-  const [vehicles, submissions, assignments, incidents, wheelSets, clears, fallback] =
+  const [vehicles, submissions, assignments, incidents, wheelSets, clears, fallback, latest] =
     await Promise.all([
       db.listVehicles(),
       db.checksForAttention(from, today),
@@ -1149,12 +1155,16 @@ async function attentionReport() {
       db.listIncidents({ scope: 'vehicle' }),
       db.listWheelSets(),
       db.listAttentionClears(),
-      fallbackFields()
+      fallbackFields(),
+      /* The side panel asks "when was this van last checked AT ALL", which
+         the ninety-day window above cannot answer: a van nobody has touched
+         since June is exactly the row that would come back blank. */
+      db.latestPerVehicle()
     ]);
   const cases = await db.incidentBySubmission(submissions.map(s => Number(s.id)));
   return attentionLib.buildAttention({
     today, vehicles, submissions, assignments, incidents, wheelSets, clears, fallback,
-    cases, lang: 'en'
+    latest, cases, lang: 'en'
   });
 }
 
@@ -1172,28 +1182,27 @@ app.get('/admin/attention', async (req, res, next) => {
 /**
  * Somebody deals with an item.
  *
- * Three rules, all enforced here and not only in the page:
+ * Two rules, both enforced here and not only in the page:
  *
- * 1. A NAME, at least two characters. One shared admin login cannot say who
- *    pressed the button, so the typed name is the only thing that makes this
- *    somebody's. Same rule as the SM check on Expenses, and for the same
- *    reason.
- * 2. The clear covers what the PAGE was showing, not now(): `covers` is the
+ * 1. The clear covers what the PAGE was showing, not now(): `covers` is the
  *    last sighting the reader could see, so a check filed while the page sat
  *    open on a desk stays open instead of being signed off by a click that
  *    never saw it. A missing or unparseable value is refused rather than
  *    quietly turned into now, which would be the silent version of the bug.
- * 3. Nothing is deleted and nothing is updated in place; the row is the
+ * 2. Nothing is deleted and nothing is updated in place; the row is the
  *    record, and a later report reopens the item on its own.
+ *
+ * It asked for a typed name until 2026-09-23. It does not any more, at
+ * Tobias's request: a list that costs a sentence per line stops being ticked
+ * off, and the login the browser already sent is recorded instead.
  */
 app.post('/admin/attention/clear', upload, async (req, res, next) => {
   try {
     const to = returnTo(req, '/admin/attention');
     const key = String(req.body.key || '').trim();
-    const who = String(req.body.who || '').trim();
+    const who = String(req.body.who || req.adminUser || '').trim();
     const covers = String(req.body.covers || '').trim();
     if (!key) return back(res, to, 'That item is no longer on the page.');
-    if (who.length < 2) return back(res, to, 'Type your name before marking something done.');
     if (!covers || !Number.isFinite(Date.parse(covers))) {
       return back(res, to, 'The page was out of date – reload it and try again.');
     }
@@ -1208,7 +1217,7 @@ app.post('/admin/attention/clear', upload, async (req, res, next) => {
     });
     if (!row) return back(res, to, 'That could not be saved.');
     back(res, atAttention(to, `#v-${normalisePlate(req.body.plate || '')}`),
-      `Marked done by ${who}. It comes back if a driver reports it again.`);
+      'Marked done. It comes back if a driver reports it again.');
   } catch (err) { next(err); }
 });
 
@@ -1216,8 +1225,7 @@ app.post('/admin/attention/clear', upload, async (req, res, next) => {
 app.post('/admin/attention/clear/:id/withdraw', upload, async (req, res, next) => {
   try {
     const to = returnTo(req, '/admin/attention');
-    const who = String(req.body.who || '').trim();
-    if (who.length < 2) return back(res, to, 'Type your name before reopening an item.');
+    const who = String(req.body.who || req.adminUser || '').trim();
     const row = await db.withdrawAttentionClear(req.params.id, who);
     if (!row) return back(res, to, 'That sign-off has already been taken back.');
     back(res, atAttention(to, `#v-${row.plate}`), `Open again: ${row.title}`);

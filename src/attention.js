@@ -96,7 +96,6 @@ const KIND_LABEL = {
   lamp: 'Warning light',
   damage: 'Damage',
   check: 'Reported on a check',
-  nocheck: 'No safety check',
   tyre: 'Tyres',
   tyredue: 'Tread not measured',
   shop: 'At the workshop'
@@ -269,61 +268,75 @@ function titleOf(latest) {
 }
 
 /* ------------------------------------------------------------------ *
- * The other three sources                                             *
+ * The other sources                                                   *
  * ------------------------------------------------------------------ */
 
 /**
- * Vans that went out without a check.
+ * When each van was last checked at all.
  *
- * Matched on the PLATE, not the driver, which is the one place this file
- * parts company with the daily email. The email asks "did this person do
- * their check", because that is a question about a person; this page asks
- * "did anybody walk round this van before it was driven", because that is a
- * question about a van, and a van is what every other item here is about.
+ * This is the panel down the right-hand side, and it replaced what used to be
+ * a "driven without a safety check" ITEM per van (2026-09-23, on Tobias's
+ * instruction). The item was the wrong shape for the question: a van that
+ * missed a check on three days does not need three lines and a Done button,
+ * it needs one number that somebody can look at -- how long since anybody
+ * walked round this van. An item you tick off says "dealt with"; a date says
+ * what is true.
  *
- * Only days that are over. A van assigned this morning whose driver has not
- * scanned the QR code yet is not a fault, and a report that cries wolf at
- * 07:30 every day is a report nobody reads by Thursday. Today's outstanding
- * checks are returned separately (`todayOutstanding`) and shown as a line at
- * the top of the page rather than as items.
+ * Every van in the fleet is listed, including the ones checked this morning,
+ * because the panel is a fleet at a glance rather than a list of problems.
+ * A van never checked at all is not given a day count of zero -- it is said
+ * out loud, and sorts to the top with the worst of them.
  */
-function nocheckItems({ assignments, submissions, today, plates }) {
-  const checked = new Set(submissions.map(s => `${dayKey(s.submitted_at)}|${s.plate}`));
-  const byPlate = new Map();
+function lastCheckPanel({ vehicles, latest, assignments, today }) {
+  const out = [];
+  const outToday = new Set(
+    (assignments || [])
+      .filter(a => String(a.date).slice(0, 10) === today)
+      .map(a => a.plate));
 
-  for (const a of assignments) {
-    const day = String(a.date).slice(0, 10);
-    if (!(day < today)) continue;                    // today is not over yet
-    if (!plates.has(a.plate)) continue;              // a van that has left the fleet
-    if (checked.has(`${day}|${a.plate}`)) continue;
-    if (!byPlate.has(a.plate)) byPlate.set(a.plate, new Map());
-    // One missing DAY, however many routes that van was given that day.
-    const days = byPlate.get(a.plate);
-    if (!days.has(day)) days.set(day, []);
-    if (a.driver && !days.get(day).includes(a.driver)) days.get(day).push(a.driver);
-  }
-
-  const items = [];
-  for (const [plate, days] of byPlate) {
-    const list = [...days.entries()].sort((a, b) => a[0].localeCompare(b[0]));
-    const last = list[list.length - 1];
-    items.push({
-      key: keyOf('nocheck', plate),
-      kind: 'nocheck',
-      plate,
-      title: 'Driven without a safety check',
-      sightings: list.map(([day, drivers]) => ({
-        at: dayStart(day),
-        day,
-        driver: drivers.join(', '),
-        answer: `Out on ${day}${drivers.length ? ' with ' + drivers.join(', ') : ''}, no check filed`
-      })),
-      severity: list.length >= 3 ? 'high' : 'normal',
-      note: `${list.length} ${list.length === 1 ? 'day' : 'days'} out of the yard with nothing filed` +
-        `, most recently ${last[0]}`
+  for (const v of vehicles) {
+    const row = latest instanceof Map ? latest.get(v.plate) : (latest || {})[v.plate];
+    const day = row && row.submitted_at ? dayKey(row.submitted_at) : '';
+    const ageDays = day ? daysBetween(day, today) : null;
+    out.push({
+      plate: v.plate,
+      owner: v.owner || '',
+      fleet: v.fleet || '',
+      day,
+      driver: (row && row.driver_name) || '',
+      ageDays,
+      never: !day,
+      age: day ? ageText(ageDays) : 'never checked',
+      outToday: outToday.has(v.plate),
+      band: staleBand(ageDays, !day)
     });
   }
-  return items;
+
+  /* Worst first, like everything else on this page: the van nobody has
+     touched for a fortnight is the reason the panel exists, and a fleet
+     sorted by registration hides it in the middle. */
+  out.sort((a, b) =>
+    (b.never ? 1 : 0) - (a.never ? 1 : 0) ||
+    (b.ageDays || 0) - (a.ageDays || 0) ||
+    a.plate.localeCompare(b.plate));
+  return out;
+}
+
+/**
+ * How old a last check is allowed to get before it is worth looking at.
+ *
+ * Deliberately generous at the short end: vans do not go out every day, and
+ * a panel that turns amber every Monday morning because nothing ran at the
+ * weekend is a panel people stop reading. Four days covers a normal weekend
+ * plus a day; ten is long enough that the van has almost certainly been out
+ * unchecked.
+ */
+function staleBand(ageDays, never) {
+  if (never) return 'never';
+  if (ageDays === null || ageDays === undefined) return 'never';
+  if (ageDays >= 10) return 'old';
+  if (ageDays >= 4) return 'ageing';
+  return 'fresh';
 }
 
 /**
@@ -553,6 +566,7 @@ function buildAttention({
   wheelSets = [],
   clears = [],
   fallback = [],
+  latest = new Map(),
   cases = new Map(),
   lang = 'en'
 } = {}) {
@@ -582,7 +596,6 @@ function buildAttention({
     items.push(item);
   }
 
-  items.push(...nocheckItems({ assignments, submissions: mine, today: day, plates }));
   items.push(...shopItems({ incidents, today: day, plates }));
   items.push(...tyreItems({ wheelSets, vehicles, today: day }));
 
@@ -670,18 +683,11 @@ function buildAttention({
     b.counts.open - a.counts.open ||
     a.plate.localeCompare(b.plate));
 
-  /* Today's assignments that have not been checked yet. Not items -- see
-     nocheckItems -- but the one thing on this page that is about right now. */
-  const checkedToday = new Set(mine.filter(s => dayKey(s.submitted_at) === day).map(s => s.plate));
-  const todayOutstanding = [];
-  const seen = new Set();
-  for (const a of assignments) {
-    if (String(a.date).slice(0, 10) !== day) continue;
-    if (!plates.has(a.plate) || checkedToday.has(a.plate) || seen.has(a.plate)) continue;
-    seen.add(a.plate);
-    todayOutstanding.push({ plate: a.plate, driver: a.driver || '', route: a.route || '' });
-  }
-  todayOutstanding.sort((a, b) => a.plate.localeCompare(b.plate));
+  /* The panel down the right-hand side: every van and how long since
+     anybody walked round it. Built from the LATEST check of all time, not
+     from the window above -- "nobody has checked this van since June" is
+     exactly the answer a ninety-day window would hide. */
+  const lastChecks = lastCheckPanel({ vehicles, latest, assignments, today: day });
 
   return {
     today: day,
@@ -689,7 +695,7 @@ function buildAttention({
     items: open,
     done,
     vehicles: perVehicle,
-    todayOutstanding,
+    lastChecks,
     counts: {
       open: open.length,
       action: open.filter(i => i.severity !== 'info').length,
@@ -702,7 +708,9 @@ function buildAttention({
       vehicles: perVehicle.filter(v => v.counts.open).length,
       fleet: vehicles.length,
       done: done.length,
-      todayOutstanding: todayOutstanding.length
+      neverChecked: lastChecks.filter(l => l.never).length,
+      checkedToday: lastChecks.filter(l => l.ageDays === 0).length,
+      stale: lastChecks.filter(l => l.band === 'old' || l.band === 'never').length
     }
   };
 }
@@ -762,5 +770,6 @@ function flatten(report) {
 module.exports = {
   buildAttention, narrow, flatten,
   WINDOW_DAYS, DONE_DAYS, SEVERITY, SEVERITY_LABEL, KIND_LABEL, RANK,
-  keyOf, titleOf, staleSince, ageText, dayStart, formTraits, sightingsFromChecks
+  keyOf, titleOf, staleSince, ageText, dayStart, formTraits, sightingsFromChecks,
+  lastCheckPanel, staleBand
 };

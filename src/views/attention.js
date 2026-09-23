@@ -35,9 +35,6 @@ const ICON = {
   check: '<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">' +
     '<path d="M12 4l9 16H3z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/>' +
     '<path d="M12 10v4M12 17v.5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>',
-  nocheck: '<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">' +
-    '<rect x="4" y="3.5" width="16" height="17" rx="2" fill="none" stroke="currentColor" stroke-width="1.7"/>' +
-    '<path d="M9 10l6 6M15 10l-6 6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>',
   tyre: '<svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">' +
     '<circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="1.7"/>' +
     '<circle cx="12" cy="12" r="3.4" fill="none" stroke="currentColor" stroke-width="1.7"/></svg>',
@@ -77,7 +74,7 @@ function ret(filters) {
  */
 const LAST_WORD = {
   check: 'last reported', lamp: 'last reported', damage: 'last reported',
-  nocheck: 'last out', tyre: 'measured', tyredue: 'due since', shop: 'in since'
+  tyre: 'measured', tyredue: 'due since', shop: 'in since'
 };
 
 /** "Reported 3 times on 2 days by Simon B, Ali K", when that is the truth. */
@@ -86,37 +83,42 @@ function saidBy(item) {
     ? ' by ' + item.drivers.slice(0, 4).map(esc).join(', ') +
       (item.drivers.length > 4 ? ` and ${item.drivers.length - 4} more` : '')
     : '';
-  // Their own notes say it better: how many days a van went out unchecked,
-  // how long it has been in the shop, how long a reading has been overdue.
-  if (item.kind === 'nocheck' || item.kind === 'shop' || item.kind === 'tyredue') return '';
+  // Their own notes say it better: how long it has been in the shop, how
+  // long a reading has been overdue.
+  if (item.kind === 'shop' || item.kind === 'tyredue') return '';
   if (item.kind === 'tyre') return who ? `Gauged${who}` : '';
   if (item.reports <= 1) return `Reported once${who}`;
   const days = item.days === item.reports ? '' : ` on ${item.days} days`;
   return `Reported ${item.reports} times${days}${who}`;
 }
 
-/** The little form under an item. A name, because one login is not a person. */
+/**
+ * One button, one click.
+ *
+ * It asked for a typed name until 2026-09-23, on the reasoning that one
+ * shared admin login cannot say WHO pressed it. Tobias asked for the name to
+ * go, and he is right about the trade: a fault list that costs a sentence of
+ * typing per line is a fault list that stops being ticked off by Wednesday,
+ * and a stale list is worse than an unsigned one. The login the browser
+ * already sent is recorded instead -- free, honest about being an account
+ * rather than a person, and ready to become a real name the day per-person
+ * logins land.
+ *
+ * The hidden fields carry the item's identity and the sighting the page was
+ * SHOWING, so a check that arrives while this page is open is not signed off
+ * by a click that never saw it.
+ */
 function fixForm(item, filters) {
-  const id = 'fix-' + item.key.replace(/[^\w-]/g, '-');
-  return `<details class="att-fix no-print" id="${esc(id)}">
-    <summary>Mark as done</summary>
-    <form method="post" action="/admin/attention/clear" class="att-fix-body">
+  return `<form method="post" action="/admin/attention/clear" class="att-fix no-print">
       <input type="hidden" name="key" value="${esc(item.key)}">
       <input type="hidden" name="plate" value="${esc(item.plate)}">
       <input type="hidden" name="kind" value="${esc(item.kind)}">
       <input type="hidden" name="title" value="${esc(item.title)}">
       <input type="hidden" name="covers" value="${esc(item.lastSightingAt)}">
       <input type="hidden" name="ret" value="${esc(ret(filters))}">
-      <label><span>Your name</span>
-        <input class="form-control" name="who" required minlength="2" maxlength="120"
-               autocomplete="name" placeholder="Who dealt with it"></label>
-      <label class="att-grow"><span>What was done (optional)</span>
-        <input class="form-control" name="note" maxlength="500"
-               placeholder="New bulb fitted, booked in for Thursday…"></label>
-      <button class="btn btn-primary btn-sm" type="submit">Done</button>
-    </form>
-    <p class="att-fix-hint">It comes straight back if a driver reports it again.</p>
-  </details>`;
+      <button class="btn btn-primary btn-sm" type="submit"
+              title="It comes straight back if a driver reports it again">Mark as done</button>
+    </form>`;
 }
 
 /** The second meta line, left out entirely when it would say nothing. */
@@ -169,15 +171,15 @@ function itemRow(item, filters) {
 function doneRow(item, filters) {
   const c = item.clear || {};
   const when = String(c.cleared_at ? new Date(c.cleared_at).toISOString().slice(0, 10) : '');
+  const who = String(c.cleared_by || '').trim();
   return `<li class="att-done-row">
     <div>
       <strong>${esc(item.title)}</strong>
-      <div class="att-meta">Done by ${esc(c.cleared_by || '—')} on ${esc(when)}${
+      <div class="att-meta">Done ${esc(when)}${who ? ' by ' + esc(who) : ''}${
         c.note ? ' · ' + esc(c.note) : ''}</div>
     </div>
     <form method="post" action="/admin/attention/clear/${esc(c.id)}/withdraw" class="att-undo no-print">
       <input type="hidden" name="ret" value="${esc(ret(filters))}">
-      <input class="form-control" name="who" required minlength="2" maxlength="120" placeholder="Your name">
       <button class="btn btn-ghost btn-sm" type="submit">Reopen</button>
     </form>
   </li>`;
@@ -215,6 +217,46 @@ function vehicleCard(v, filters) {
   </div>`;
 }
 
+/**
+ * The panel down the right-hand side: every van, and how long since anybody
+ * walked round it.
+ *
+ * Asked for on 2026-09-23 in place of the "driven without a safety check"
+ * items that used to sit in the main list. It answers the same worry in a
+ * shape that suits it better -- a missed check is not a fault to tick off,
+ * it is a number that is either small or large -- and it covers the whole
+ * fleet rather than only the vans that happened to be assigned.
+ *
+ * Worst first, like everything else here. The date and the age are both
+ * printed: the date is what somebody quotes, the age is what they judge.
+ */
+function lastCheckPanel(report) {
+  const rows = report.lastChecks || [];
+  if (!rows.length) return '';
+
+  const line = r => `<li class="lc-row lc-${esc(r.band)}">
+      <a class="lc-plate mono" href="/admin?plate=${esc(r.plate)}"
+         title="Every check filed for ${esc(r.plate)}">${esc(r.plate)}</a>
+      <span class="lc-when">
+        <em>${r.never ? '—' : esc(r.day)}</em>
+        <b>${esc(r.age)}</b>
+      </span>
+      ${r.outToday ? '<span class="lc-out" title="Assigned to a route today">out today</span>' : ''}
+    </li>`;
+
+  const c = report.counts;
+  return `<aside class="att-side">
+    <div class="card att-last" id="last-checks">
+      <div class="card-header">Last safety check
+        <span class="step-tag">${esc(c.fleet)} vehicles · longest ago first</span></div>
+      <ul class="lc-list">${rows.map(line).join('')}</ul>
+      <p class="lc-foot">${esc(c.checkedToday)} checked today${
+        c.stale ? ` · <strong>${esc(c.stale)}</strong> not for ten days or more` : ''}${
+        c.neverChecked ? ` · ${esc(c.neverChecked)} never checked` : ''}.</p>
+    </div>
+  </aside>`;
+}
+
 function attentionPage({ report, filters = {}, message = '', nav = '' }) {
   const c = report.counts;
 
@@ -235,19 +277,6 @@ function attentionPage({ report, filters = {}, message = '', nav = '' }) {
   const clearLine = clear.length
     ? `<p class="att-clear">Nothing to report on ${clear.length} of ${esc(c.fleet)}:
         ${clear.map(v => `<span class="mono">${esc(v.plate)}</span>`).join(' ')}</p>`
-    : '';
-
-  /* The one thing on this page that is about right now rather than about
-     what is outstanding. Deliberately not items: a van assigned at seven
-     whose driver has not scanned yet is not a fault, and a report that cries
-     wolf every morning is a report nobody reads by Thursday. */
-  const today = report.todayOutstanding.length
-    ? `<div class="warn att-today no-print">
-         <strong>${esc(report.todayOutstanding.length)} of today's vans have not been checked yet</strong> —
-         ${report.todayOutstanding.map(t =>
-           `<span class="mono">${esc(t.plate)}</span>${t.driver ? ' (' + esc(t.driver) + ')' : ''}`).join(', ')}.
-         <span class="muted">Counted as a fault only once the day is over.</span>
-       </div>`
     : '';
 
   const tallies = [
@@ -272,11 +301,10 @@ ${nav}
 ${message ? `<div class="ok-msg no-print">${esc(message)}</div>` : ''}
 
   <p class="lede">Everything still outstanding on the vans, built from the safety checks the
-    drivers file, the days a van went out unchecked, the workshop and the tread readings.
-    An item stays here until somebody marks it done, and comes back if it is reported again.</p>
+    drivers file, the workshop and the tread readings. An item stays here until somebody
+    marks it done, and comes back if it is reported again.</p>
 
   <div class="att-tallies">${tallies}</div>
-  ${today}
 
   <form class="filters no-print" method="get" action="/admin/attention">
     <input type="hidden" name="show" value="${esc(filters.show || '')}">
@@ -294,9 +322,14 @@ ${message ? `<div class="ok-msg no-print">${esc(message)}</div>` : ''}
     c.done ? ` · ${esc(c.done)} dealt with in the last 30 days` : ''}.
     Reports are read ${esc(WINDOW_DAYS)} days back (from ${esc(report.window.from)}).</p>
 
+  <div class="att-cols">
+    <div class="att-col-main">
 ${cards}
 
-${clearLine}`;
+${clearLine}
+    </div>
+${lastCheckPanel(report)}
+  </div>`;
 
   return page({
     title: `What needs attention – ${report.today}`,

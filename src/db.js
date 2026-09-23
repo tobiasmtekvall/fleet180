@@ -2375,11 +2375,16 @@ async function listAttentionClears() {
  * `coversTo` comes off the page (the last sighting it was showing), never
  * from now(), and is clamped to now so a doctored form cannot sign off
  * reports that have not happened yet.
+ *
+ * `by` is whatever login the request carried, and may be empty: the page
+ * stopped asking for a typed name on 2026-09-23 (see fixForm) and an empty
+ * signature is not a reason to refuse the click. The column stays, because
+ * the day per-person logins land it fills itself.
  */
 async function clearAttentionItem({ itemKey, plate = '', kind = '', title = '',
-                                    coversTo, by, note = '' }) {
+                                    coversTo, by = '', note = '' }) {
   const who = String(by || '').trim();
-  if (!itemKey || who.length < 2) return null;
+  if (!itemKey) return null;
   const r = await pool.query(
     `INSERT INTO attention_clears (item_key, plate, kind, title, covers_to, cleared_by, note)
      VALUES ($1,$2,$3,$4, LEAST($5::timestamptz, now()), $6, $7)
@@ -2396,10 +2401,9 @@ async function clearAttentionItem({ itemKey, plate = '', kind = '', title = '',
  * particular clear, and an already-withdrawn row is left alone so two people
  * pressing Reopen do not rewrite who did it first.
  */
-async function withdrawAttentionClear(id, by) {
+async function withdrawAttentionClear(id, by = '') {
   if (!/^\d+$/.test(String(id))) return null;
   const who = String(by || '').trim();
-  if (who.length < 2) return null;
   const r = await pool.query(
     `UPDATE attention_clears
         SET withdrawn_at = now(), withdrawn_by = $2

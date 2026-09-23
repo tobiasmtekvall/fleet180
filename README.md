@@ -266,33 +266,40 @@ valda alternativet, så att höger halvljus och vänster bromsljus är två post
 som lagas var för sig. Det föraren skriver i kommentaren håller ihop posten,
 det delar inte upp den.
 
-**Ingenting stänger sig självt.** En post ligger kvar tills någon skriver sitt
-namn och trycker *Mark as done*. En senare kontroll som svarar "ja, fungerar"
-stänger den alltså **inte** – en förare som bockar av utan att gå runt bilen
-ska inte kunna radera ett verkligt fel. Signeringen täcker observationerna
-*till och med den sidan visade* (`covers_to`), inte "till nu", så en kontroll
-som kommer in medan sidan ligger uppe på ett skrivbord blir inte bortsignerad
-av ett klick som aldrig såg den – och en ny rapport öppnar posten igen av sig
-själv. Varje signering och varje återtagande sparas i `attention_clears`;
-inget uppdateras på plats och inget raderas.
+**Ingenting stänger sig självt.** En post ligger kvar tills någon trycker
+*Mark as done* – **ett klick, ingenting att skriva**. En senare kontroll som
+svarar "ja, fungerar" stänger den alltså **inte**: en förare som bockar av utan
+att gå runt bilen ska inte kunna radera ett verkligt fel. Signeringen täcker
+observationerna *till och med den sidan visade* (`covers_to`), inte "till nu",
+så en kontroll som kommer in medan sidan ligger uppe på ett skrivbord blir inte
+bortsignerad av ett klick som aldrig såg den – och en ny rapport öppnar posten
+igen av sig själv. Varje signering och varje återtagande sparas i
+`attention_clears`; inget uppdateras på plats och inget raderas. Knappen bad om
+ett namn fram till 2026-09-23; den inloggning webbläsaren ändå skickar skrivs i
+`cleared_by` i stället, och blir ett riktigt namn den dag personliga
+inloggningar finns.
 
-Fem källor, sorterade värst först:
+Fyra källor i listan, sorterade värst först:
 
 | Vad | Blir en post när | Stängs av |
 |---|---|---|
-| Flaggade svar | `alert_on` slår till på svaret | någon markerar den klar |
+| Flaggade svar | `alert_on` slår till på svaret | någon trycker Mark as done |
 | Varningslampa | frågan med `comment_source = 'lights'` flaggar | dito (röd direkt) |
 | Skada | frågan med rollen `damage` flaggar | dito – länkas till ärendet på Expenses om ett finns |
-| Ingen kontroll | bilen var tilldelad en dag som är slut och ingen kontroll kom in | dito (idag räknas aldrig – se nedan) |
-| Däck | mönsterdjup under 3 mm, 3–5 mm, eller en mätning äldre än 90 dagar | en ny mätning, eller någon som markerar den klar |
+| Däck | mönsterdjup under 3 mm, 3–5 mm, eller en mätning äldre än 90 dagar | en ny mätning, eller någon som trycker Mark as done |
 | På verkstad | ett ärende med `shop_in` men utan `shop_out` | att utdatumet fylls i på Expenses (ingen knapp här – två ställen att stänga samma sak är två ställen som är oense på fredag) |
 
-**Dagens bilar räknas aldrig som fel.** En bil som är tilldelad klockan sju och
-vars förare inte skannat ännu är inget fel klockan halv åtta; en rapport som
-ropar varg varje morgon är en rapport ingen läser på torsdagen. Dagens
-osignerade kontroller står som en rad högst upp i stället. Saknade kontroller
-matchas på **registreringsnumret**, inte på föraren – dagsmejlet frågar om
-personen gjorde sin kontroll, den här sidan frågar om någon gick runt bilen.
+**Uteblivna kontroller är inte poster.** De satt i listan fram till 2026-09-23
+och togs bort därifrån på begäran: en missad kontroll är inget att bocka av,
+den är ett tal som antingen är litet eller stort. I stället står **panelen till
+höger**: varje bil i flottan, datumet för dess senaste säkerhetskontroll och
+hur många dagar sedan det var. Längst-sedan först, bilar som aldrig kontrollerats
+överst, och den bil som har en rutt idag är märkt *out today*. Färgerna är
+medvetet tröga – grönt till och med tre dagar, gult till och med nio, rött
+därefter – för en panel som blir gul varje måndag för att ingenting kördes i
+helgen är en panel folk slutar läsa. Panelen läser den senaste kontrollen
+**genom alla tider** (`db.latestPerVehicle()`), inte 90-dagarsfönstret: en bil
+som ingen rört sedan juni är precis den rad ett fönster skulle lämna tom.
 
 Tre rapporter på tre olika dagar höjer posten till röd av sig själv: felet är
 inte värre, men det har stått olöst tre gånger, och det är vad sidan handlar om.

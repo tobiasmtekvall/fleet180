@@ -58,11 +58,27 @@ function submission(plate, day, answers, opts = {}) {
 
 const light = pick => ({ f8: { choice: 'nej', comment: '', pick } });
 
+/* `latest` is db.latestPerVehicle() in the app -- the newest check per van,
+   of all time. Derived here from whatever submissions the case supplies, so a
+   fixture never has to state the same fact twice. */
+function latestOf(submissions) {
+  const out = new Map();
+  for (const s of submissions) {
+    const seen = out.get(s.plate);
+    if (!seen || s.submitted_at > seen.submitted_at) {
+      out.set(s.plate, { submitted_at: s.submitted_at, driver_name: s.driver_name });
+    }
+  }
+  return out;
+}
+
 function build(over = {}) {
+  const submissions = over.submissions || [];
   return a.buildAttention({
     today: TODAY, vehicles: VEHICLES, fallback: FORM,
-    submissions: [], assignments: [], incidents: [], wheelSets: [], clears: [],
-    ...over
+    assignments: [], incidents: [], wheelSets: [], clears: [],
+    latest: latestOf(submissions),
+    ...over, submissions
   });
 }
 const find = (report, key) => report.items.concat(report.done).find(i => i.key === key);
@@ -260,67 +276,89 @@ check('the whole sign-off history is kept with the item', () => {
 });
 
 
-console.log('\n4. vans that went out without a check');
+console.log('\n4. the last-check panel down the right-hand side');
 
 const ASSIGNED = day => ([
   { date: day, plate: 'RJC29S', driver: 'Simon B', route: 'JK-EM-1', fleet: 'box' },
   { date: day, plate: 'BPM38R', driver: 'Ali K', route: 'JK-EM-2', fleet: 'box' }
 ]);
+const panelFor = (report, plate) => report.lastChecks.find(l => l.plate === plate);
 
-check('an assigned van with no check that day becomes an item', () => {
-  const r = build({ assignments: ASSIGNED('2026-09-17') });
-  const item = find(r, 'nocheck|RJC29S');
-  assert.ok(item, 'a van went out unchecked and nothing said so');
-  assert.strictEqual(item.severity, 'normal');
-  assert.ok(item.sightings[0].answer.includes('Simon B'), 'it does not say who had it');
+check('every van in the fleet is in the panel, checked or not', () => {
+  const r = build({ submissions: [submission('RJC29S', '2026-09-17', { f12: { choice: 'ja' } })] });
+  assert.strictEqual(r.lastChecks.length, 3, 'the panel is the fleet, not the vans with faults');
+  assert.deepStrictEqual(r.lastChecks.map(l => l.plate).sort(), ['BPM38R', 'RJC29S', 'TTJ00A']);
 });
 
-check('a van that WAS checked that day is not on the list', () => {
-  const r = build({
-    assignments: ASSIGNED('2026-09-17'),
-    submissions: [submission('RJC29S', '2026-09-17', { f12: { choice: 'ja' } })]
-  });
-  assert.ok(!find(r, 'nocheck|RJC29S'));
-  assert.ok(find(r, 'nocheck|BPM38R'), 'the other van still went out unchecked');
+check('each van carries the date of its last check and how long ago that was', () => {
+  const r = build({ submissions: [submission('RJC29S', '2026-09-15', { f12: { choice: 'ja' } })] });
+  const row = panelFor(r, 'RJC29S');
+  assert.strictEqual(row.day, '2026-09-15');
+  assert.strictEqual(row.ageDays, 3);
+  assert.strictEqual(row.age, '3 days');
+  assert.strictEqual(row.never, false);
 });
 
-check('today is never counted as a fault', () => {
-  /* A van assigned at seven whose driver has not scanned the code yet is not
-     a fault at half past seven, and a report that cries wolf every morning is
-     a report nobody reads by Thursday. */
+check('a van checked this morning reads as today, not as zero days', () => {
+  const r = build({ submissions: [submission('RJC29S', TODAY, { f12: { choice: 'ja' } })] });
+  assert.strictEqual(panelFor(r, 'RJC29S').age, 'today');
+  assert.strictEqual(r.counts.checkedToday, 1);
+});
+
+check('a van nobody has ever checked says so rather than showing a number', () => {
+  const r = build();
+  const row = panelFor(r, 'TTJ00A');
+  assert.strictEqual(row.never, true);
+  assert.strictEqual(row.day, '');
+  assert.strictEqual(row.age, 'never checked');
+  assert.strictEqual(row.ageDays, null, 'a van never checked is not nought days ago');
+  assert.strictEqual(r.counts.neverChecked, 3);
+});
+
+check('the panel is sorted longest-ago first, never-checked at the top', () => {
+  const r = build({ submissions: [
+    submission('RJC29S', '2026-09-17', { f12: { choice: 'ja' } }),
+    submission('BPM38R', '2026-09-02', { f12: { choice: 'ja' } })
+  ] });
+  assert.deepStrictEqual(r.lastChecks.map(l => l.plate), ['TTJ00A', 'BPM38R', 'RJC29S'],
+    'the van nobody has touched is the reason the panel exists');
+});
+
+check('the age is banded so that a normal weekend does not turn it amber', () => {
+  assert.strictEqual(a.staleBand(0), 'fresh');
+  assert.strictEqual(a.staleBand(3), 'fresh', 'Friday to Monday must stay quiet');
+  assert.strictEqual(a.staleBand(4), 'ageing');
+  assert.strictEqual(a.staleBand(9), 'ageing');
+  assert.strictEqual(a.staleBand(10), 'old');
+  assert.strictEqual(a.staleBand(null, true), 'never');
+});
+
+check('a van on a route today is marked, so a stale one stands out', () => {
   const r = build({ assignments: ASSIGNED(TODAY) });
-  assert.strictEqual(r.items.filter(i => i.kind === 'nocheck').length, 0);
-  assert.strictEqual(r.counts.todayOutstanding, 2, 'today belongs in its own line at the top');
-  assert.strictEqual(r.todayOutstanding[0].plate, 'BPM38R');
+  assert.strictEqual(panelFor(r, 'RJC29S').outToday, true);
+  assert.strictEqual(panelFor(r, 'TTJ00A').outToday, false);
 });
 
-check("today's line clears as the checks come in", () => {
-  const r = build({
-    assignments: ASSIGNED(TODAY),
-    submissions: [submission('RJC29S', TODAY, { f12: { choice: 'ja' } })]
+check('a missed check is NOT an item any more', () => {
+  /* It was one until 2026-09-23. A missed check is not a fault to tick off,
+     it is a number, and the number lives in the panel. */
+  const r = build({ assignments: [...ASSIGNED('2026-09-15'), ...ASSIGNED('2026-09-16')] });
+  assert.strictEqual(r.items.length, 0, 'skipped checks are back in the list: ' +
+    r.items.map(i => i.key).join(', '));
+});
+
+check('the panel reads the last check of ALL time, not just the window', () => {
+  /* A van last checked in June is exactly the row a ninety-day window would
+     hand back blank, which is why the panel is fed from latestPerVehicle(). */
+  const r = a.buildAttention({
+    today: TODAY, vehicles: VEHICLES, fallback: FORM, submissions: [],
+    latest: new Map([['RJC29S', { submitted_at: new Date('2026-02-03T07:30:00Z'), driver_name: 'Eva N' }]])
   });
-  assert.deepStrictEqual(r.todayOutstanding.map(t => t.plate), ['BPM38R']);
+  const row = panelFor(r, 'RJC29S');
+  assert.strictEqual(row.day, '2026-02-03');
+  assert.strictEqual(row.band, 'old');
+  assert.strictEqual(row.driver, 'Eva N');
 });
-
-check('three unchecked days is an act-now item, and says how many', () => {
-  const r = build({ assignments: [
-    ...ASSIGNED('2026-09-15'), ...ASSIGNED('2026-09-16'), ...ASSIGNED('2026-09-17')
-  ] });
-  const item = find(r, 'nocheck|RJC29S');
-  assert.strictEqual(item.severity, 'high');
-  assert.strictEqual(item.reports, 3);
-  assert.ok(item.note.includes('3 days'), item.note);
-  assert.strictEqual(item.firstDay, '2026-09-15');
-});
-
-check('two routes in one van on one day is one missing check, not two', () => {
-  const r = build({ assignments: [
-    { date: '2026-09-17', plate: 'RJC29S', driver: 'Simon B', route: 'JK-EM-1', fleet: 'box' },
-    { date: '2026-09-17', plate: 'RJC29S', driver: 'Simon B', route: 'JK-EM-9', fleet: 'box' }
-  ] });
-  assert.strictEqual(find(r, 'nocheck|RJC29S').reports, 1);
-});
-
 
 console.log('\n5. the workshop and the tyres');
 
@@ -487,10 +525,13 @@ console.log('\n7. the page itself');
 const render = (over = {}, filters = {}) =>
   attentionPage({ report: build(over), filters, message: '', nav: '<nav></nav>' });
 
-check('an item is drawn with a way to mark it done, and the fields to do it', () => {
+check('an item is marked done in one click, with nothing to type', () => {
   const html = render({ submissions: [submission('RJC29S', '2026-09-14', light('Halvljus – höger fram'))] });
   assert.ok(html.includes('action="/admin/attention/clear"'), 'no way to mark anything done');
-  assert.ok(html.includes('name="who" required'), 'a sign-off with no name is nobody\'s');
+  assert.ok(!html.includes('name="who"'), 'the sign-off is asking for a name again');
+  assert.ok(!html.includes('name="note"'), 'the sign-off is asking for a note again');
+  assert.ok(!html.includes('<details class="att-fix'), 'the button is hidden behind a fold again');
+  assert.ok(html.includes('>Mark as done</button>'), 'no button');
   assert.ok(html.includes('name="covers" value="2026-09-14T07:30:00.000Z"'),
     'the form must post the sighting it was showing, not rely on the server guessing');
   assert.ok(html.includes('id="v-RJC29S"'), 'no anchor to come back to');
@@ -522,17 +563,41 @@ check('an empty fleet reads as an answer, not as a broken page', () => {
   assert.ok(html.includes('Nothing to report on 3 of 3'));
 });
 
-check('a cleared item is still readable, with who and a way back', () => {
+check('a cleared item is still readable, and reopens in one click', () => {
   const html = render({ submissions: ONE, clears: [clear()] });
   assert.ok(html.includes('dealt with in the last 30 days'));
-  assert.ok(html.includes('Done by Tobias'));
+  assert.ok(html.includes('Done 2026-09-15'), 'when it was signed off is not shown');
+  assert.ok(html.includes('by Tobias'), 'the login that signed it off is not shown');
   assert.ok(html.includes('/admin/attention/clear/1/withdraw'), 'no way to take a sign-off back');
+  assert.ok(!/withdraw"[^]*?name="who"/.test(html), 'reopening is asking for a name');
 });
 
-check('today\'s outstanding checks are a line, not items', () => {
-  const html = render({ assignments: ASSIGNED(TODAY) });
-  assert.ok(html.includes("2 of today's vans have not been checked yet"));
-  assert.ok(html.includes('Counted as a fault only once the day is over'));
+check('a sign-off with no login recorded still reads properly', () => {
+  const html = render({ submissions: ONE, clears: [clear({ cleared_by: '' })] });
+  assert.ok(html.includes('Done 2026-09-15'));
+  assert.ok(!html.includes('Done 2026-09-15 by'), 'an empty signature left a dangling "by"');
+});
+
+check('the panel is drawn to the right, with a date and an age per van', () => {
+  const html = render({ submissions: [
+    submission('RJC29S', '2026-09-15', { f12: { choice: 'ja' } }),
+    submission('BPM38R', TODAY, { f12: { choice: 'ja' } })
+  ], assignments: ASSIGNED(TODAY) });
+  assert.ok(html.includes('<aside class="att-side">'), 'no panel');
+  assert.ok(html.includes('Last safety check'), 'the panel has no heading');
+  assert.ok(html.includes('class="att-cols"'), 'the panel is not beside the list');
+  assert.ok(html.includes('2026-09-15') && html.includes('3 days'), 'RJC29S has no date and age');
+  assert.ok(html.includes('never checked'), 'the van nobody has checked is not said out loud');
+  assert.ok(html.includes('out today'), 'a van on a route today is not marked');
+  // Worst first, inside the panel itself -- the plates also appear in the
+  // filter dropdown and the "nothing to report" line further up the page.
+  const panel = html.slice(html.indexOf('<aside class="att-side">'));
+  assert.ok(panel.indexOf('TTJ00A') < panel.indexOf('RJC29S'), 'the panel is not worst-first');
+});
+
+check('a missed check is nowhere in the list itself', () => {
+  const html = render({ assignments: [...ASSIGNED('2026-09-15'), ...ASSIGNED('2026-09-16')] });
+  assert.ok(!html.includes('Driven without a safety check'), 'skipped checks are back in the list');
 });
 
 check('the window it reads is stated on the page', () => {
