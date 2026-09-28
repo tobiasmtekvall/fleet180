@@ -19,30 +19,32 @@ const check = (what, fn) => {
 const q = url => new URL(url).searchParams;
 
 console.log('\n1. the Planday name');
-check('tag and company come off, company goes in brackets', () => {
+check('Courier/Company is the company alone: Flexio, Boxflow, or empty', () => {
   const cv = s => L.courierValue(L.parseCourier(s));
-  assert.strictEqual(cv('(EXT) Flexio Abdo Ghannoum'), 'Abdo Ghannoum (Flexio)');
-  assert.strictEqual(cv('(BOX) Boxflow Hussein Al-lami'), 'Hussein Al-lami (Boxflow)');
-  assert.strictEqual(cv('Sara Molin'), 'Sara Molin');
+  assert.strictEqual(cv('(EXT) Flexio Abdo Ghannoum'), 'Flexio');
+  assert.strictEqual(cv('(EXT) Boxflow Belal Abdalla'), 'Boxflow');
+  assert.strictEqual(cv('(BOX) Boxflow Hussein Al-lami'), 'Boxflow');
+  assert.strictEqual(cv('Sara Molin'), '', 'an internal driver gets no company and no name');
+  assert.strictEqual(L.parseCourier('(EXT) Flexio Abdo Ghannoum').name, 'Abdo Ghannoum');
 });
 check('only Flexio and Boxflow are companies; anything else stays in the name', () => {
   const p = L.parseCourier('(3PL) Kraft Guld Naveen Jacob');
   assert.strictEqual(p.company, '');
-  assert.strictEqual(L.courierValue(p), 'Kraft Guld Naveen Jacob');
+  assert.strictEqual(L.courierValue(p), '');
 });
-check('an unknown company is not cut off, nor a name that starts like one', () => {
+check('an unknown company is not a company, nor a name that starts like one', () => {
   const cv = s => L.courierValue(L.parseCourier(s));
-  assert.strictEqual(cv('(EXT) Newco Anna Berg'), 'Newco Anna Berg');
-  assert.strictEqual(cv('Boxflowen Test'), 'Boxflowen Test');
+  assert.strictEqual(cv('(EXT) Newco Anna Berg'), '');
+  assert.strictEqual(cv('Boxflowen Test'), '');
 });
 
 console.log('\n2. the link');
 check('the same link the extension builds, byte for byte', () => {
   assert.strictEqual(L.prefillUrl({ terminal: 'Jönköping', registration: 'HJA34R', route: 'JKP-EM-6-RR',
-    courier: 'Wille Zäther (Boxflow)' }),
+    courier: 'Boxflow' }),
     'https://docs.google.com/forms/d/e/1FAIpQLSfhF1u6mXWSNICHMrFr_uRg9xoQFySDkgheAtaaXwpaUhww7w/viewform' +
     '?usp=pp_url&entry.2145116271=J%C3%B6nk%C3%B6ping&entry.1069125218=HJA34R&entry.414178441=JKP-EM-6-RR' +
-    '&entry.1449088697=Wille+Z%C3%A4ther+%28Boxflow%29&entry.1672312795=Yes&entry.1186095297=Yes' +
+    '&entry.1449088697=Boxflow&entry.1672312795=Yes&entry.1186095297=Yes' +
     '&entry.1685393160=Yes&entry.1835434897=Yes&entry.848372024=Yes&entry.1897586744=Yes&entry.214106876=Yes');
 });
 check('seven Yes, the two tailgate questions included', () => {
@@ -65,8 +67,9 @@ check('sorted by route number, courier from the Planday name, roster name as fal
     { route: 'JKP-EM-6-RR', plate: 'HJA34R', driver: 'Wille Zäther', courier: '(EXT) Boxflow Wille Zäther' }
   ]);
   assert.deepStrictEqual(o.map(x => x.route), ['JKP-EM-6-RR', 'JKP-EM-10-RR']);
-  assert.strictEqual(o[0].courier, 'Wille Zäther (Boxflow)');
-  assert.strictEqual(o[1].courier, 'Abdo Ghannoum');
+  assert.strictEqual(o[0].courier, 'Boxflow');
+  assert.strictEqual(o[0].driver, 'Wille Zäther');
+  assert.strictEqual(o[1].courier, '', 'no Planday name: no company, and never the driver');
   assert.strictEqual(o[0].terminal, 'Jönköping');
 });
 check('the Company column: Flexio, Boxflow, or none', () => {
@@ -77,8 +80,12 @@ check('the Company column: Flexio, Boxflow, or none', () => {
       { route: 'JKP-EM-9-RR', plate: 'C', driver: 'Simon Bergman', courier: 'Simon Bergman' }] ) });
   const cells = [...html.matchAll(/<td>(<span class="(?:dl-co[^"]*|muted)">[^<]*<\/span>)<\/td>/g)].map(m => m[1].replace(/<[^>]+>/g, ''));
   assert.deepStrictEqual(cells.slice(0, 3), ['Flexio', 'Boxflow', '—']);
-  assert.ok(html.includes('entry.1449088697=Abdo+Ghannoum+%28Flexio%29'));
-  assert.ok(html.includes('entry.1449088697=Belal+Abdalla+%28Boxflow%29'));
+  assert.ok(html.includes('entry.1449088697=Flexio&amp;'));
+  assert.ok(html.includes('entry.1449088697=Boxflow&amp;'));
+  // Simon has no company: his link carries no Courier/Company at all.
+  const simon = html.match(/entry\.414178441=JKP-EM-9-RR[^"]*/)[0];
+  assert.ok(!simon.includes('entry.1449088697'), simon);
+  assert.ok(!/entry\.1449088697=[^&"]*(Abdo|Belal|Simon)/.test(html), 'a driver name reached the field');
 });
 check('a prefix nobody named gets no terminal', () => {
   assert.strictEqual(L.terminalFromRoute('MTP-EM-1-RR'), '');

@@ -79,10 +79,13 @@ function parseCourier(raw) {
   return { tag, company, name: s.trim() };
 }
 
-/** What goes in "Courier/Company name": "Abdo Ghannoum (Flexio)". */
+/**
+ * What goes in "Courier/Company name": the company alone -- "Flexio" or
+ * "Boxflow" -- and nothing for anyone else. His rule (2026-09-28): the field
+ * names the company, never the driver again.
+ */
 function courierValue(p) {
-  if (!p || !p.name) return '';
-  return p.company ? `${p.name} (${p.company})` : p.name;
+  return (p && p.company) || '';
 }
 
 function terminalFromRoute(route) {

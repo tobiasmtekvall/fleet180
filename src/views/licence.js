@@ -2,7 +2,8 @@
 /**
  * License control (Box) -- one admin tab. Pick a route from the newest day's
  * box assignment and open the "Arrival Inspection Box" Google form with the
- * terminal, plate, route, courier and the seven inspection answers filled in.
+ * terminal, plate, route, company (Flexio / Boxflow) and the seven inspection
+ * answers filled in.
  *
  * Works without JavaScript: the table under the picker has a ready link per
  * route. The script only keeps the big button in step with the picker and
@@ -23,7 +24,7 @@ const json = v => JSON.stringify(v).replace(/</g, '\\u003c')
   .replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
 
 function optionLabel(o) {
-  return `${o.route || '(no route)'} — ${o.plate} — ${o.courier || o.driver}`;
+  return `${o.route || '(no route)'} — ${o.plate} — ${o.driver}${o.company ? ' · ' + o.company : ''}`;
 }
 
 function licencePage({ days, date, options, message, nav, newest, today }) {
@@ -71,7 +72,7 @@ function licencePage({ days, date, options, message, nav, newest, today }) {
                value="${esc(firstValues.route)}">
         <label for="dl-courier">Courier/Company name</label>
         <input class="form-control" id="dl-courier" type="text" maxlength="200" autocomplete="off"
-               value="${esc(firstValues.courier)}">
+               value="${esc(firstValues.courier)}" placeholder="Flexio or Boxflow – empty for anyone else">
       </div>
       <p class="dl-hint muted" id="dl-hint"></p>
       <p><a class="btn btn-primary" id="dl-go" target="_blank" rel="noopener"
@@ -96,12 +97,12 @@ function licencePage({ days, date, options, message, nav, newest, today }) {
     <div class="card-header">Every route on ${esc(date)}
       <span class="step-tag">${esc(options.length)} with a van</span></div>
     <div class="dl-scroll"><table class="table dl-table">
-      <thead><tr><th>Route</th><th>Registration</th><th>Company</th><th>Courier/Company</th><th>Terminal</th><th></th></tr></thead>
+      <thead><tr><th>Route</th><th>Registration</th><th>Driver</th><th>Company</th><th>Terminal</th><th></th></tr></thead>
       <tbody>${options.map(o => `<tr>
         <td class="mono">${esc(o.route || '—')}</td>
         <td class="mono" style="font-weight:700">${esc(o.plate)}</td>
+        <td>${esc(o.driver)}</td>
         <td>${o.company ? `<span class="dl-co dl-co-${esc(o.company.toLowerCase())}">${esc(o.company)}</span>` : '<span class="muted">—</span>'}</td>
-        <td>${esc(o.courier || o.driver)}</td>
         <td>${o.terminal ? esc(o.terminal) : '<span class="muted">—</span>'}</td>
         <td><a class="btn btn-secondary btn-sm" target="_blank" rel="noopener" href="${esc(licence.prefillUrl({
           terminal: o.terminal, registration: o.plate, route: o.route, courier: o.courier }))}">Open form</a></td>
@@ -119,8 +120,9 @@ ${nav}
 ${message ? `<div class="ok-msg no-print">${esc(message)}</div>` : ''}
   <p class="lede">Pick a route and press <strong>Open prefilled form</strong>. The routes, vans and drivers
     are the box assignment Route Suite sent for the day – the newest day opens first. Terminal comes from
-    the route (JKP → Jönköping), the courier is the name Planday has on the route with its staffing
-    company, and every field can be changed before the form is opened.</p>
+    the route (JKP → Jönköping), and Courier/Company is the staffing company Planday tags the driver
+    with – <strong>Flexio</strong> or <strong>Boxflow</strong>, and left empty for anyone else. Every field
+    can be changed before the form is opened.</p>
 ${dayMenu}
 ${picker}
 ${table}`;
@@ -158,7 +160,7 @@ ${table}`;
     term.value = o.terminal || '';
     reg.value = o.plate || '';
     route.value = o.route || '';
-    cour.value = o.courier || o.driver || '';
+    cour.value = o.courier || '';   // the company only -- never the driver's name
     refresh();
   });
   [term, reg, route, cour].forEach(function (el) {
