@@ -21,6 +21,9 @@ const TABS = [
   { href: '/admin/vehicles', text: 'Vehicles', key: 'vehicles' },
   { href: '/admin/forms', text: 'Forms', key: 'forms' },
   { href: '/admin/drivers', text: 'Drivers', key: 'drivers' },
+  // The Box driver license control, pre-filled from the assignment (2026-09-28).
+  { href: '/admin/license', text: 'License control', key: 'license',
+    title: 'Open the Arrival Inspection Box form pre-filled for a route' },
   { href: '/admin/incidents', text: 'Incidents', key: 'incidents' },
   // The ledger, the SM check and the CSV, split off Incidents 2026-09-15.
   { href: '/admin/expenses', text: 'Expenses', key: 'expenses' },

@@ -405,6 +405,12 @@ CREATE INDEX IF NOT EXISTS assignments_driver_idx ON assignments (driver);
 -- The form asks "who has this van today" on every scan, and "who had it the
 -- last seven days" beside it. Both read by plate.
 CREATE INDEX IF NOT EXISTS assignments_plate_date_idx ON assignments (plate, date DESC);
+-- The name exactly as Planday writes it -- "(EXT) Flexio Abdo Ghannoum" --
+-- pushed beside the roster name since 2026-09-28. The roster name is what a
+-- check is signed with; this one carries the staffing company, which is what
+-- the Box licence control's Courier/Company field asks for. Rows pushed
+-- before then have it empty and the page falls back to the roster name.
+ALTER TABLE assignments ADD COLUMN IF NOT EXISTS courier TEXT NOT NULL DEFAULT '';
 
 CREATE TABLE IF NOT EXISTS photos (
   id             BIGSERIAL PRIMARY KEY,
@@ -2032,11 +2038,11 @@ async function replaceAssignments(rows) {
     let n = 0;
     for (const r of rows) {
       const res = await client.query(
-        `INSERT INTO assignments (date, plate, driver, route, type, fleet, source_at)
-         VALUES ($1,$2,$3,$4,$5,$6,$7)
+        `INSERT INTO assignments (date, plate, driver, route, type, fleet, source_at, courier)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
          ON CONFLICT (date, plate, driver, fleet) DO NOTHING`,
         [r.date, r.plate, r.driver, r.route || '', r.type || '', r.fleet || 'box',
-         r.sourceAt || null]);
+         r.sourceAt || null, r.courier || '']);
       n += res.rowCount;
     }
     await client.query('COMMIT');
@@ -2108,6 +2114,29 @@ async function plateHistory(plate, from, to) {
         ORDER BY submitted_at DESC`, [plate, from, to])
   ]);
   return { assignments: asg.rows, checks: subs.rows };
+}
+
+/**
+ * The days one fleet has assignments for, newest first, with how many rows
+ * each -- the Licence control tab's day menu. Newest first because the newest
+ * pushed day is the one the page opens on.
+ */
+async function assignmentDays(fleet, limit = 14) {
+  const r = await pool.query(
+    `SELECT to_char(date, 'YYYY-MM-DD') AS date, COUNT(*)::int AS n,
+            MAX(COALESCE(source_at, created_at)) AS pushed_at
+       FROM assignments WHERE fleet = $1
+      GROUP BY date ORDER BY date DESC LIMIT $2`, [fleet, limit]);
+  return r.rows;
+}
+
+/** One fleet's assignments for one day, with the Planday name. */
+async function assignmentsForDay(date, fleet) {
+  const r = await pool.query(
+    `SELECT to_char(date, 'YYYY-MM-DD') AS date, plate, driver, route, type, fleet, courier
+       FROM assignments WHERE date = $1::date AND fleet = $2
+      ORDER BY route, plate`, [date, fleet]);
+  return r.rows;
 }
 
 async function assignmentRange() {
@@ -2420,7 +2449,7 @@ module.exports = {
   updateForm, deleteForm, addField, getField, updateField, deleteField, moveField,
   saveSubmission, listSubmissions, getSubmission, getPhoto, latestPerVehicle,
   listDrivers, replaceDrivers, claimJob, jobState, submissionsBetween, photoIdsFor,
-  replaceAssignments, assignmentsBetween, assignmentRange,
+  replaceAssignments, assignmentsBetween, assignmentRange, assignmentDays, assignmentsForDay,
   assignmentsForPlate, plateHistory, lastOdometer, deleteSubmission, routeChoices,
   getSetting, setSetting, getStatsEpoch, setStatsEpoch, countsBefore,
   listIncidents, getIncident, createIncident, updateIncident, deleteIncident, incidentCounts, expenseSections,

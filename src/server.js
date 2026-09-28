@@ -32,6 +32,8 @@ const exif = require('./exif');
 const expenses = require('./expenses');
 const wheels = require('./wheels');
 const { wheelsPage } = require('./views/wheels');
+const { licencePage } = require('./views/licence');
+const licenceLib = require('./licence');
 const statsLib = require('./stats');
 const { buildDriverStats } = statsLib;
 const { badgeText } = require('./badges');
@@ -716,6 +718,9 @@ app.post('/api/assignments', apiAuth, async (req, res, next) => {
         date, plate, driver,
         route: String(a.route || '').slice(0, 60),
         type: String(a.type || '').slice(0, 40),
+        // The Planday name with its staffing-company tag (2026-09-28). Optional:
+        // an extension or script from before that date sends none.
+        courier: String(a.courier || '').trim().slice(0, 200),
         fleet: a.fleet === 'home' ? 'home' : 'box',
         sourceAt: a.sourceAt || null
       });
@@ -2135,6 +2140,23 @@ app.get('/admin/wheels', async (req, res, next) => {
       vehicles, sets, tally, filters,
       today: summaryLib.dayKey(),
       message: flashOf(req), nav: adminNav('wheels')
+    }));
+  } catch (err) { next(err); }
+});
+
+/* License control (Box), 2026-09-28: the Arrival Inspection Box Google form,
+   pre-filled from one day's box assignment. Opens on the newest day Fleet 180
+   has; ?date= picks another from the menu. Read-only -- nothing is posted. */
+app.get('/admin/license', async (req, res, next) => {
+  try {
+    const days = await db.assignmentDays('box', 14);
+    const newest = days.length ? days[0].date : '';
+    const asked = String(req.query.date || '');
+    const date = days.some(d => d.date === asked) ? asked : newest;
+    const options = date ? licenceLib.optionsFor(await db.assignmentsForDay(date, 'box')) : [];
+    res.send(licencePage({
+      days, date, newest, options, today: summaryLib.dayKey(),
+      message: flashOf(req), nav: adminNav('license')
     }));
   } catch (err) { next(err); }
 });

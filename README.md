@@ -15,6 +15,7 @@ skriva om en fråga.
 | &nbsp;&nbsp;· Fordon | `/admin/vehicles` – lägg till, ändra, avställ |
 | &nbsp;&nbsp;· Formulär | `/admin/forms` – frågor, ordning, kopior |
 | &nbsp;&nbsp;· Förare | `/admin/drivers` – listan som synkas från Route Suite |
+| &nbsp;&nbsp;· License control | `/admin/license` – öppnar Arrival Inspection Box-formuläret förifyllt för en rutt ur senaste dagens box-tilldelning |
 | &nbsp;&nbsp;· Dagsmejl | `/admin/daily-summary` – förhandsgranska och skicka |
 | API | `/api/drivers`, `/api/checks`, `/api/photo/:id` (nyckel krävs) |
 | Hälsokontroll | `/health` |

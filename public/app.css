@@ -1088,3 +1088,19 @@ body.wide .wrap{max-width:1720px}
   .att-cols{display:block}
   .att-side{position:static}
 }
+
+/* License control (Box) -- /admin/license, 2026-09-28 */
+.dl-grid{display:grid;grid-template-columns:190px minmax(0,1fr);gap:10px 14px;align-items:center;max-width:720px}
+.dl-grid label{margin:0;font-size:13px;color:var(--muted)}
+.dl-grid .form-control{border-color:var(--border);width:100%}
+.dl-day{margin-top:14px}
+.dl-table td.mono{white-space:nowrap}
+.dl-hint{min-height:1.2em;margin:10px 0 4px;font-size:13px}
+.dl-warn{color:#8a5a00;font-size:13px}
+.dl-small{font-size:12.5px}
+.dl-scroll{overflow-x:auto}
+.dl-table td{vertical-align:middle}
+@media (max-width:640px){
+  .dl-grid{grid-template-columns:1fr;gap:4px}
+  .dl-grid label{margin-top:8px}
+}

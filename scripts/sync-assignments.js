@@ -125,6 +125,8 @@ function buildAssignments(store, from) {
         date, plate, driver,
         route: String((r.row && r.row.route) || ''),
         type: String((r.parsed && r.parsed.type) || ''),
+        // The Planday name with its company tag, for License control (Box).
+        courier: String((r.parsed && r.parsed.raw) || '').trim(),
         fleet: run.fleet,
         sourceAt: run.runAt
       });
