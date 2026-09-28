@@ -1104,3 +1104,6 @@ body.wide .wrap{max-width:1720px}
   .dl-grid{grid-template-columns:1fr;gap:4px}
   .dl-grid label{margin-top:8px}
 }
+.dl-co{display:inline-block;padding:1px 8px;border-radius:9px;font-size:12px;font-weight:700}
+.dl-co-flexio{background:#e7f0fb;color:#1b5fa8}
+.dl-co-boxflow{background:#eaf5ec;color:#256b38}

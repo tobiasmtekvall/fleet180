@@ -46,9 +46,11 @@ const TERMINALS = ['Jönköping', 'Mantorp', 'Karlstad', 'Växjö', 'Kalmar'];
 // blank rather than guessed.
 const TERMINAL_BY_PREFIX = { JKP: 'Jönköping' };
 
-// Staffing companies as Planday writes them after the tag. Longest first so a
-// two-word company is not cut to its first word.
-const COMPANIES = ['Fleetforce Bemanning', 'Kraft Guld', 'Boxflow', 'Flexio', 'Kharels'];
+// The two staffing companies the Courier/Company field names, as Planday writes
+// them after the tag: "(EXT) Flexio Abdo Ghannoum", "(BOX) Boxflow ...". Any
+// other company is deliberately not recognised (his rule, 2026-09-28: "these
+// two or none") -- its name stays in front of the person's.
+const COMPANIES = ['Boxflow', 'Flexio'];
 
 function norm(s) {
   return String(s == null ? '' : s).toLowerCase()

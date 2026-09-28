@@ -22,9 +22,13 @@ console.log('\n1. the Planday name');
 check('tag and company come off, company goes in brackets', () => {
   const cv = s => L.courierValue(L.parseCourier(s));
   assert.strictEqual(cv('(EXT) Flexio Abdo Ghannoum'), 'Abdo Ghannoum (Flexio)');
-  assert.strictEqual(cv('(3PL) Kraft Guld Naveen Jacob'), 'Naveen Jacob (Kraft Guld)');
-  assert.strictEqual(cv('[3PL] Fleetforce Bemanning Ali Hassan'), 'Ali Hassan (Fleetforce Bemanning)');
+  assert.strictEqual(cv('(BOX) Boxflow Hussein Al-lami'), 'Hussein Al-lami (Boxflow)');
   assert.strictEqual(cv('Sara Molin'), 'Sara Molin');
+});
+check('only Flexio and Boxflow are companies; anything else stays in the name', () => {
+  const p = L.parseCourier('(3PL) Kraft Guld Naveen Jacob');
+  assert.strictEqual(p.company, '');
+  assert.strictEqual(L.courierValue(p), 'Kraft Guld Naveen Jacob');
 });
 check('an unknown company is not cut off, nor a name that starts like one', () => {
   const cv = s => L.courierValue(L.parseCourier(s));
@@ -64,6 +68,17 @@ check('sorted by route number, courier from the Planday name, roster name as fal
   assert.strictEqual(o[0].courier, 'Wille Zäther (Boxflow)');
   assert.strictEqual(o[1].courier, 'Abdo Ghannoum');
   assert.strictEqual(o[0].terminal, 'Jönköping');
+});
+check('the Company column: Flexio, Boxflow, or none', () => {
+  const html = licencePage({ days: [{ date: '2026-09-28', n: 3 }], date: '2026-09-28', newest: '2026-09-28', today: '2026-09-28', nav: '',
+    options: L.optionsFor([
+      { route: 'JKP-EM-1-RR', plate: 'A', driver: 'Abdo Ghannoum', courier: '(EXT) Flexio Abdo Ghannoum' },
+      { route: 'JKP-EM-5-RR', plate: 'B', driver: 'Belal Abdalla', courier: '(EXT) Boxflow Belal Abdalla' },
+      { route: 'JKP-EM-9-RR', plate: 'C', driver: 'Simon Bergman', courier: 'Simon Bergman' }] ) });
+  const cells = [...html.matchAll(/<td>(<span class="(?:dl-co[^"]*|muted)">[^<]*<\/span>)<\/td>/g)].map(m => m[1].replace(/<[^>]+>/g, ''));
+  assert.deepStrictEqual(cells.slice(0, 3), ['Flexio', 'Boxflow', '—']);
+  assert.ok(html.includes('entry.1449088697=Abdo+Ghannoum+%28Flexio%29'));
+  assert.ok(html.includes('entry.1449088697=Belal+Abdalla+%28Boxflow%29'));
 });
 check('a prefix nobody named gets no terminal', () => {
   assert.strictEqual(L.terminalFromRoute('MTP-EM-1-RR'), '');

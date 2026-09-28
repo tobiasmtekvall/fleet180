@@ -96,10 +96,11 @@ function licencePage({ days, date, options, message, nav, newest, today }) {
     <div class="card-header">Every route on ${esc(date)}
       <span class="step-tag">${esc(options.length)} with a van</span></div>
     <div class="dl-scroll"><table class="table dl-table">
-      <thead><tr><th>Route</th><th>Registration</th><th>Courier/Company</th><th>Terminal</th><th></th></tr></thead>
+      <thead><tr><th>Route</th><th>Registration</th><th>Company</th><th>Courier/Company</th><th>Terminal</th><th></th></tr></thead>
       <tbody>${options.map(o => `<tr>
         <td class="mono">${esc(o.route || '—')}</td>
         <td class="mono" style="font-weight:700">${esc(o.plate)}</td>
+        <td>${o.company ? `<span class="dl-co dl-co-${esc(o.company.toLowerCase())}">${esc(o.company)}</span>` : '<span class="muted">—</span>'}</td>
         <td>${esc(o.courier || o.driver)}</td>
         <td>${o.terminal ? esc(o.terminal) : '<span class="muted">—</span>'}</td>
         <td><a class="btn btn-secondary btn-sm" target="_blank" rel="noopener" href="${esc(licence.prefillUrl({
