@@ -20,22 +20,37 @@ const SPENT = [
   ['partsCost', i => i.scope === 'vehicle' && i.category === 'parts'],
   ['toolCost', i => i.scope === 'tool'],
   ['miscCost', i => i.scope === 'misc'],
-  ['rentalCost', i => i.scope === 'rental']
+  ['rentalCost', i => i.scope === 'rental'],
+  /* An Estimate/Invoice line counts here only once it has been invoiced --
+     `hasCost` below is what decides, and a line with only a quote on it never
+     reaches this list. */
+  ['invoicedCost', i => i.scope === 'estimate']
 ];
 
+/** Is there a real amount on this line? A quote is not one. */
+function hasCost(i) {
+  return i.cost_sek !== null && i.cost_sek !== undefined;
+}
+
+/** A line still asking rather than billing: quoted, not invoiced. */
+function quoteOnly(i) {
+  return i.scope === 'estimate' && !hasCost(i);
+}
+
 function totalsOf(incidents, today) {
-  const spent = incidents.filter(i => i.scope !== 'estimate' && i.cost_sek !== null &&
-    i.cost_sek !== undefined);
+  const spent = incidents.filter(hasCost);
   const sum = list => list.reduce((n, i) => n + Number(i.cost_sek), 0);
-  const estimates = incidents.filter(i => i.scope === 'estimate');
 
   const totals = {
     withCost: spent.length,
     cost: sum(spent),
-    /* Quoted money is kept apart from all of the above and from the total. */
-    quoted: estimates.reduce((n, i) => n + (Number(i.quoted_sek) || 0), 0),
-    toAccept: estimates.filter(i => !i.sm_ok).length,
-    waiting: incidents.filter(i => i.scope !== 'estimate' && !i.sm_ok).length,
+    /* What is only asked for is kept apart from all of the above and from the
+       total. Once the bill arrives and the invoiced amount is filled in, the
+       line is money spent like any other and its quote stops being counted
+       here -- otherwise one repair would show up twice on this page. */
+    quoted: incidents.filter(quoteOnly).reduce((n, i) => n + (Number(i.quoted_sek) || 0), 0),
+    toAccept: incidents.filter(i => quoteOnly(i) && !i.sm_ok).length,
+    waiting: incidents.filter(i => !quoteOnly(i) && !i.sm_ok).length,
     atShop: incidents.filter(i => i.scope === 'vehicle' && i.category !== 'parts' &&
       i.shop_in && !i.shop_out).length,
     /* Hire cars still out: no return date at all, or one still in the future
@@ -49,4 +64,4 @@ function totalsOf(incidents, today) {
   return totals;
 }
 
-module.exports = { totalsOf, SPENT };
+module.exports = { totalsOf, SPENT, hasCost, quoteOnly };

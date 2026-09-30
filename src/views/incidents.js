@@ -79,13 +79,13 @@ const ESTIMATE_SHOP_LABEL = {
 // The five sections of Expenses. Only Vehicles has workshop dates; Vehicles,
 // Rental cars and Estimates have a registration, and a rental's is not ours.
 const SCOPE_LABEL = { vehicle: 'Vehicles', tool: 'Tools', misc: 'Misc', rental: 'Rental cars',
-  estimate: 'Estimat (Reparation)' };
+  estimate: 'Estimate/Invoice' };
 const SCOPES = Object.keys(SCOPE_LABEL);
 const DESC_HINT = {
   damage: 'What happened?', parts: 'Which part?',
   tool: 'Which tool? e.g. torque wrench, repaired', misc: 'What was it for?',
   rental: 'Which car, and why it was hired',
-  estimate: 'What the estimate is for'
+  estimate: 'What the estimate or invoice is for'
 };
 
 /* What a line IS, in one word: the section and the vehicle category folded
@@ -95,7 +95,7 @@ const DESC_HINT = {
    hire or a part, and those are three different conversations. */
 const KIND_LABEL = {
   damage: 'Damage', parts: 'Spare parts', tool: 'Tool', misc: 'Misc', rental: 'Rental car',
-  estimate: 'Estimat'
+  estimate: 'Estimate/Invoice'
 };
 /**
  * Which kind a line is. The one rule -- the server imports this rather than
@@ -233,14 +233,20 @@ function smCell(inc) {
      the history over the cell says that too. A tooltip reading "reset (the
      cost changed)" on a row whose own heading says Quoted is the kind of
      small lie that makes somebody distrust the rest of the page. */
-  const estimate = inc.scope === 'estimate';
+  // A quote is accepted; a bill is approved. The same line does both, one
+  // after the other, so the word follows the figure the line is showing.
+  const estimate = inc.scope === 'estimate' &&
+    (inc.cost_sek === null || inc.cost_sek === undefined);
   const WORD = estimate
     ? { ok: 'accepted', withdrawn: 'acceptance withdrawn',
         'cleared-by-quote-change': 'cleared (the quote changed)',
         'cleared-by-workshop-change': 'cleared (the workshop changed)',
         'cleared-by-cost-change': 'cleared (the quote changed)' }
     : { ok: 'OK', withdrawn: 'withdrawn',
-        'cleared-by-cost-change': 'reset (the cost changed)' };
+        'cleared-by-cost-change': 'reset (the cost changed)',
+        'cleared-by-quote-change': 'cleared (the quote changed)',
+        'cleared-by-workshop-change': 'cleared (the workshop changed)',
+        'cleared-by-invoice': 'cleared (the invoice arrived – approve the bill)' };
   const history = inc.events && inc.events.length
     ? inc.events.map(e => {
         const what = WORD[e.action] || (estimate ? 'cleared' : 'reset');
@@ -452,15 +458,19 @@ function rentalRow(inc, plates, today, ret) {
 }
 
 /**
- * One repair estimate.
+ * One repair, from the quote to the bill.
  *
- * A quote for work nobody has done yet, so it has no cost: the figure on it
- * is what the workshop is ASKING, and it lives in its own column and its own
- * database column so that nothing summing costs can mistake it for money
- * spent. The date is the day the estimate came in, and the tick at the end
- * means we are going ahead with it.
+ * Two money columns, because they are two different facts about the same
+ * work. **Quoted** is what the workshop is ASKING for work nobody has done:
+ * its own column, its own database column, and counted in no total, or every
+ * page in this app would say a van cost twice what it did. **Invoiced** is
+ * what was actually charged, and the moment it is filled in this line joins
+ * the money spent and the tick at the end stops meaning "go ahead" and starts
+ * meaning "this bill is approved". The quote stays either way -- the only
+ * reason to keep both on one line is to see them against each other.
  */
 function estimateRow(inc, plates, ret) {
+  const invoiced = inc.cost_sek !== null && inc.cost_sek !== undefined;
   return `<div class="inc-line${inc.sm_ok ? ' inc-done' : ''}">
       <form class="inc-form" method="post" enctype="multipart/form-data"
             action="/admin/incidents/${esc(inc.id)}">
@@ -474,10 +484,13 @@ function estimateRow(inc, plates, ret) {
         <input class="form-control inc-desc" type="text" name="description" maxlength="600" required
                value="${esc(inc.description)}" placeholder="${DESC_HINT.estimate}" title="${esc(inc.description)}">
         <input class="form-control inc-inv" type="text" name="invoiceNo" maxlength="80"
-               value="${esc(inc.invoice_no)}" placeholder="Estimate no." title="${esc(inc.invoice_no)}">
-        <input class="form-control inc-cost" type="number" name="quoted" step="0.01" min="0"
-               value="${esc(numValue(inc.quoted_sek))}" placeholder="kr"
-               title="What the workshop is asking, in SEK. A quote, not a cost -- it is not counted as money spent.">
+               value="${esc(inc.invoice_no)}" placeholder="Est./inv. no." title="${esc(inc.invoice_no)}">
+        <input class="form-control inc-cost inc-quoted" type="number" name="quoted" step="0.01" min="0"
+               value="${esc(numValue(inc.quoted_sek))}" placeholder="quoted"
+               title="What the workshop is asking, in SEK. A quote, not a cost – it is counted in no total.">
+        <input class="form-control inc-cost${invoiced ? ' inc-billed' : ''}" type="number" name="cost" step="0.01" min="0"
+               value="${esc(numValue(inc.cost_sek))}" placeholder="invoiced"
+               title="What was actually charged, in SEK. Filling this in makes the line money spent, and the SM check becomes an approval of this amount.">
         ${filesCell(inc, 'estimate')}
         <span class="inc-sm">${smCell(inc)}</span>
         ${actionsCell(inc)}
@@ -566,14 +579,20 @@ function ledgerRow(inc, today, ret, editHref) {
     : estimate ? (ESTIMATE_SHOP_LABEL[inc.estimate_shop] || '')
     : inc.supplier || (inc.scope === 'vehicle' ? (HANDLER_LABEL[inc.handled_by] || '') : '');
   const extra = rental && inc.for_plate ? ` (for ${inc.for_plate})` : '';
-  /* An estimate's figure goes in the Cost column because that is where money
-     is read, but it is set apart and says so: it is what somebody is asking
-     for work not done, and it is in none of the totals under this list. */
-  const money = estimate
+  /* An Estimate/Invoice line shows whichever figure it has reached. Only a
+     quote: set apart, italic, and it says it is in none of the totals. Once
+     it is invoiced the bill is the figure -- read like any other cost, with
+     the quote kept beside it in smaller type, because "4 350 where 3 900 was
+     quoted" is the whole reason both are on one line. */
+  const quoteOnly = estimate && (inc.cost_sek === null || inc.cost_sek === undefined);
+  const money = quoteOnly
     ? (inc.quoted_sek === null || inc.quoted_sek === undefined
       ? '<span class="muted">not quoted</span>'
       : `<em class="inc-quote" title="Quoted, not spent – this is not in any total below">${esc(kr(inc.quoted_sek))}</em>`)
-    : esc(kr(inc.cost_sek) || '—');
+    : estimate
+      ? `${esc(kr(inc.cost_sek) || '—')}${inc.quoted_sek === null || inc.quoted_sek === undefined ? ''
+        : `<em class="inc-was-quoted" title="Quoted at ${esc(kr(inc.quoted_sek))} before the bill came">(${esc(kr(inc.quoted_sek))})</em>`}`
+      : esc(kr(inc.cost_sek) || '—');
   return `<div class="inc-line inc-read${inc.sm_ok ? ' inc-done' : ''}">
       <form class="inc-form" method="post" action="/admin/incidents/${esc(inc.id)}/sm">
         <input type="hidden" name="ret" value="${esc(ret)}">
@@ -625,12 +644,13 @@ function head(scope) {
     return `<div class="inc-row inc-head">
       <span class="inc-plate">Vehicle</span>
       <span class="inc-firm">Workshop</span>
-      <span class="inc-date">Estimate received</span>
+      <span class="inc-date">Received</span>
       <span class="inc-desc">Description</span>
-      <span class="inc-inv">Estimate no.</span>
+      <span class="inc-inv">Est./inv. no.</span>
       <span class="inc-cost">Quoted</span>
+      <span class="inc-cost">Invoiced</span>
       <span class="inc-files">Files</span>
-      <span class="inc-sm">Accepted</span>
+      <span class="inc-sm">Accepted / approved</span>
       <span class="inc-actions"></span>
     </div>`;
   }
@@ -735,18 +755,19 @@ function newRental(plates, today, ret) {
  * driver, the workshop visit and OKQ8/Own; Tools and Misc do not.
  */
 /**
- * The form for a repair estimate.
+ * The form for a repair quote, and for the bill for that same repair.
  *
- * No cost box: an estimate is what somebody is asking for work not done yet,
- * and the moment that figure sits in the same column as the repairs it would
- * be added to them. It is "Quoted", it has its own column, and it stays out
- * of every total on the page until the work is actually done and booked as a
- * Damage line with its own invoice.
+ * Two money boxes, and the empty one is the normal state: a line is usually
+ * added the day the estimate comes in, with Invoiced left blank, and the bill
+ * is typed onto the same line weeks later. Until then the quote is in no
+ * total on the page; from then on the invoiced amount is money spent like any
+ * other line, and the quote stays for the comparison.
  */
 function newEstimate(plates, today, ret) {
   return `<div class="card nf-card">
-    <div class="card-header">New estimate
-      <span class="step-tag">A repair quote from a workshop · fields marked * are required</span></div>
+    <div class="card-header">New estimate or invoice
+      <span class="step-tag">A repair quote from a workshop, and the bill when it comes ·
+        fields marked * are required</span></div>
     <div class="card-body">
       <form class="nf" method="post" action="/admin/incidents" enctype="multipart/form-data">
         <input type="hidden" name="ret" value="${esc(ret)}">
@@ -754,10 +775,11 @@ function newEstimate(plates, today, ret) {
         <div class="nf-grid">
           ${field('Vehicle *', plateSelect('plate', plates, ''))}
           ${field('Workshop *', shopSelect('', 'nf-shop'))}
-          ${field('Estimate received *', `<input class="form-control" type="date" name="occurredOn" value="${esc(today)}" required>`)}
-          ${field('Estimate no.', `<input class="form-control" type="text" name="invoiceNo" maxlength="80">`)}
+          ${field('Received *', `<input class="form-control" type="date" name="occurredOn" value="${esc(today)}" required>`)}
+          ${field('Estimate / invoice no.', `<input class="form-control" type="text" name="invoiceNo" maxlength="80">`)}
           ${field('Quoted (SEK)', `<input class="form-control" type="number" name="quoted" step="0.01" min="0" placeholder="kr">`)}
-          ${field('The estimate (PDF or photo)', `<input class="form-control nf-file" type="file" name="estimates" accept="application/pdf,image/*" multiple>`)}
+          ${field('Invoiced (SEK)', `<input class="form-control" type="number" name="cost" step="0.01" min="0" placeholder="leave empty until the bill comes">`)}
+          ${field('The estimate or invoice (PDF or photo)', `<input class="form-control nf-file" type="file" name="estimates" accept="application/pdf,image/*" multiple>`)}
           ${field('Photos', `<input class="form-control nf-file" type="file" name="photos" accept="image/*" multiple>`)}
           ${field('Description *',
             `<textarea class="form-control nf-desc" name="description" rows="3" maxlength="600"
@@ -766,7 +788,7 @@ function newEstimate(plates, today, ret) {
                       placeholder="Anything else worth keeping – who asked for it, how long it holds"></textarea>`, 'nf-half')}
         </div>
         <div class="actions" style="justify-content:flex-start;margin-top:14px">
-          <button class="btn btn-primary" type="submit">Add estimate</button>
+          <button class="btn btn-primary" type="submit">Add line</button>
         </div>
       </form>
     </div>
@@ -925,7 +947,7 @@ ${newEntry('vehicle', plates, today, '/admin/incidents')}
 /** Query-string name -> the property it is kept under on `filters`. */
 const keyOf = k => ({ by: 'handledBy' })[k] || k;
 
-/** Vehicles · Tools · Misc · Rental cars · Estimat, each with its count and total. */
+/** Vehicles · Tools · Misc · Rental cars · Estimate/Invoice, each with its count and total. */
 function sectionTabs(active, sections, filters) {
   // Every filter follows you between the tabs. The list below them is the same
   // ledger whichever tab you are on, so a filter that meant something on one
@@ -936,11 +958,16 @@ function sectionTabs(active, sections, filters) {
     const x = sections[s] || { n: 0, cost: 0, quoted: 0, waiting: 0 };
     // An estimate has no cost, only a quote, and nobody approves it -- they
     // accept it. The tab says what its own section actually holds.
+    /* This tab holds both, so it says both: what has been billed on it, and
+       what is still only asked for. */
     const est = s === 'estimate';
-    const money = est ? `${kr(x.quoted) || '0 kr'} quoted` : (kr(x.cost) || '0 kr');
+    const money = est
+      ? [kr(x.cost) || '0 kr', x.quoted ? `${kr(x.quoted)} quoted` : ''].filter(Boolean).join(' · ')
+      : (kr(x.cost) || '0 kr');
     return `<a href="/admin/expenses?scope=${s}${esc(keep)}"${s === active ? ' class="on"' : ''}>
       <strong>${esc(SCOPE_LABEL[s])}</strong>
-      <span>${esc(x.n)} · ${esc(money)}${x.waiting ? ` · <em>${esc(x.waiting)} to ${est ? 'accept' : 'approve'}</em>` : ''}</span></a>`;
+      <span>${esc(x.n)} · ${esc(money)}${x.waiting
+        ? ` · <em>${esc(x.waiting)} to ${est ? 'accept or approve' : 'approve'}</em>` : ''}</span></a>`;
   }).join('')}</div>`;
 }
 
@@ -999,7 +1026,8 @@ ${line}
      of them. Anything left over would be money this page cannot account for,
      which is the one thing it must not do. */
   const per = [['damage', totals.damageCost], ['spare parts', totals.partsCost],
-    ['tools', totals.toolCost], ['misc', totals.miscCost], ['hire', totals.rentalCost]]
+    ['tools', totals.toolCost], ['misc', totals.miscCost], ['hire', totals.rentalCost],
+    ['invoiced repairs', totals.invoicedCost]]
     .filter(([, v]) => v).map(([l, v]) => `${l} ${esc(kr(v))}`).join(' · ');
   const summary = `${esc(incidents.length)} ${incidents.length === 1 ? 'line' : 'lines'} ·
      ${esc(totals.withCost)} with cost · ${esc(kr(totals.cost) || '0 kr')} total${
@@ -1021,9 +1049,10 @@ ${line}
     misc: 'Anything that is neither a vehicle nor a tool is added in the form under it.',
     rental: `A car hired from OKQ8, Circle K or Skeppsbrons is added in the form under it – the
      hire period, the agreement, and photos of the car as it was handed over and handed back.`,
-    estimate: `A repair estimate is added in the form under it – the van, the workshop, the day
-     it came in and the estimate itself. What is quoted is not money spent, so it stays out of
-     the totals.`
+    estimate: `A repair quote and the bill for it live on one line – the van, the workshop, the
+     day it came in, the estimate itself, and the invoiced amount once the bill arrives. What is
+     only quoted is not money spent and stays out of the totals; an invoiced amount counts like
+     any other cost, and the SM check turns from accepting the quote into approving the bill.`
   }[scope];
 
   const html = `  <div class="page-head">
@@ -1088,7 +1117,7 @@ ${newEntry(scope, plates, today, ret)}
       <p><strong>One list, five sections.</strong> The tabs above choose which form you are
          filling in; the list is always every expense there is. The first column says which kind
          a line is – <em>Damage</em>, <em>Spare parts</em>, <em>Tool</em>, <em>Misc</em>,
-         <em>Rental car</em> or <em>Estimat</em> – and the columns after it are what they all
+         <em>Rental car</em> or <em>Estimate/Invoice</em> – and the columns after it are what they all
          have in common.
          Everything else about a line lives on its own tab: press <strong>Edit</strong> and it
          opens there, in that section's full line, with the driver, the workshop dates, the hire
@@ -1104,15 +1133,21 @@ ${newEntry(scope, plates, today, ret)}
          to cover it as well. Each photo keeps <strong>when it was taken</strong> where the camera
          wrote that into the file, and its upload time otherwise – open a line to see every file
          with its time.</p>
-      <p><strong>Estimat (Reparation)</strong> is a quote for work nobody has done yet: the van,
-         the workshop (STS, Malte Månsson or Skeppsbrons), the day the estimate came in, the
-         estimate itself as a file, and what is being asked for it. That figure is
-         <strong>quoted, not spent</strong> – it is shown apart from the costs and is in none of
-         the totals, because adding a quote to the money that has actually gone out would say the
-         van cost twice what it did. The tick at the end of the line means <strong>accepted – we
-         are going ahead</strong>, and like the SM check it keeps who and when, can be undone, and
-         is cleared if the quoted figure is changed afterwards. When the work is done it is booked
-         as a <em>Damage</em> line, with the real invoice.</p>
+      <p><strong>Estimate/Invoice</strong> is one repair from the quote to the bill: the van,
+         the workshop (STS, Malte Månsson or Skeppsbrons), the day it came in, the document
+         itself as a file, and two money columns. <strong>Quoted</strong> is what is being asked
+         for work nobody has done – shown apart from the costs and in none of the totals, because
+         adding a quote to the money that has actually gone out would say the van cost twice what
+         it did. <strong>Invoiced</strong> is what was charged in the end: fill it in when the
+         bill arrives and the line becomes money spent like any other, counted in the total under
+         its own figure, with the quote kept beside it so the two can be read against each
+         other.</p>
+      <p>The tick at the end of such a line follows the same move. While there is only a quote it
+         means <strong>accepted – we are going ahead</strong>; once the invoiced amount is filled
+         in it is the ordinary <strong>SM check of what was spent</strong>, and the earlier
+         acceptance is cleared so the bill is signed for on its own. Like every other check it
+         keeps who and when, can be undone, and is cleared again if the figure or the workshop
+         changes afterwards.</p>
       <p>The list opens on <strong>what is waiting for the check</strong> – and on estimates
          nobody has accepted yet. Pick <em>Both</em> under SM check, or press <em>Everything</em>,
          to see what has already been approved.</p>
@@ -1135,7 +1170,7 @@ function incidentDeletePage({ inc, ret, nav }) {
     <h1>Delete this entry?</h1>
     <div class="muted mono">${esc([
       ({ vehicle: 'Vehicle', tool: 'Tool', misc: 'Misc', rental: 'Rental car',
-        estimate: 'Estimat (Reparation)' })[inc.scope],
+        estimate: 'Estimate/Invoice' })[inc.scope],
       inc.plate, inc.scope === 'vehicle' ? EXPENSE_LABEL[inc.category] : '',
       RENTAL_FIRM_LABEL[inc.rental_firm], ESTIMATE_SHOP_LABEL[inc.estimate_shop],
       inc.occurred_on].filter(Boolean).join(' · '))}</div>

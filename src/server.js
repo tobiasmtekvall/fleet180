@@ -1436,14 +1436,17 @@ function readIncidentBody(body) {
       forPlate: normalisePlate(body.forPlate)
     };
   }
-  /* An estimate. The van is one of ours, so it is picked; the workshop is one
-     of three. `quoted` is what is being ASKED and goes in its own field --
-     `cost` is forced to null here, because a quote that reached the cost
-     column would be counted as money spent on every total in the app. */
+  /* An estimate, and later the invoice for the same work. The van is one of
+     ours, so it is picked; the workshop is one of three. The line carries BOTH
+     figures and they mean different things: `quoted` is what is being ASKED,
+     in its own column, counted in nothing; `cost` is what was actually
+     billed, and the moment it is filled in this line is money spent like
+     every other line on the page. Keeping the quote afterwards is the point --
+     it is the only way to see what a repair was said to cost against what it
+     did. */
   if (scope === 'estimate') {
     return {
       ...common,
-      cost: null,
       plate: normalisePlate(body.plate),
       driverName: '', category: '', handledBy: '', shopIn: null, shopOut: null,
       estimateShop: ESTIMATE_SHOPS.has(body.estimateShop) ? body.estimateShop : '',
@@ -1479,7 +1482,7 @@ function entryName(data) {
   if (data.scope === 'tool') return 'Tool expense';
   if (data.scope === 'misc') return 'Misc expense';
   if (data.scope === 'rental') return 'Rental car';
-  if (data.scope === 'estimate') return 'Estimate';
+  if (data.scope === 'estimate') return data.cost === null ? 'Estimate' : 'Invoice';
   return data.category === 'parts' ? 'Spare part' : 'Incident';
 }
 
@@ -1498,9 +1501,9 @@ function entryProblem(data) {
     return null;
   }
   if (data.scope === 'estimate') {
-    if (!data.plate) return 'Choose which vehicle the estimate is for.';
-    if (!data.estimateShop) return 'Choose which workshop wrote the estimate.';
-    if (!data.description) return 'Say what the estimate is for.';
+    if (!data.plate) return 'Choose which vehicle it is for.';
+    if (!data.estimateShop) return 'Choose which workshop it is from.';
+    if (!data.description) return 'Say what the estimate or invoice is for.';
     return null;
   }
   if (data.scope !== 'vehicle' && !data.description) return 'Say what the expense was for.';
@@ -1838,6 +1841,7 @@ app.post('/admin/incidents/:id', softUpload, async (req, res, next) => {
         ? ' Spare parts have no workshop dates, so those were cleared.' : '') +
       (result && result.costChanged ? ({
         quote: ' The quoted amount changed, so the acceptance was cleared and has to be given again.',
+        invoice: ' The invoiced amount is what is signed for now, so the earlier acceptance was cleared – approve the bill.',
         workshop: ' The workshop changed, so the acceptance was cleared – it was given for the other one’s quote.',
         cost: ' The cost changed, so the SM check was reset and needs to be given again.'
       })[result.reason] || '' : ''));
@@ -1861,21 +1865,26 @@ app.post('/admin/incidents/:id/sm', upload, async (req, res, next) => {
     /* On an estimate this same tick means "accepted, we are going ahead", and
        the amount it is given against is the quote rather than a cost. The
        rule is the one rule either way: no figure, no signature. */
-    const estimate = inc.scope === 'estimate';
-    const amount = estimate ? inc.quoted_sek : inc.cost_sek;
+    /* On an Estimate/Invoice line the same tick means one of two things.
+       While the line is only a quote it means "accepted, go ahead", and the
+       figure it is given against is the quote. Once the bill is on it, the
+       tick is the ordinary approval of an amount actually spent -- and the
+       invoiced figure, not the quote, is what is being signed for. */
+    const quote = expenses.quoteOnly(inc);
+    const amount = quote ? inc.quoted_sek : inc.cost_sek;
     if (who.length < 2) {
-      return back(res, to, estimate
+      return back(res, to, quote
         ? 'Type your name before accepting – the acceptance is saved under that name.'
         : 'Type your name in the SM box before approving – the approval is saved under that name.');
     }
     if (amount === null || amount === undefined) {
-      return back(res, to, estimate
+      return back(res, to, quote
         ? 'Fill in the quoted amount first. Accepting an unknown figure is not accepting.'
         : 'Fill in the cost first. An OK on an unknown amount is not an approval.');
     }
     const after = await db.signOffIncident(inc.id, { ok: true, who });
-    console.log(`[admin] ${estimate ? 'estimate accepted' : 'SM check'} ${inc.plate} ${inc.occurred_on} by ${who} (${amount} kr)`);
-    back(res, to, `${estimate ? 'Accepted' : 'Approved'} by ${who} ${fmtDateTime(after.sm_at)}.`);
+    console.log(`[admin] ${quote ? 'estimate accepted' : 'SM check'} ${inc.plate} ${inc.occurred_on} by ${who} (${amount} kr)`);
+    back(res, to, `${quote ? 'Accepted' : 'Approved'} by ${who} ${fmtDateTime(after.sm_at)}.`);
   } catch (err) { next(err); }
 });
 
@@ -1888,7 +1897,7 @@ app.post('/admin/incidents/:id/sm/withdraw', upload, async (req, res, next) => {
     await db.signOffIncident(inc.id, { ok: false, who });
     // An estimate is accepted, not approved, and undoing it has to say so.
     back(res, to,
-      `The ${inc.scope === 'estimate' ? 'acceptance' : 'approval'} for ${
+      `The ${expenses.quoteOnly(inc) ? 'acceptance' : 'approval'} for ${
         inc.plate ? inc.plate + ' ' : 'the entry from '}${inc.occurred_on} was withdrawn. The history is kept.`);
   } catch (err) { next(err); }
 });
@@ -1971,7 +1980,7 @@ app.get('/admin/expenses.csv', async (req, res, next) => {
     const header = ['Id', 'Category', 'Vehicle', 'Date / picked up / received', 'Description',
       'Driver', 'Workshop in / hire from', 'Workshop out / hire to', 'Days', 'OKQ8 / Own',
       'Supplier', 'Hire firm / estimating workshop', 'Stands in for', 'Invoice / estimate no.',
-      'Cost (SEK)', 'Quoted (SEK)',
+      'Cost / invoiced (SEK)', 'Quoted (SEK)',
       'Photos', 'Invoices', 'Agreements', 'Estimates', 'SM check / accepted', 'SM by', 'SM time',
       'Check', 'Note'];
     const lines = [header.map(csvCell).join(';')];

@@ -760,14 +760,23 @@ body.wide .wrap{max-width:1720px}
    line needs. It grows to fill the line and stops there. */
 .inc-editing .inc-desc{max-width:300px}
 
-/* ---------- Expenses: Estimat (Reparation), the fifth section (2026-09-18) ---------- */
+/* ---------- Expenses: Estimate/Invoice, the fifth section (2026-09-18) ---------- */
 /* 1462 is the sum of the nine columns on an estimate's own line, their gaps
    and the row padding (96+170+118+130+120+88+250+262+160, eight 6px gaps, 20
    of padding). Narrower than a hire in columns -- no return date, no days, no
    van it stands in for -- and the two that grow with what is in them are
    pinned here, so the description is the only thing that stretches and the
    headings stay over their fields at every width. */
-.inc-list.inc-list-estimate{min-width:1462px}
+.inc-list.inc-list-estimate{min-width:1572px}
+/* Two money columns on one line: what was asked, and what was charged. The
+   quote is the quieter of the two -- it is in no total. */
+.inc-quoted{color:#6b6257;background:#fffdf7}
+.inc-billed{font-weight:600}
+/* The quote under the bill on a read line. The cost cell is a one-line flex
+   box, so the two figures are stacked by making that cell a column rather
+   than by a display:block the flex box would ignore. */
+.inc-read .inc-cost.ro{flex-direction:column;align-items:flex-end;justify-content:center;line-height:1.15}
+.inc-was-quoted{font-style:normal;font-size:10px;color:var(--muted);white-space:nowrap}
 .inc-list-estimate .inc-files{width:250px;flex:0 0 250px;flex-wrap:wrap}
 .inc-list-estimate .inc-sm{width:262px;flex:0 0 262px;min-width:0}
 .kind-estimate{background:#f1eefb;border-color:#d3c9ef;color:#5233a8}

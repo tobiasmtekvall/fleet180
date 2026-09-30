@@ -73,7 +73,7 @@ check('Expenses has five sections and Rental cars is one of them', () => {
     ['vehicle', 'tool', 'misc', 'rental', 'estimate']);
   assert.strictEqual(SCOPE_LABEL.rental, 'Rental cars');
   const html = render([row()]);
-  ['Vehicles', 'Tools', 'Misc', 'Rental cars', 'Estimat (Reparation)'].forEach(t =>
+  ['Vehicles', 'Tools', 'Misc', 'Rental cars', 'Estimate/Invoice'].forEach(t =>
     assert.ok(html.includes(`<strong>${t}</strong>`), 'no tab for ' + t));
 });
 check('the four firms, and only those four', () => {
@@ -281,10 +281,11 @@ check('a line with more files than fit says so', () => {
   assert.ok(html.includes('>+2</span>'), 'nothing says two files are not shown');
 });
 
-console.log('\n7. Estimat (Reparation)');
-/* A quote for work nobody has done yet. The thing that must never break: the
-   quoted figure is not money spent, and nothing on the page adds it to money
-   that was. */
+console.log('\n7. Estimate/Invoice');
+/* One repair from the quote to the bill. The thing that must never break: a
+   figure that is only QUOTED is not money spent and nothing adds it to money
+   that was -- and the moment the invoiced amount is filled in, that line is
+   money spent and its quote stops being counted anywhere. */
 const estFilters = { scope: 'estimate' };
 
 check('three workshops, and only those three', () => {
@@ -297,17 +298,17 @@ check('three workshops, and only those three', () => {
 });
 check('the form asks for exactly what he asked for', () => {
   const html = render([], { filters: estFilters });
-  assert.ok(html.includes('New estimate'), 'no estimate form');
-  ['Vehicle *', 'Workshop *', 'Estimate received *', 'Description *']
+  assert.ok(html.includes('New estimate or invoice'), 'no estimate form');
+  ['Vehicle *', 'Workshop *', 'Received *', 'Description *', 'Quoted (SEK)', 'Invoiced (SEK)']
     .forEach(l => assert.ok(html.includes(`>${l}</span>`), 'the form does not ask for ' + l));
   assert.ok(html.includes('name="estimates"'), 'nowhere to upload the estimate itself');
   assert.ok(html.includes('name="quoted"'), 'no quoted amount');
-  assert.ok(!/name="cost"[^>]*>[\s\S]{0,200}Add estimate/.test(html),
-    'an estimate must not have a cost box');
+  assert.ok(html.includes('name="cost"'), 'nowhere to type the bill when it comes');
 });
 check('its own columns: no days, no workshop visit, no OKQ8 / Own', () => {
   const html = render([estimateLine({ id: 1 })], { filters: { scope: 'estimate', edit: '1' } });
-  ['Vehicle', 'Workshop', 'Estimate received', 'Estimate no.', 'Quoted', 'Accepted']
+  ['Vehicle', 'Workshop', 'Received', 'Est./inv. no.', 'Quoted', 'Invoiced',
+    'Accepted / approved']
     .forEach(h => assert.ok(html.includes(`>${h}</span>`), 'no column ' + h));
   assert.ok(!html.includes('>Workshop in</span>'), 'an estimate is not a workshop visit');
   assert.ok(!html.includes('name="handledBy"'), 'nobody has done the work yet');
@@ -324,8 +325,9 @@ check('a quote is in no total, and the five buckets add up to the total', () => 
   assert.ok(!Object.entries(totals).some(([k, v]) => k.endsWith('Cost') && v === 18400),
     'the quote landed in one of the cost buckets: ' + JSON.stringify(totals));
   assert.strictEqual(
-    totals.damageCost + totals.partsCost + totals.toolCost + totals.miscCost + totals.rentalCost,
-    totals.cost, 'the five buckets do not add up to the total');
+    totals.damageCost + totals.partsCost + totals.toolCost + totals.miscCost +
+    totals.rentalCost + totals.invoicedCost,
+    totals.cost, 'the buckets do not add up to the total');
   assert.strictEqual(totals.withCost, LEDGER.length - 1, 'the estimate was counted as a cost');
   assert.strictEqual(totals.toAccept, 1);
   assert.strictEqual(totals.waiting,
@@ -360,8 +362,33 @@ check('the tick means accepted, and needs a figure to be given against', () => {
 });
 check('the delete page names the workshop', () => {
   const html = incidentDeletePage({ inc: estimateLine(), ret: '/admin/expenses', nav: '' });
-  assert.ok(html.includes('Estimat (Reparation)'));
+  assert.ok(html.includes('Estimate/Invoice'));
   assert.ok(html.includes('Malte M\u00e5nsson'));
+});
+
+/* The second half of the same line: the bill. Added 2026-09-25, when the
+   section became Estimate/Invoice and one line came to hold both figures. */
+check('an invoiced line is money spent, and its quote stops being counted', () => {
+  const billed = estimateLine({ cost_sek: 4350.5 });
+  const t = totalsOf([billed], TODAY);
+  assert.strictEqual(t.cost, 4350.5, 'the bill is not counted as spent');
+  assert.strictEqual(t.invoicedCost, 4350.5, 'the bill is in no bucket of its own');
+  assert.strictEqual(t.quoted, 0, 'the quote is still counted after the bill arrived');
+  assert.strictEqual(t.withCost, 1);
+  assert.strictEqual(t.toAccept, 0, 'a billed line is not waiting to be accepted');
+  assert.strictEqual(t.waiting, 1, 'a billed line waits for the ordinary SM check');
+});
+check('both figures stay on the line, and the words follow the bill', () => {
+  const billed = estimateLine({ cost_sek: 4350.5 });
+  const html = render([billed], { totals: totalsOf([billed], TODAY), filters: estFilters });
+  assert.ok(/4.350,50 kr/.test(html), 'the invoiced figure is missing');
+  assert.ok(/\(18.400 kr\)/.test(html), 'the quote was dropped once the bill came');
+  assert.ok(!/class="inc-quote"/.test(html), 'a billed line still reads as a bare quote');
+  assert.ok(/>OK<\/button>/.test(html), 'the button should say OK once there is a bill');
+  assert.ok(!/quoted and not spent/.test(html), 'the quote is still called unspent');
+  const done = render([estimateLine({ cost_sek: 4350.5, sm_ok: true, sm_by: 'Simon Bergman',
+    sm_at: '2026-09-25T07:00:00Z' })], { filters: estFilters });
+  assert.ok(done.includes('Approved by Simon Bergman'), 'a bill is approved, not accepted');
 });
 
 console.log(fails ? `\n${fails} FAILED\n` : '\nall green\n');

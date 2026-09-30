@@ -487,7 +487,7 @@ CREATE INDEX IF NOT EXISTS incidents_scope_idx ON incidents (scope, occurred_on 
 ALTER TABLE incidents ADD COLUMN IF NOT EXISTS rental_firm TEXT NOT NULL DEFAULT '';
 ALTER TABLE incidents ADD COLUMN IF NOT EXISTS rented_to   DATE;
 ALTER TABLE incidents ADD COLUMN IF NOT EXISTS for_plate   TEXT NOT NULL DEFAULT '';
--- 2026-09-18: Estimat (Reparation), the fifth section. A quote from one of
+-- 2026-09-18: Estimate/Invoice (was "Estimat (Reparation)"), the fifth section. A quote from one of
 -- three workshops for work not done yet, so it carries no cost_sek at all:
 -- quoted_sek is what somebody asked for, and it is deliberately a separate
 -- column -- here and on incident_sm_events -- so that no sum of cost_sek
@@ -1431,14 +1431,28 @@ async function updateIncident(id, data) {
   if (!before.rows.length) return null;
   const num = v => (v === null || v === undefined ? null : Number(v));
   const estimate = before.rows[0].scope === 'estimate';
-  const oldCost = num(estimate ? before.rows[0].quoted_sek : before.rows[0].cost_sek);
-  const newCost = num(estimate ? data.quoted : data.cost);
+  /* An Estimate/Invoice line is signed for whichever figure it is showing:
+     the quote while that is all there is, the invoiced amount as soon as the
+     bill arrives. So the bill landing on an accepted quote CHANGES what the
+     signature would be about, and clears it -- accepting a price is not the
+     same act as approving what was actually charged, which is the whole
+     reason both figures live on one line. */
+  const oldCost = num(estimate
+    ? (before.rows[0].cost_sek === null ? before.rows[0].quoted_sek : before.rows[0].cost_sek)
+    : before.rows[0].cost_sek);
+  const newCost = num(estimate
+    ? (data.cost === null || data.cost === undefined ? data.quoted : data.cost)
+    : data.cost);
+  const wasInvoiced = estimate && before.rows[0].cost_sek !== null;
+  const nowInvoiced = estimate && data.cost !== null && data.cost !== undefined;
   /* What was accepted on an estimate is one workshop's quote, so pointing the
      row at a different workshop invalidates the tick exactly as changing the
      figure does: nobody has said yes to Malte Mansson's price for a line that
      was accepted as STS's. */
   const shopChanged = estimate && (before.rows[0].estimate_shop || '') !== (data.estimateShop || '');
-  const reason = oldCost !== newCost ? (estimate ? 'quote' : 'cost') : shopChanged ? 'workshop' : '';
+  const reason = (oldCost !== newCost || wasInvoiced !== nowInvoiced)
+    ? (estimate ? (nowInvoiced ? 'invoice' : 'quote') : 'cost')
+    : shopChanged ? 'workshop' : '';
   const costChanged = Boolean(before.rows[0].sm_ok && reason);
 
   await pool.query(
@@ -1462,8 +1476,12 @@ async function updateIncident(id, data) {
       `INSERT INTO incident_sm_events (incident_id, action, who, cost_sek, quoted_sek)
        VALUES ($1, $2, '', $3, $4)`,
       [id, !estimate ? 'cleared-by-cost-change'
-        : reason === 'workshop' ? 'cleared-by-workshop-change' : 'cleared-by-quote-change',
-       estimate ? null : newCost, estimate ? newCost : null]);
+        : reason === 'workshop' ? 'cleared-by-workshop-change'
+        : reason === 'invoice' ? 'cleared-by-invoice' : 'cleared-by-quote-change',
+       // The figure the cleared signature would have been about, in the
+       // column that says what kind of figure it was.
+       (estimate && !nowInvoiced) ? null : newCost,
+       (estimate && !nowInvoiced) ? newCost : null]);
   }
   return { costChanged, reason };
 }
