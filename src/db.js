@@ -322,6 +322,39 @@ ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS model_key TEXT NOT NULL DEFAULT ''
 -- model's own manual is" (telltales.manualFor); a value here is a file in
 -- public/manualer/ and overrides it for this van only.
 ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS manual_file TEXT NOT NULL DEFAULT '';
+-- 2026-09-30: what the van is doing today, as opposed to whether it is ours.
+-- The active flag above says the van is in the fleet at all and changes a few
+-- times a year; this changes most weeks, and it is the one the Team Manager counts
+-- before deciding how many routes can go out. Set by hand: see vehicle-status.js
+-- for why nothing infers it. '' and anything unrecognised read as 'service'.
+ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS status      TEXT NOT NULL DEFAULT 'service';
+-- Why, and until when. One line, shown beside the status wherever it appears.
+ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS status_note TEXT NOT NULL DEFAULT '';
+-- When the status last CHANGED -- not when the row was last saved. "In the
+-- workshop since the 4th" is the question somebody asks about a van that has
+-- been off the road a while, and a plain updated_at could not answer it.
+ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS status_at   TIMESTAMPTZ;
+-- Anything the app does not recognise becomes Off the road, on every boot.
+-- Off rather than In service, for the reason the whole column exists: a van
+-- nobody can account for is not a van to hand a route to. The note says so on
+-- the page, so it is a thing somebody fixes rather than a thing nobody sees.
+-- Normally this matches no rows at all and costs nothing.
+UPDATE vehicles SET status = 'off',
+       status_note = CASE WHEN status_note = ''
+                          THEN 'status was not recognised - please set it'
+                          ELSE status_note END
+ WHERE status NOT IN ('service', 'waiting', 'workshop', 'off');
+
+-- With the rows known good, the database can say what the column may hold
+-- rather than trusting every writer to. Validated, not NOT VALID: a later
+-- migration in this same file rewrites vehicle rows, and a deferred check
+-- would fire on one of those instead -- during a boot, where nobody is
+-- watching. DO/EXCEPTION because a CHECK has no ADD CONSTRAINT IF NOT EXISTS
+-- and this file runs on every start.
+DO $do$ BEGIN
+  ALTER TABLE vehicles ADD CONSTRAINT vehicles_status_chk
+    CHECK (status IN ('service', 'waiting', 'workshop', 'off'));
+EXCEPTION WHEN duplicate_object THEN NULL; END $do$;
 CREATE INDEX IF NOT EXISTS vehicles_order_idx ON vehicles (fleet, sort_order, plate);
 
 CREATE TABLE IF NOT EXISTS submissions (
@@ -1236,7 +1269,7 @@ async function init() {
  * ------------------------------------------------------------------ */
 
 const VEHICLE_COLS = `id, plate, owner, fleet, note, active, form_id, sort_order, model_key,
-                      manual_file, fitted_season, fitted_since`;
+                      manual_file, fitted_season, fitted_since, status, status_note, status_at`;
 
 async function listVehicles({ includeInactive = false } = {}) {
   const where = includeInactive ? '' : 'WHERE active';
@@ -1259,24 +1292,41 @@ async function getVehicleById(id) {
 }
 
 async function createVehicle({ plate, owner = '', fleet = 'box', note = '', formId = null,
-                               modelKey = '', manualFile = '' }) {
+                               modelKey = '', manualFile = '', status = 'service',
+                               statusNote = '' }) {
   const r = await pool.query(
-    `INSERT INTO vehicles (plate, owner, fleet, note, form_id, model_key, manual_file, sort_order)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,
+    `INSERT INTO vehicles (plate, owner, fleet, note, form_id, model_key, manual_file,
+                           status, status_note, status_at, sort_order)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,
+             -- A van in service has no holdup to explain, so it carries no
+             -- reason. readVehicleBody says the same thing; it is stated twice
+             -- because this column is read by people making plans off it.
+             CASE WHEN $8 = 'service' THEN '' ELSE $9 END,
+             -- A van added already off the road is dated from today; one added
+             -- in service has no date to show, because nothing has happened.
+             CASE WHEN $8 <> 'service' THEN now() END,
              COALESCE((SELECT MAX(sort_order) FROM vehicles WHERE fleet = $3), 0) + 10)
      RETURNING ${VEHICLE_COLS}`,
-    [normalisePlate(plate), owner, fleet, note, formId, modelKey || '', manualFile || '']);
+    [normalisePlate(plate), owner, fleet, note, formId, modelKey || '', manualFile || '',
+     status || 'service', statusNote || '']);
   return r.rows[0];
 }
 
 async function updateVehicle(id, { plate, owner, fleet, note, active, formId, modelKey,
-                                   manualFile }) {
+                                   manualFile, status = 'service', statusNote = '' }) {
   const r = await pool.query(
     `UPDATE vehicles SET plate = $2, owner = $3, fleet = $4, note = $5,
-            active = $6, form_id = $7, model_key = $8, manual_file = $9
+            active = $6, form_id = $7, model_key = $8, manual_file = $9,
+            status = $10,
+            status_note = CASE WHEN $10 = 'service' THEN '' ELSE $11 END,
+            /* The date moves only when the status itself does. Saving the row
+               to fix a typo in the manual file must not reset "in the workshop
+               since the 4th" to today. The right-hand side of a SET sees the
+               row as it was, so this compares old against new. */
+            status_at = CASE WHEN status IS DISTINCT FROM $10 THEN now() ELSE status_at END
       WHERE id = $1 RETURNING ${VEHICLE_COLS}`,
     [id, normalisePlate(plate), owner, fleet, note, active, formId, modelKey || '',
-     manualFile || '']);
+     manualFile || '', status || 'service', statusNote || '']);
   return r.rows[0] || null;
 }
 

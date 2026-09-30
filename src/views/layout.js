@@ -25,6 +25,14 @@ function fmtDateTime(d) {
   }).format(new Date(d));
 }
 
+/** The day alone. For "in the workshop since the 4th", where the minute the
+ *  box was ticked is noise. */
+function fmtDate(d) {
+  if (!d) return '';
+  return new Intl.DateTimeFormat('sv-SE', { timeZone: STOCKHOLM, dateStyle: 'short' })
+    .format(new Date(d));
+}
+
 const FAVICON =
   'data:image/svg+xml,' + encodeURIComponent(
     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">' +
@@ -74,4 +82,4 @@ ${scripts}
 </html>`;
 }
 
-module.exports = { page, esc, fmtDateTime };
+module.exports = { page, esc, fmtDateTime, fmtDate };

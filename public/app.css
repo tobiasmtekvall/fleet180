@@ -1184,3 +1184,56 @@ body.wide .wrap{max-width:1720px}
 }
 .doc-editing .inc-editing-tag{margin:0 -12px 10px}
 @media print{.doc-wrap{display:block}.doc-rail{display:none}.doc-list{min-width:0}}
+
+/* ---------- Fleet readiness and vehicle status (2026-09-30) -----------
+   One card per fleet at the top of both vehicle pages: how many vans can be
+   given a route, and which ones cannot. The big figure is what the Team
+   Manager reads; the small print underneath is the question he asks next. */
+.fleetbar{display:flex;flex-wrap:wrap;gap:14px;margin:4px 0 18px}
+.fleet-card{
+  flex:1 1 300px;min-width:260px;padding:12px 16px;
+  border:1px solid var(--border);border-left:4px solid #3f9a5a;border-radius:10px;background:#fff;
+}
+.fleet-card.fleet-short{border-left-color:#d08a00}
+.fleet-name{font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;
+  letter-spacing:.04em}
+.fleet-ready{display:flex;align-items:baseline;gap:8px;margin:2px 0 6px}
+.fleet-ready strong{font-size:32px;line-height:1.05;font-variant-numeric:tabular-nums}
+.fleet-ready span{font-size:14px;color:var(--muted)}
+.fleet-held-list{display:flex;flex-direction:column;gap:3px;font-size:13px}
+.fleet-held{color:var(--text)}
+.fleet-held .mono{color:var(--muted);font-size:12px}
+.fleet-ok{color:#256b38}
+.fleet-inactive{color:var(--muted);font-size:12px;margin-top:2px}
+.st-dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:7px;
+  vertical-align:1px;background:var(--muted)}
+
+/* The four statuses, one colour each, used by the dot, the chip and the
+   dropdown so a van reads the same in all three places. */
+.st-waiting,.st-dot.st-waiting{--st:#a86b00;--st-bg:#fdf6e8;--st-br:#e8cf9a}
+.st-workshop,.st-dot.st-workshop{--st:#1b5fa8;--st-bg:#eef4fb;--st-br:#b9cee6}
+.st-off,.st-dot.st-off{--st:#9a3b3b;--st-bg:#fdf1f1;--st-br:#e5b4b4}
+.st-service,.st-dot.st-service{--st:#256b38;--st-bg:#f3faf5;--st-br:#b7dfc2}
+/* Not one of the four: loud on purpose, because it means somebody has to look. */
+.st-unknown,.st-dot.st-unknown{--st:#7a3fa0;--st-bg:#f7f0fb;--st-br:#d4b8e4}
+.st-dot{background:var(--st,var(--muted))}
+.chip.st-chip{color:var(--st);background:var(--st-bg);border-color:var(--st-br);font-weight:600;
+  white-space:nowrap}
+.st-why{display:block;font-style:normal;font-size:12px;color:var(--muted);margin-top:2px}
+/* A van that cannot take a route: a stripe in its own status colour down the
+   left of the row, so the ones to skip are skippable without reading them. */
+.table tr.row-held td:first-child{box-shadow:inset 4px 0 0 var(--st,var(--muted))}
+
+/* The dropdown on the admin row carries the same colour, so a screenful of
+   vans can be read without opening any of them. */
+.st-select{width:168px}
+.st-select.st-sel-waiting{border-color:#e8cf9a;background:#fdf6e8;color:#7d5100}
+.st-select.st-sel-workshop{border-color:#b9cee6;background:#eef4fb;color:#164a83}
+.st-select.st-sel-off{border-color:#e5b4b4;background:#fdf1f1;color:#7d2f2f}
+.st-select.st-sel-unknown{border-color:#d4b8e4;background:#f7f0fb;color:#5f2b80;font-weight:600}
+/* A fleet whose vans are all inactive: stated, not congratulated. */
+.fleet-card.fleet-empty{border-left-color:var(--border);opacity:.8}
+/* Six columns on the main list since Status arrived; on a phone the table
+   scrolls inside its card rather than pushing the whole page sideways. */
+.table-scroll{overflow-x:auto}
+@media print{.fleet-card{break-inside:avoid}}

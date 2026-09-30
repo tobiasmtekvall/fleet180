@@ -3,7 +3,8 @@
 const { page, esc, fmtDateTime } = require('./layout');
 const { KINDS, KIND_LABEL, ROLES, SOURCES, CHOICES, CHOICE_LABEL_EN, formatAnswer } = require('../fields');
 const i18n = require('../i18n');
-const { OWNER_LABEL, FLEET_LABEL } = require('./index');
+const { OWNER_LABEL, FLEET_LABEL, readinessBar } = require('./index');
+const vstatus = require('../vehicle-status');
 const telltales = require('../telltales');
 
 const LINKS = [
@@ -223,8 +224,29 @@ const OWNER_OPTIONS = [
   { value: 'okq8', label: OWNER_LABEL.okq8 }
 ];
 const FLEET_OPTIONS = Object.entries(FLEET_LABEL).map(([value, label]) => ({ value, label }));
+/* What the van is doing today. Not the same question as the Active tick beside
+   it, which is whether the van is ours at all -- see vehicle-status.js. */
+const STATUS_OPTIONS = vstatus.STATUSES.map(value => ({ value, label: vstatus.STATUS_LABEL[value] }));
+
+/**
+ * The dropdown, with one extra entry when it is needed.
+ *
+ * A row whose column holds something this app does not recognise would
+ * otherwise show the first option, In service, and saving it would make that
+ * true without anybody meaning it. So the odd value gets an entry of its own,
+ * selected and impossible to choose, and the only way out of it is to pick one
+ * of the four on purpose.
+ */
+function statusSelect(v) {
+  const cur = vstatus.normalise(v.status);
+  const known = cur !== vstatus.UNKNOWN;
+  const options = known ? STATUS_OPTIONS
+    : [{ value: '', label: `${vstatus.STATUS_LABEL.unknown} – pick one` }].concat(STATUS_OPTIONS);
+  return select('status', options, known ? cur : '', 'st-select st-sel-' + cur);
+}
 
 function adminVehiclesPage({ vehicles, forms, message, counts }) {
+  const ready = vehicles.filter(vstatus.isReady).length;
   const formOptions = [{ value: '', label: 'Default form' }]
     .concat(forms.filter(f => !f.is_default).map(f => ({ value: String(f.id), label: f.title })));
 
@@ -257,6 +279,12 @@ function adminVehiclesPage({ vehicles, forms, message, counts }) {
                  placeholder="${esc(manualHint(v.model_key))}"
                  title="A PDF in public/manualer/ for this van only. Empty = the model's own manual.">
           ${select('formId', formOptions, v.form_id ? String(v.form_id) : '', 'grow')}
+          ${statusSelect(v)}
+          <input class="form-control" type="text" name="statusNote" style="width:180px"
+                 value="${esc(v.status_note || '')}" maxlength="120"
+                 placeholder="${vstatus.normalise(v.status) === vstatus.READY
+                   ? 'only kept while the van is held' : 'why / until when'}"
+                 title="One line beside the status: what is wrong, and when it is expected back. It is cleared when the van goes back into service.">
           <label class="check"><input type="checkbox" name="active" value="1"${v.active ? ' checked' : ''}> Active</label>
           <span class="muted" style="font-size:13px">${esc(counts.get(v.plate) || 0)} checks</span>
           <button class="btn btn-primary btn-sm" type="submit">Save</button>
@@ -268,15 +296,29 @@ function adminVehiclesPage({ vehicles, forms, message, counts }) {
 
   const html = `  <div class="page-head">
     <h1>Vehicles</h1>
-    <div class="muted">${vehicles.length} in total</div>
+    <div class="muted">${vehicles.length} in total \u00b7 ${esc(ready)} ready for a route</div>
   </div>
 ${nav('vehicles')}
 ${flash(message)}
 
+${vehicles.length ? readinessBar(vehicles, { inactiveKnown: true }) : ''}
+
   <p class="lede">A vehicle added here immediately gets its own page and its own QR code
      on the <a href="/qr">QR page</a>. A vehicle no longer in use is unticked as
-     <em>Active</em> – it then disappears from the lists and the QR sheet, but its old checks
+     <em>Active</em> \u2013 it then disappears from the lists and the QR sheet, but its old checks
      are kept. <em>Delete</em> only works on vehicles with no recorded checks.</p>
+
+  <p class="lede"><strong>Status and Active are two different questions.</strong>
+     <em>Active</em> is whether the van is ours at all, and it changes a few times a year.
+     <em>Status</em> is what it is doing this week \u2013 <em>In service</em>,
+     <em>Waiting for repair</em>, <em>In the workshop</em> or <em>Off the road</em> \u2013 and it is
+     the one the figures above count. Only a van that is both Active and In service is counted as
+     ready for a route, so the Team Manager can read how many routes can go out straight off the
+     top of this page. Nothing sets the status by itself: a van reported broken on Friday that
+     nobody has booked in yet is exactly the van these figures exist to catch, and no workshop
+     date would know about it. Use the box beside it to say why and when it is expected back
+     – that line is cleared when the van goes back into service, so the next breakdown never
+     inherits the last one's reason.</p>
 
   <p class="lede"><strong>The model decides the warning lights.</strong> When a driver answers Yes
      to the dashboard-lights question, they get a list of this particular van's lamps and symbols.
@@ -301,13 +343,17 @@ ${flash(message)}
                maxlength="120" placeholder="manual – the model's own"
                title="A PDF in public/manualer/ for this van only. Empty = the model's own manual.">
         ${select('formId', formOptions, '', 'grow')}
+        ${select('status', STATUS_OPTIONS, 'service', 'st-select st-sel-service')}
+        <input class="form-control" type="text" name="statusNote" style="width:180px"
+               maxlength="120" placeholder="why / until when"
+               title="Only kept while the van is not in service.">
         <button class="btn btn-primary" type="submit">Add</button>
       </form>
     </div>
   </div>
 
   <div class="card">
-    <div class="card-header">All vehicles<span class="step-tag">Reg. no. · owner · fleet · model · manual · form</span></div>
+    <div class="card-header">All vehicles<span class="step-tag">Reg. no. \u00b7 owner \u00b7 fleet \u00b7 model \u00b7 manual \u00b7 form \u00b7 status</span></div>
     <table class="table"><tbody>
 ${rows || '<tr><td class="muted" style="padding:20px">No vehicles yet.</td></tr>'}
     </tbody></table>

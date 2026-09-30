@@ -31,6 +31,7 @@ const attentionLib = require('./attention');
 const { attentionPage } = require('./views/attention');
 const exif = require('./exif');
 const expenses = require('./expenses');
+const vstatus = require('./vehicle-status');
 const wheels = require('./wheels');
 const { wheelsPage } = require('./views/wheels');
 const { licencePage } = require('./views/licence');
@@ -2657,7 +2658,19 @@ app.get('/admin/wheels.csv', async (req, res, next) => {
 const OWNERS = new Set(['', 'own', 'okq8']);
 const FLEETS = new Set(['box', 'home']);
 
-function readVehicleBody(body) {
+/**
+ * The vehicle form, read off a POST.
+ *
+ * `existing` is the row being edited, when there is one. A field the form did
+ * NOT post keeps whatever the row already says, rather than being blanked. The
+ * row form has no box for `note` at all; a tab opened before Status existed
+ * has none for that either; and a script or a browser that posts the row some
+ * other way has whatever it has. Blanking by omission is how "in the workshop
+ * since the 4th, gearbox" silently becomes a van the Team Manager is told to
+ * plan a route around.
+ */
+function readVehicleBody(body, existing = null) {
+  const has = k => Object.prototype.hasOwnProperty.call(body, k);
   const owner = OWNERS.has(body.owner) ? body.owner : '';
   const fleet = FLEETS.has(body.fleet) ? body.fleet : 'box';
   const formId = /^\d+$/.test(String(body.formId || '')) ? Number(body.formId) : null;
@@ -2670,11 +2683,30 @@ function readVehicleBody(body) {
      rather than on somebody else's server or on ../. */
   const manualFile = /^[A-Za-z0-9._-]+\.pdf$/.test(String(body.manualFile || '').trim())
     ? String(body.manualFile).trim() : '';
+  /* Not posted at all: keep the row's own status. Posted as something that is
+     not one of the four (a duplicated field arrives as an array, a hand-made
+     request arrives as anything): `statusBad`, and the caller refuses the whole
+     save. Never quietly resolved, because every way of resolving it either
+     invents a fact or counts a broken van as available. */
+  const status = has('status')
+    ? (vstatus.STATUSES.includes(body.status) ? body.status : null)
+    : vstatus.safe(existing ? existing.status : vstatus.READY);
+
   return {
     plate: normalisePlate(body.plate),
     owner, fleet, formId, modelKey, manualFile,
-    note: String(body.note || '').slice(0, 500),
-    active: body.active === '1'
+    note: has('note') ? String(body.note || '').slice(0, 500)
+      : (existing ? existing.note : ''),
+    active: body.active === '1',
+    status,
+    statusBad: has('status') && status === null,
+    /* The note answers "why is this van not ready", so a van that IS ready has
+       nothing to answer. Clearing it on the way back into service is what
+       stops the next breakdown inheriting the last one's reason -- and stops
+       "In service" being printed beside "tailgate, back Thursday". */
+    statusNote: status === vstatus.READY ? ''
+      : has('statusNote') ? String(body.statusNote || '').slice(0, 120)
+        : (existing ? existing.status_note : '')
   };
 }
 
@@ -2693,10 +2725,14 @@ app.post('/admin/vehicles', async (req, res, next) => {
   try {
     const data = readVehicleBody(req.body);
     if (!data.plate) return back(res, '/admin/vehicles', 'The registration number is missing.');
+    if (data.statusBad) {
+      return back(res, '/admin/vehicles', 'That is not one of the four statuses, so nothing was added.');
+    }
     const existing = await db.getVehicle(data.plate);
     if (existing) return back(res, '/admin/vehicles', `${data.plate} already exists.`);
     await db.createVehicle(data);
-    back(res, '/admin/vehicles', `${data.plate} added. Its QR code is on the QR page.`);
+    back(res, '/admin/vehicles', `${data.plate} added, ${
+      vstatus.label(data.status).toLowerCase()}. Its QR code is on the QR page.`);
   } catch (err) { next(err); }
 });
 
@@ -2704,8 +2740,13 @@ app.post('/admin/vehicles/:id', async (req, res, next) => {
   try {
     const vehicle = await db.getVehicleById(req.params.id);
     if (!vehicle) return back(res, '/admin/vehicles', 'That vehicle no longer exists.');
-    const data = readVehicleBody(req.body);
+    const data = readVehicleBody(req.body, vehicle);
     if (!data.plate) return back(res, '/admin/vehicles', 'The registration number is missing.');
+    if (data.statusBad) {
+      return back(res, '/admin/vehicles',
+        `That is not one of the four statuses, so nothing was saved – ${vehicle.plate} is ` +
+        `still ${vstatus.label(vehicle.status).toLowerCase()}.`);
+    }
     if (data.plate !== vehicle.plate) {
       const clash = await db.getVehicle(data.plate);
       if (clash) return back(res, '/admin/vehicles', `${data.plate} already exists.`);
@@ -2717,7 +2758,13 @@ app.post('/admin/vehicles/:id', async (req, res, next) => {
       }
     }
     await db.updateVehicle(vehicle.id, data);
-    back(res, '/admin/vehicles', `${data.plate} saved.`);
+    /* A status change is the one edit on this row that changes what the
+       figures at the top of the page say, so the confirmation names it. */
+    const moved = vstatus.normalise(vehicle.status) !== data.status;
+    back(res, '/admin/vehicles', `${data.plate} saved.${moved
+      ? ` It is now ${vstatus.label(data.status).toLowerCase()}${
+          data.status === vstatus.READY ? ' and counts towards the routes again' : ' and is not counted as ready'}.`
+      : ''}`);
   } catch (err) { next(err); }
 });
 
