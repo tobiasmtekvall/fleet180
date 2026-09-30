@@ -656,6 +656,43 @@ CREATE TABLE IF NOT EXISTS attention_clears (
 CREATE INDEX IF NOT EXISTS attention_clears_key_idx ON attention_clears (item_key, id);
 CREATE INDEX IF NOT EXISTS attention_clears_when_idx ON attention_clears (cleared_at DESC);
 
+-- 2026-09-29: Documents. A filing cabinet rather than a ledger: the papers
+-- that belong to the fleet without belonging to any one line of it -- a
+-- leasing contract, an insurance policy, a manual, a photograph of the yard.
+-- Folders are made by hand, named by hand and renamed by hand: what this
+-- office wants to call a drawer is not something a schema can guess.
+CREATE TABLE IF NOT EXISTS document_folders (
+  id         BIGSERIAL PRIMARY KEY,
+  name       TEXT        NOT NULL,
+  note       TEXT        NOT NULL DEFAULT '',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+-- Two drawers called "Insurance" is a filing system with a bug in it. The
+-- index is on the folded name so "insurance" cannot slip past "Insurance".
+CREATE UNIQUE INDEX IF NOT EXISTS document_folders_name_idx
+  ON document_folders (lower(name));
+
+CREATE TABLE IF NOT EXISTS documents (
+  id          BIGSERIAL PRIMARY KEY,
+  -- SET NULL, not CASCADE: deleting a drawer must never delete the papers in
+  -- it. They fall back to Unfiled, where they can be seen and put somewhere
+  -- else -- a folder is a label, and losing a label is not losing a document.
+  folder_id   BIGINT      REFERENCES document_folders(id) ON DELETE SET NULL,
+  -- The optional vehicle. Empty on most rows; a registration number on the
+  -- ones that belong to one van, so that van's papers can be pulled up by it.
+  plate       TEXT        NOT NULL DEFAULT '',
+  title       TEXT        NOT NULL DEFAULT '',
+  note        TEXT        NOT NULL DEFAULT '',
+  filename    TEXT,
+  mime        TEXT        NOT NULL,
+  bytes       BYTEA       NOT NULL,
+  byte_size   INTEGER     NOT NULL DEFAULT 0,
+  uploaded_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS documents_folder_idx ON documents (folder_id, id DESC);
+CREATE INDEX IF NOT EXISTS documents_plate_idx  ON documents (plate, id DESC);
+CREATE INDEX IF NOT EXISTS documents_time_idx   ON documents (uploaded_at DESC);
+
 `;
 
 /* ------------------------------------------------------------------ *
@@ -1562,6 +1599,174 @@ async function getIncidentFile(id) {
 async function deleteIncidentFile(id) {
   const r = await pool.query(
     'DELETE FROM incident_files WHERE id = $1 RETURNING incident_id, filename', [id]);
+  return r.rows[0] || null;
+}
+
+/* ------------------------------------------------------------------ *
+ * Documents                                                           *
+ *                                                                     *
+ * The filing cabinet under Expenses. Nothing here is tied to a line in *
+ * the ledger: these are the papers that belong to the fleet itself.    *
+ * ------------------------------------------------------------------ */
+
+/* Digits, and few enough of them to be a bigint: a longer run of digits is
+   still id-shaped, and handing it to Postgres raises "out of range", which is
+   a 500 where a plain "not found" belongs. */
+const id64 = v => (/^\d{1,18}$/.test(String(v)) ? String(v) : null);
+
+/* The most rows this page will draw at once. A filing cabinet only ever gets
+   fuller, and the answer to a cabinet too big to read is a folder or a search,
+   not a page that takes a second and a half to arrive. */
+const DOC_PAGE = 400;
+
+/** Every folder, with how many files are in it -- empty ones included. */
+async function listDocumentFolders() {
+  const r = await pool.query(
+    `SELECT f.id, f.name, f.note, f.created_at,
+            count(d.id)::int AS n,
+            coalesce(sum(d.byte_size), 0)::bigint AS bytes
+       FROM document_folders f
+       LEFT JOIN documents d ON d.folder_id = f.id
+      GROUP BY f.id
+      ORDER BY lower(f.name)`);
+  return r.rows.map(x => ({ ...x, id: String(x.id), bytes: Number(x.bytes) }));
+}
+
+async function getDocumentFolder(id) {
+  if (!id64(id)) return null;
+  const r = await pool.query('SELECT id, name, note FROM document_folders WHERE id = $1', [id]);
+  if (!r.rows.length) return null;
+  const f = r.rows[0];
+  const c = await pool.query(
+    'SELECT count(*)::int AS n FROM documents WHERE folder_id = $1', [id]);
+  return { ...f, id: String(f.id), n: c.rows[0].n };
+}
+
+/**
+ * A new drawer.
+ *
+ * Returns null when one of that name already exists rather than throwing:
+ * "Insurance is already a folder" is a sentence the page can say, and a
+ * unique-violation stack trace is not.
+ */
+async function createDocumentFolder(name, note = '') {
+  const r = await pool.query(
+    `INSERT INTO document_folders (name, note) VALUES ($1, $2)
+     ON CONFLICT DO NOTHING RETURNING id, name`, [name, note || '']);
+  if (!r.rows.length) return null;
+  return { ...r.rows[0], id: String(r.rows[0].id) };
+}
+
+async function renameDocumentFolder(id, name, note) {
+  if (!id64(id)) return null;
+  const clash = await pool.query(
+    'SELECT 1 FROM document_folders WHERE lower(name) = lower($1) AND id <> $2', [name, id]);
+  if (clash.rows.length) return null;
+  const r = await pool.query(
+    `UPDATE document_folders SET name = $2, note = $3 WHERE id = $1 RETURNING id, name`,
+    [id, name, note || '']);
+  if (!r.rows.length) return null;
+  return { ...r.rows[0], id: String(r.rows[0].id) };
+}
+
+/** The drawer goes; the papers in it fall back to Unfiled (see the schema). */
+async function deleteDocumentFolder(id) {
+  if (!id64(id)) return null;
+  const r = await pool.query(
+    'DELETE FROM document_folders WHERE id = $1 RETURNING id, name', [id]);
+  return r.rows[0] || null;
+}
+
+/**
+ * The files, newest first.
+ *
+ * `folder` is a folder id, the string 'none' for the ones in no folder, or
+ * empty for all of them. `plate` finds a van's papers; `q` is a plain-words
+ * search over the name, the title and the note.
+ */
+async function listDocuments({ folder = '', plate = '', q = '', limit = DOC_PAGE } = {}) {
+  const where = [];
+  const args = [];
+  if (folder === 'none') where.push('d.folder_id IS NULL');
+  else if (id64(folder)) { args.push(folder); where.push(`d.folder_id = $${args.length}`); }
+  if (plate) { args.push(plate); where.push(`d.plate = $${args.length}`); }
+  if (q) {
+    args.push('%' + q.replace(/[%_\\]/g, c => '\\' + c) + '%');
+    where.push(`(d.title ILIKE $${args.length} OR d.filename ILIKE $${args.length}
+                 OR d.note ILIKE $${args.length} OR d.plate ILIKE $${args.length})`);
+  }
+  const r = await pool.query(
+    `SELECT d.id, d.folder_id, d.plate, d.title, d.note, d.filename, d.mime,
+            d.byte_size, d.uploaded_at, f.name AS folder_name
+       FROM documents d
+       LEFT JOIN document_folders f ON f.id = d.folder_id
+       ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
+      ORDER BY d.uploaded_at DESC, d.id DESC
+      LIMIT $${args.length + 1}`, [...args, Math.max(1, limit) + 1]);
+  /* One more than asked for, so the caller can tell a full page from a page
+     that happens to end there, without a second COUNT over the whole table. */
+  const rows = r.rows.slice(0, limit).map(x => ({ ...x, id: String(x.id),
+    folder_id: x.folder_id === null ? null : String(x.folder_id) }));
+  rows.more = r.rows.length > limit;
+  rows.cap = limit;
+  return rows;
+}
+
+/** The two figures the Documents tab shows, without loading a single byte. */
+async function documentCounts() {
+  const r = await pool.query(
+    `SELECT (SELECT count(*)::int FROM documents) AS n,
+            (SELECT count(*)::int FROM document_folders) AS folders,
+            (SELECT count(*)::int FROM documents WHERE folder_id IS NULL) AS unfiled,
+            (SELECT coalesce(sum(byte_size), 0)::bigint FROM documents) AS bytes`);
+  return { ...r.rows[0], bytes: Number(r.rows[0].bytes) };
+}
+
+async function addDocument({ folderId, plate, title, note, filename, mime, buffer }) {
+  const r = await pool.query(
+    `INSERT INTO documents (folder_id, plate, title, note, filename, mime, bytes, byte_size)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
+    [id64(folderId), plate || '', title || '', note || '', filename || null,
+     mime, buffer, buffer.length]);
+  return String(r.rows[0].id);
+}
+
+/** The bytes, for serving. Kept apart from the listing on purpose. */
+async function getDocument(id) {
+  if (!id64(id)) return null;
+  const r = await pool.query(
+    'SELECT id, filename, title, mime, bytes FROM documents WHERE id = $1', [id]);
+  return r.rows[0] || null;
+}
+
+/** Everything about one file except its bytes. */
+async function getDocumentMeta(id) {
+  if (!id64(id)) return null;
+  const r = await pool.query(
+    `SELECT d.id, d.folder_id, d.plate, d.title, d.note, d.filename, d.mime,
+            d.byte_size, d.uploaded_at, f.name AS folder_name
+       FROM documents d LEFT JOIN document_folders f ON f.id = d.folder_id
+      WHERE d.id = $1`, [id]);
+  if (!r.rows.length) return null;
+  const x = r.rows[0];
+  return { ...x, id: String(x.id),
+    folder_id: x.folder_id === null ? null : String(x.folder_id) };
+}
+
+/** Renaming, re-filing and the vehicle link. The bytes are never touched. */
+async function updateDocument(id, { folderId, plate, title, note }) {
+  if (!id64(id)) return null;
+  const r = await pool.query(
+    `UPDATE documents SET folder_id = $2, plate = $3, title = $4, note = $5
+      WHERE id = $1 RETURNING id`,
+    [id, id64(folderId), plate || '', title || '', note || '']);
+  return r.rows.length ? getDocumentMeta(id) : null;
+}
+
+async function deleteDocument(id) {
+  if (!id64(id)) return null;
+  const r = await pool.query(
+    'DELETE FROM documents WHERE id = $1 RETURNING id, filename, title', [id]);
   return r.rows[0] || null;
 }
 
@@ -2473,6 +2678,9 @@ module.exports = {
   listIncidents, getIncident, createIncident, updateIncident, deleteIncident, incidentCounts, expenseSections,
   signOffIncident, addIncidentFile, getIncidentFile, deleteIncidentFile,
   submissionsWithIncident, incidentBySubmission,
+  listDocumentFolders, getDocumentFolder, createDocumentFolder, renameDocumentFolder,
+  deleteDocumentFolder, listDocuments, documentCounts, addDocument, getDocument,
+  getDocumentMeta, updateDocument, deleteDocument,
   listWheelSets, upsertWheelSet, wheelSetId, replaceWheelSet, addWheelReading, deleteWheelReading,
   setFitted, addWheelFile, getWheelFile, deleteWheelFile,
   checksForAttention, listAttentionClears, clearAttentionItem, withdrawAttentionClear,

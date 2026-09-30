@@ -947,13 +947,31 @@ ${newEntry('vehicle', plates, today, '/admin/incidents')}
 /** Query-string name -> the property it is kept under on `filters`. */
 const keyOf = k => ({ by: 'handledBy' })[k] || k;
 
-/** Vehicles · Tools · Misc · Rental cars · Estimate/Invoice, each with its count and total. */
-function sectionTabs(active, sections, filters) {
+/**
+ * Vehicles · Tools · Misc · Rental cars · Estimate/Invoice · Documents.
+ *
+ * The first five are sections of the ledger and each says what it has cost.
+ * The sixth is not money at all -- it is the filing cabinet -- so it says how
+ * many files and folders are in it instead, and it is drawn last for that
+ * reason: everything to the left of it adds up, and it does not.
+ *
+ * `filters` may carry a ready-made `keep` string instead of the filters
+ * themselves, which is how the Documents page keeps the ledger's filters
+ * alive across a trip to the cabinet and back.
+ */
+function sectionTabs(active, sections, filters, docs = null) {
   // Every filter follows you between the tabs. The list below them is the same
   // ledger whichever tab you are on, so a filter that meant something on one
   // tab means exactly the same on the next; only the form above changes.
-  const keep = ['kind', 'plate', 'by', 'from', 'to', 'sm'].filter(k => filters[keyOf(k)])
-    .map(k => `&${k}=${encodeURIComponent(filters[keyOf(k)])}`).join('');
+  const keep = typeof filters.keep === 'string' ? filters.keep
+    : ['kind', 'plate', 'by', 'from', 'to', 'sm'].filter(k => filters[keyOf(k)])
+      .map(k => `&${k}=${encodeURIComponent(filters[keyOf(k)])}`).join('');
+  const d = docs || { n: 0, folders: 0, unfiled: 0 };
+  const docTab = `<a href="/admin/documents${keep ? '?exp=' + encodeURIComponent(keep) : ''}"${
+      active === 'documents' ? ' class="on"' : ''} title="Papers that belong to no line in the ledger">
+      <strong>Documents</strong>
+      <span>${esc(d.n)} ${d.n === 1 ? 'file' : 'files'} · ${esc(d.folders)} ${
+        d.folders === 1 ? 'folder' : 'folders'}${d.unfiled ? ` · <em>${esc(d.unfiled)} unfiled</em>` : ''}</span></a>`;
   return `<div class="exp-tabs no-print">${SCOPES.map(s => {
     const x = sections[s] || { n: 0, cost: 0, quoted: 0, waiting: 0 };
     // An estimate has no cost, only a quote, and nobody approves it -- they
@@ -968,10 +986,10 @@ function sectionTabs(active, sections, filters) {
       <strong>${esc(SCOPE_LABEL[s])}</strong>
       <span>${esc(x.n)} · ${esc(money)}${x.waiting
         ? ` · <em>${esc(x.waiting)} to ${est ? 'accept or approve' : 'approve'}</em>` : ''}</span></a>`;
-  }).join('')}</div>`;
+  }).join('')}${docTab}</div>`;
 }
 
-function expensesPage({ incidents, plates, filters, totals, sections = {}, today, message, nav }) {
+function expensesPage({ incidents, plates, filters, totals, sections = {}, docs = null, today, message, nav }) {
   const scope = filters.scope;
   const ret = '/admin/expenses' + (filters.query || '');
   const opt = (v, l, cur) => `<option value="${esc(v)}"${cur === v ? ' selected' : ''}>${esc(l)}</option>`;
@@ -1057,11 +1075,12 @@ ${line}
 
   const html = `  <div class="page-head">
     <h1>Expenses</h1>
-    <div class="muted">Every expense, all five sections · ${esc(incidents.length)} ${incidents.length === 1 ? 'line' : 'lines'}</div>
+    <div class="muted">Every expense, all five sections · ${esc(incidents.length)} ${incidents.length === 1 ? 'line' : 'lines'}
+      · <a href="/admin/documents">Documents</a> holds the papers that are not expenses</div>
   </div>
 ${nav}
 ${message ? `<div class="ok-msg no-print">${esc(message)}</div>` : ''}
-${sectionTabs(scope, sections, filters)}
+${sectionTabs(scope, sections, filters, docs)}
 
   <p class="lede">The list below is the <strong>whole ledger</strong> – vehicles, tools, misc,
      hire cars and estimates together, on every tab – so the Site Manager reads and approves all
@@ -1199,5 +1218,6 @@ ${nav}
   return page({ title: 'Delete entry', body: html, links: LINKS, lang: 'en', admin: true });
 }
 
-module.exports = { incidentsPage, expensesPage, incidentDeletePage, kr, EXPENSE_LABEL, HANDLER_LABEL,
+module.exports = { incidentsPage, expensesPage, incidentDeletePage, sectionTabs, LINKS,
+  kr, EXPENSE_LABEL, HANDLER_LABEL,
   SCOPE_LABEL, RENTAL_FIRM_LABEL, ESTIMATE_SHOP_LABEL, KIND_LABEL, kindOf };

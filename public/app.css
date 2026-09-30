@@ -1116,3 +1116,71 @@ body.wide .wrap{max-width:1720px}
 .dl-co{display:inline-block;padding:1px 8px;border-radius:9px;font-size:12px;font-weight:700}
 .dl-co-flexio{background:#e7f0fb;color:#1b5fa8}
 .dl-co-boxflow{background:#eaf5ec;color:#256b38}
+
+/* ---------- Documents: the filing cabinet (2026-09-29) ----------------
+   The sixth tab on Expenses, and the one page here that is not a ledger.
+   A rail of folders on the left, the files on the right; under 900px the
+   rail folds on top of the list, because a phone in a yard is where half
+   of these uploads come from. */
+.doc-wrap{display:grid;grid-template-columns:260px minmax(0,1fr);gap:18px;align-items:start}
+.doc-main{min-width:0}
+@media (max-width:900px){.doc-wrap{grid-template-columns:1fr}}
+
+.doc-rail{position:sticky;top:12px}
+@media (max-width:900px){.doc-rail{position:static}}
+.doc-rail-list{display:flex;flex-direction:column;padding:6px 8px 10px}
+.doc-rail-list a{
+  display:flex;justify-content:space-between;gap:10px;align-items:baseline;
+  padding:7px 10px;border-radius:8px;text-decoration:none;color:inherit;
+}
+.doc-rail-list a:hover{background:#f3f6fa}
+.doc-rail-list a.on{background:#f3f8fd;box-shadow:inset 3px 0 0 var(--primary);font-weight:600}
+.doc-rail-list a > span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.doc-rail-list a > em{font-style:normal;font-size:12px;color:var(--muted);flex:0 0 auto}
+.doc-newfolder{border-top:1px solid var(--border);padding:8px 14px 12px}
+.doc-newfolder > summary{cursor:pointer;font-size:13px;font-weight:600;color:var(--primary)}
+.doc-newfolder form{display:flex;flex-direction:column;gap:8px;margin-top:10px}
+.doc-folder-edit > summary{cursor:pointer;font-size:13px;font-weight:600;color:var(--primary)}
+
+/* One line per file. Same shape as the ledger's rows, fewer columns, and it
+   scrolls sideways inside its own box rather than stretching the page. */
+.doc-scroll{overflow-x:auto}
+/* 1134 = the six fixed columns (150+96+72+150+190+132), the six 10px gaps,
+   the row's own 12px of padding on each side, and 260 left for the name --
+   which is the column somebody actually reads, so it is the one that gets
+   room rather than the one that gets squeezed. */
+.doc-list{min-width:1134px}
+.doc-row{
+  display:flex;gap:10px;align-items:baseline;padding:9px 12px;
+  border-top:1px solid var(--border);
+}
+.doc-list > .doc-row:first-child{border-top:0}
+.doc-head{font-size:12px;font-weight:700;color:var(--muted);text-transform:uppercase;
+  letter-spacing:.03em;background:#fafbfc}
+.doc-name{flex:1 1 260px;min-width:0}
+.doc-name a{display:flex;gap:7px;align-items:center;text-decoration:none;color:var(--primary);
+  font-weight:600;min-width:0}
+.doc-name a > span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.doc-name a:hover > span{text-decoration:underline}
+.doc-name svg{flex:0 0 auto;color:var(--muted)}
+.doc-file{display:block;font-style:normal;font-size:11px;color:var(--muted);
+  margin-left:23px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.doc-folder{width:150px;flex:0 0 150px;font-size:13px;overflow:hidden;text-overflow:ellipsis;
+  white-space:nowrap}
+.doc-folder svg{vertical-align:-3px;color:var(--muted)}
+.doc-plate{width:96px;flex:0 0 96px;font-size:13px}
+.doc-size{width:72px;flex:0 0 72px;font-size:13px;color:var(--muted);text-align:right}
+.doc-when{width:150px;flex:0 0 150px;font-size:12px;color:var(--muted)}
+.doc-note{width:190px;flex:0 0 190px;font-size:12px;color:var(--muted);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.doc-actions{width:132px;flex:0 0 132px;display:flex;gap:6px;justify-content:flex-end}
+.doc-actions .btn-sm{padding:4px 9px}
+.btn-danger-ghost{color:#a33}
+.btn-danger-ghost:hover{background:#fdf3f4;border-color:#e3b6b9}
+
+.doc-editing{
+  border:2px solid var(--primary);border-radius:10px;margin:8px 0;padding:0 12px 12px;
+  background:#fbfdff;
+}
+.doc-editing .inc-editing-tag{margin:0 -12px 10px}
+@media print{.doc-wrap{display:block}.doc-rail{display:none}.doc-list{min-width:0}}

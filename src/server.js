@@ -26,6 +26,7 @@ const { qrPage } = require('./views/qr');
 const { statsPage, statsResetPage } = require('./views/stats');
 const { incidentsPage, expensesPage, incidentDeletePage, HANDLER_LABEL,
   RENTAL_FIRM_LABEL, ESTIMATE_SHOP_LABEL, KIND_LABEL, kindOf } = require('./views/incidents');
+const { documentsPage, documentDeletePage } = require('./views/documents');
 const attentionLib = require('./attention');
 const { attentionPage } = require('./views/attention');
 const exif = require('./exif');
@@ -1521,7 +1522,7 @@ function entryProblem(data) {
  */
 function returnTo(req, fallback = '/admin/expenses') {
   const r = String((req.body && req.body.ret) || '');
-  if (/^\/admin\/(expenses|incidents|wheels|attention)(\?[\w=&%.+-]*)?(#(row-\d+|v-[\w-]+|t-[\w-]+))?$/.test(r)) {
+  if (/^\/admin\/(expenses|incidents|documents|wheels|attention)(\?[\w=&%.+-]*)?(#(row-\d+|doc-\d+|v-[\w-]+|t-[\w-]+))?$/.test(r)) {
     return r;
   }
   /* The fallback is the page the caller came from, not always Expenses: a
@@ -1763,13 +1764,14 @@ app.get('/admin/expenses', async (req, res, next) => {
       return res.redirect(303, '/admin/expenses' +
         req.originalUrl.slice(req.originalUrl.indexOf('?')).replace(/([?&])scope=all\b/, '$1scope=vehicle'));
     }
-    const [{ filters, incidents, totals }, vehicles, sections] = await Promise.all([
+    const [{ filters, incidents, totals }, vehicles, sections, docs] = await Promise.all([
       incidentsFor(req),
       db.listVehicles({ includeInactive: true }),
-      db.expenseSections()
+      db.expenseSections(),
+      db.documentCounts()
     ]);
     res.send(expensesPage({
-      incidents, totals, filters, sections,
+      incidents, totals, filters, sections, docs,
       plates: vehicles.map(v => v.plate),
       today: summaryLib.dayKey(),
       message: flashOf(req), nav: adminNav('expenses')
@@ -1961,6 +1963,285 @@ app.post('/admin/incidents/:id/delete', upload, async (req, res, next) => {
     await db.deleteIncident(inc.id);
     console.log(`[admin] deleted expense ${inc.id} (${inc.plate} ${inc.occurred_on})`);
     back(res, to, `The entry ${inc.plate ? 'for ' + inc.plate + ' ' : ''}from ${inc.occurred_on} was deleted.`);
+  } catch (err) { next(err); }
+});
+
+/* ------------------------------ documents --------------------------
+ *
+ * The filing cabinet: papers that belong to the fleet rather than to any one
+ * line in the ledger. Same door as the rest of Expenses -- everything under
+ * /admin goes through adminAuth above -- and the sixth tab on that page.
+ * ------------------------------------------------------------------ */
+
+/**
+ * Documents get their own upload rather than sharing the ledger's.
+ *
+ * A photo of a scratch is a phone picture and 12 MB is generous for one. A
+ * scanned twelve-page leasing contract is not a phone picture, and the whole
+ * point of this tab is the things that do not fit anywhere else -- so the
+ * limit is raised for it and for nothing else.
+ */
+const docUpload = multer({
+  storage: multer.memoryStorage(),
+  /* Eight, not twenty-four: these files are bigger than the ledger's and they
+     are all held in memory at once, and then handed to Postgres hex-encoded,
+     which costs twice the file again. Eight 25 MB scans is about as much as
+     the container can carry without putting every other request at risk. */
+  limits: { fileSize: 25 * 1024 * 1024, files: 8, fields: 40 }
+}).any();
+
+/* Same bargain as softUpload: one file over the limit must not throw away the
+   folder, the plate and the note somebody has just typed. */
+function softDocUpload(req, res, next) {
+  docUpload(req, res, err => {
+    if (!err) return next();
+    if (err.code === 'LIMIT_FILE_SIZE' || err.code === 'LIMIT_FILE_COUNT' ||
+        err.code === 'LIMIT_PART_COUNT' || err.code === 'LIMIT_FIELD_COUNT') {
+      req.uploadLimit = err.code;
+      req.files = req.files || [];
+      return next();
+    }
+    return next(err);
+  });
+}
+
+/**
+ * What to tell somebody whose upload did not all fit.
+ *
+ * Carefully NOT the ledger's wording. There the files are an extra on a row
+ * that saved anyway, so "the rest of the line was saved" is true. Here the
+ * files ARE the thing, and on a size limit multer stops reading the request
+ * at the offending part -- so everything queued behind it is gone too, and a
+ * message implying otherwise would have somebody tick a document off as
+ * filed when it is nowhere.
+ */
+function docLimitNote(req) {
+  if (!req.uploadLimit) return '';
+  return req.uploadLimit === 'LIMIT_FILE_SIZE'
+    ? ' One file was over 25 MB: it, and anything after it in the same upload,'
+      + ' was NOT saved. Send those again on their own.'
+    : ' Only the first 8 files were saved – send the rest in another go.';
+}
+
+/**
+ * What may be shown IN the browser, as opposed to handed to it.
+ *
+ * Anything else downloads. That is not fussiness: this cabinet takes any kind
+ * of file on purpose, and a page of HTML or an SVG served inline would run
+ * its own script on this app's own origin, with this app's own session
+ * sitting right there. Downloading it is the same file and none of that.
+ */
+const DOC_INLINE = /^(image\/(jpeg|png|webp|gif|heic|heif)|application\/pdf|text\/plain)(;|$)/i;
+
+/* Digits, but not more digits than a bigint holds: "9999999999999999999999"
+   is id-shaped and makes Postgres throw, which is a 500 where a 404 belongs. */
+const docId = v => (/^\d{1,18}$/.test(String(v)) ? String(v) : '');
+
+function docFilters(req) {
+  const folder = String(req.query.folder || '');
+  return {
+    folder: folder === 'none' ? 'none' : (/^\d+$/.test(folder) ? folder : ''),
+    plate: normalisePlate(req.query.plate || ''),
+    q: String(req.query.q || '').slice(0, 80).trim(),
+    // The ledger's own filters, carried across so the five tabs to the left
+    // still remember what they were showing.
+    exp: String(req.query.exp || '').slice(0, 300),
+    edit: docId(req.query.edit || '')
+  };
+}
+
+/**
+ * The folder a form is asking for, checked against the ones that exist.
+ *
+ * Two people work this page at once: one has a document open with "Insurance"
+ * picked while the other deletes that folder. Saving would break a foreign
+ * key and throw away everything typed into the form -- so the file goes to
+ * Unfiled instead and is told so, which loses a label rather than the work.
+ */
+async function askedFolder(body) {
+  const id = docId(body && body.folder);
+  if (!id) return { id: null, gone: false };
+  const f = await db.getDocumentFolder(id);
+  return f ? { id, gone: false } : { id: null, gone: true };
+}
+
+const GONE_NOTE = ' That folder no longer exists, so it went to Unfiled.';
+
+/**
+ * The name the browser actually sent, rather than the one busboy guessed.
+ *
+ * Multipart filenames arrive as raw bytes and busboy hands them over decoded
+ * as latin1, so "Försäkring.pdf" reaches us as "FÃ¶rsÃ¤kring.pdf" -- and that
+ * is then what is stored, listed and downloaded forever. Reading the bytes
+ * back as UTF-8 undoes it. A name that was genuinely latin1 comes back with a
+ * replacement character, and then the original is kept as it was.
+ */
+function uploadName(raw) {
+  const s = String(raw || '');
+  if (!/[\u0080-\u00ff]/.test(s)) return s;
+  const d = Buffer.from(s, 'latin1').toString('utf8');
+  return d.includes('\ufffd') ? s : d;
+}
+
+/** Where a documents action lands afterwards: back where it came from. */
+function docReturn(req) {
+  const r = String((req.body && req.body.ret) || '');
+  /* `*` is in the class because the form-urlencoded serialiser leaves it
+     alone, so a search for "cert*" would otherwise lose the filter on save. */
+  return /^\/admin\/documents(\?[\w=&%.*+-]*)?(#doc-\d+)?$/.test(r) ? r : '/admin/documents';
+}
+
+app.get('/admin/documents', async (req, res, next) => {
+  try {
+    const filters = docFilters(req);
+    const [folders, documents, counts, vehicles, sections] = await Promise.all([
+      db.listDocumentFolders(),
+      db.listDocuments({ folder: filters.folder, plate: filters.plate, q: filters.q }),
+      db.documentCounts(),
+      db.listVehicles({ includeInactive: true }),
+      db.expenseSections()
+    ]);
+    res.send(documentsPage({
+      folders, documents, counts, filters, sections,
+      plates: vehicles.map(v => v.plate),
+      message: flashOf(req), nav: adminNav('expenses')
+    }));
+  } catch (err) { next(err); }
+});
+
+app.get('/admin/documents/file/:id', async (req, res, next) => {
+  try {
+    const f = await db.getDocument(req.params.id);
+    if (!f) return res.status(404).type('text/plain').send('Document not found.');
+    const inline = DOC_INLINE.test(f.mime || '');
+    const name = (f.filename || f.title || 'document').replace(/["\\\r\n]/g, '');
+    /* Two names, as RFC 6266 asks for: a plain one every browser understands,
+       and the real one for the browsers that read filename*. Percent-encoding
+       the plain field, which is what the rest of this app does, is what turns
+       "Försäkring.pdf" into "F%C3%B6rs%C3%A4kring.pdf" on somebody's disk. */
+    const ascii = name.replace(/[^\x20-\x7e]/g, '_') || 'document';
+    res
+      // Only the types above keep their own type. Everything else is handed
+      // over as bytes, so the browser saves it instead of running it.
+      .type(inline ? f.mime : 'application/octet-stream')
+      .set('Content-Disposition',
+        `${inline ? 'inline' : 'attachment'}; filename="${ascii}"; ` +
+        `filename*=UTF-8''${encodeURIComponent(name)}`)
+      .set('X-Content-Type-Options', 'nosniff')
+      .set('Cache-Control', 'private, max-age=3600')
+      .send(f.bytes);
+  } catch (err) { next(err); }
+});
+
+app.post('/admin/documents/folder', upload, async (req, res, next) => {
+  try {
+    const to = docReturn(req);
+    const name = String(req.body.name || '').trim().slice(0, 80);
+    if (!name) return back(res, to, 'A folder needs a name.');
+    const made = await db.createDocumentFolder(name, String(req.body.note || '').slice(0, 200));
+    if (!made) return back(res, to, `There is already a folder called “${name}”.`);
+    /* Land on the new folder, keeping every other filter that was set -- the
+       plate, the search and the ledger's own filters riding along in `exp`.
+       Rebuilding the URL from scratch here would quietly undo the one thing
+       that carry exists for. */
+    const u = new URL(to, 'http://x');
+    u.searchParams.set('folder', made.id);
+    u.searchParams.delete('ok');
+    back(res, u.pathname + u.search, `Folder “${made.name}” created.`);
+  } catch (err) { next(err); }
+});
+
+app.post('/admin/documents/folder/:id', upload, async (req, res, next) => {
+  try {
+    const to = docReturn(req);
+    const name = String(req.body.name || '').trim().slice(0, 80);
+    if (!name) return back(res, to, 'A folder needs a name.');
+    const done = await db.renameDocumentFolder(
+      req.params.id, name, String(req.body.note || '').slice(0, 200));
+    if (!done) {
+      return back(res, to,
+        `That folder no longer exists, or there is already one called “${name}”.`);
+    }
+    back(res, to, `Folder renamed to “${done.name}”.`);
+  } catch (err) { next(err); }
+});
+
+app.post('/admin/documents/folder/:id/delete', upload, async (req, res, next) => {
+  try {
+    const to = docReturn(req);
+    const f = await db.getDocumentFolder(req.params.id);
+    if (!f) return back(res, to, 'That folder no longer exists.');
+    await db.deleteDocumentFolder(f.id);
+    console.log(`[admin] deleted document folder ${f.id} (${f.name}), ${f.n} file(s) unfiled`);
+    /* Said plainly, because it is the one thing somebody pressing Delete on a
+       folder full of papers is actually worried about. */
+    back(res, '/admin/documents', `Folder “${f.name}” deleted.${f.n
+      ? ` The ${f.n} ${f.n === 1 ? 'file' : 'files'} in it ${f.n === 1 ? 'is' : 'are'} kept – ${
+        f.n === 1 ? 'it is' : 'they are'} now under Unfiled.` : ''}`);
+  } catch (err) { next(err); }
+});
+
+app.post('/admin/documents', softDocUpload, async (req, res, next) => {
+  try {
+    const to = docReturn(req);
+    const files = (req.files || []).filter(f => f.fieldname === 'files' && f.buffer && f.buffer.length);
+    if (!files.length) {
+      return back(res, to, `No file was uploaded.${docLimitNote(req)}`.trim());
+    }
+    const folder = await askedFolder(req.body);
+    const folderId = folder.id;
+    const plate = normalisePlate(req.body.plate || '');
+    const note = String(req.body.note || '').slice(0, 2000);
+    const title = String(req.body.title || '').trim().slice(0, 200);
+    for (let i = 0; i < files.length; i++) {
+      const f = files[i];
+      await db.addDocument({
+        folderId, plate, note,
+        /* One name typed over several files would give them all the same one,
+           and a list of four identical lines is a list you cannot use. So the
+           name is numbered, and with a single file it is left exactly as
+           typed. An empty name means each file keeps its own. */
+        title: title ? (files.length > 1 ? `${title} (${i + 1})` : title) : '',
+        filename: uploadName(f.originalname).slice(0, 200),
+        mime: f.mimetype || 'application/octet-stream',
+        buffer: f.buffer
+      });
+    }
+    back(res, to, `${files.length} ${files.length === 1 ? 'document' : 'documents'} uploaded.${
+      folder.gone ? GONE_NOTE : ''}${docLimitNote(req)}`);
+  } catch (err) { next(err); }
+});
+
+app.post('/admin/documents/:id', upload, async (req, res, next) => {
+  try {
+    const to = docReturn(req);
+    const folder = await askedFolder(req.body);
+    const done = await db.updateDocument(req.params.id, {
+      folderId: folder.id,
+      plate: normalisePlate(req.body.plate || ''),
+      title: String(req.body.title || '').trim().slice(0, 200),
+      note: String(req.body.note || '').slice(0, 2000)
+    });
+    if (!done) return back(res, to, 'That document no longer exists.');
+    back(res, to, `Saved. ${done.title || done.filename || 'The document'} is now in ${
+      done.folder_name ? `“${done.folder_name}”` : 'no folder'}${
+      done.plate ? ` and filed under ${done.plate}` : ''}.${folder.gone ? GONE_NOTE : ''}`);
+  } catch (err) { next(err); }
+});
+
+app.post('/admin/documents/:id/delete', upload, async (req, res, next) => {
+  try {
+    const to = docReturn(req);
+    const doc = await db.getDocumentMeta(req.params.id);
+    if (!doc) return back(res, to, 'That document no longer exists.');
+    // The same rule as everywhere else: nothing with bytes in it disappears
+    // on one stray click.
+    if (req.query.confirm !== '1') {
+      return res.send(documentDeletePage({ doc, ret: to, nav: adminNav('expenses') }));
+    }
+    await db.deleteDocument(doc.id);
+    console.log(`[admin] deleted document ${doc.id} (${doc.filename || doc.title})`);
+    back(res, to, `“${doc.title || doc.filename || 'The document'}” was deleted.`);
   } catch (err) { next(err); }
 });
 
