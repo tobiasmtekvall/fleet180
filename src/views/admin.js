@@ -235,7 +235,7 @@ const STATUS_OPTIONS = vstatus.STATUSES.map(value => ({ value, label: vstatus.ST
  * otherwise show the first option, In service, and saving it would make that
  * true without anybody meaning it. So the odd value gets an entry of its own,
  * selected and impossible to choose, and the only way out of it is to pick one
- * of the four on purpose.
+ * on the list on purpose.
  */
 function statusSelect(v) {
   const cur = vstatus.normalise(v.status);
@@ -283,8 +283,9 @@ function adminVehiclesPage({ vehicles, forms, message, counts }) {
           <input class="form-control" type="text" name="statusNote" style="width:180px"
                  value="${esc(v.status_note || '')}" maxlength="120"
                  placeholder="${vstatus.normalise(v.status) === vstatus.READY
-                   ? 'only kept while the van is held' : 'why / until when'}"
-                 title="One line beside the status: what is wrong, and when it is expected back. It is cleared when the van goes back into service.">
+                   ? 'only kept while the van is not in service'
+                   : vstatus.isRental(v) ? 'covering which van, until when' : 'why / until when'}"
+                 title="One line beside the status: what is wrong and when it is expected back, or which van a hire car is covering. Cleared only when the van goes back into service.">
           <label class="check"><input type="checkbox" name="active" value="1"${v.active ? ' checked' : ''}> Active</label>
           <span class="muted" style="font-size:13px">${esc(counts.get(v.plate) || 0)} checks</span>
           <button class="btn btn-primary btn-sm" type="submit">Save</button>
@@ -311,14 +312,18 @@ ${vehicles.length ? readinessBar(vehicles, { inactiveKnown: true }) : ''}
   <p class="lede"><strong>Status and Active are two different questions.</strong>
      <em>Active</em> is whether the van is ours at all, and it changes a few times a year.
      <em>Status</em> is what it is doing this week \u2013 <em>In service</em>,
-     <em>Waiting for repair</em>, <em>In the workshop</em> or <em>Off the road</em> \u2013 and it is
-     the one the figures above count. Only a van that is both Active and In service is counted as
-     ready for a route, so the Team Manager can read how many routes can go out straight off the
-     top of this page. Nothing sets the status by itself: a van reported broken on Friday that
+     <em>Temporary rental in service</em>, <em>Waiting for repair</em>, <em>In the workshop</em> or
+     <em>Off the road</em> \u2013 and it is the one the figures above count. A van that is Active
+     and either in service or a working hire car is counted as ready for a route, so the Team
+     Manager can read how many routes can go out straight off the top of this page.
+     <strong>A temporary rental counts as ready</strong>, because it is a vehicle a driver gets
+     into \u2013 it is named separately on the card only so you can see how much of what is on
+     the road today is hired, and its reason line is kept rather than cleared, for which van it
+     is covering and until when. Nothing sets the status by itself: a van reported broken on Friday that
      nobody has booked in yet is exactly the van these figures exist to catch, and no workshop
      date would know about it. Use the box beside it to say why and when it is expected back
-     – that line is cleared when the van goes back into service, so the next breakdown never
-     inherits the last one's reason.</p>
+     – that line is cleared when the van goes back into service, so the next breakdown
+     never inherits the last one's reason.</p>
 
   <p class="lede"><strong>The model decides the warning lights.</strong> When a driver answers Yes
      to the dashboard-lights question, they get a list of this particular van's lamps and symbols.
@@ -346,7 +351,7 @@ ${vehicles.length ? readinessBar(vehicles, { inactiveKnown: true }) : ''}
         ${select('status', STATUS_OPTIONS, 'service', 'st-select st-sel-service')}
         <input class="form-control" type="text" name="statusNote" style="width:180px"
                maxlength="120" placeholder="why / until when"
-               title="Only kept while the van is not in service.">
+               title="Kept for every status except In service.">
         <button class="btn btn-primary" type="submit">Add</button>
       </form>
     </div>

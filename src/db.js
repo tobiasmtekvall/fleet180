@@ -339,21 +339,26 @@ ALTER TABLE vehicles ADD COLUMN IF NOT EXISTS status_at   TIMESTAMPTZ;
 -- nobody can account for is not a van to hand a route to. The note says so on
 -- the page, so it is a thing somebody fixes rather than a thing nobody sees.
 -- Normally this matches no rows at all and costs nothing.
+-- Dropped and re-added rather than created once, so the list of allowed
+-- values is whatever this file says today: 'rental' joined it on 2026-09-30,
+-- and a constraint written before that would refuse every hire car.
+ALTER TABLE vehicles DROP CONSTRAINT IF EXISTS vehicles_status_chk;
+
 UPDATE vehicles SET status = 'off',
        status_note = CASE WHEN status_note = ''
                           THEN 'status was not recognised - please set it'
                           ELSE status_note END
- WHERE status NOT IN ('service', 'waiting', 'workshop', 'off');
+ WHERE status NOT IN ('service', 'rental', 'waiting', 'workshop', 'off');
 
--- With the rows known good, the database can say what the column may hold
--- rather than trusting every writer to. Validated, not NOT VALID: a later
+-- With the rows known good, the column is put back under the check. Validated,
+-- not NOT VALID: a later
 -- migration in this same file rewrites vehicle rows, and a deferred check
 -- would fire on one of those instead -- during a boot, where nobody is
 -- watching. DO/EXCEPTION because a CHECK has no ADD CONSTRAINT IF NOT EXISTS
 -- and this file runs on every start.
 DO $do$ BEGIN
   ALTER TABLE vehicles ADD CONSTRAINT vehicles_status_chk
-    CHECK (status IN ('service', 'waiting', 'workshop', 'off'));
+    CHECK (status IN ('service', 'rental', 'waiting', 'workshop', 'off'));
 EXCEPTION WHEN duplicate_object THEN NULL; END $do$;
 CREATE INDEX IF NOT EXISTS vehicles_order_idx ON vehicles (fleet, sort_order, plate);
 

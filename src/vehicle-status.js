@@ -21,9 +21,9 @@
 
 /* The order is the order they are offered in, and the order the shortfall is
    read out in: nearest to working first. */
-const STATUSES = ['service', 'waiting', 'workshop', 'off'];
+const STATUSES = ['service', 'rental', 'waiting', 'workshop', 'off'];
 
-/* Not one of the four. A column that says something this app does not
+/* Not one of the five. A column that says something this app does not
    recognise is a column somebody wrote around the form, and the van behind it
    is not one to hand a route to -- so it gets a name of its own, is counted
    with the vans that cannot work, and says plainly that it needs looking at.
@@ -32,6 +32,7 @@ const UNKNOWN = 'unknown';
 
 const STATUS_LABEL = {
   service: 'In service',
+  rental: 'Temporary rental in service',
   waiting: 'Waiting for repair',
   workshop: 'In the workshop',
   off: 'Off the road',
@@ -40,15 +41,30 @@ const STATUS_LABEL = {
 
 const STATUS_HINT = {
   service: 'On the road, or ready to be – this van can be given a route.',
+  rental: 'A hired vehicle standing in for one of ours, and working. It CAN be given a route, '
+    + 'so it counts towards the ready figure – it is shown apart only so the Team Manager '
+    + 'can see how much of the fleet on the road today is hired.',
   waiting: 'Damaged or faulty and not yet booked in. Cannot take a route.',
   workshop: 'At the body shop or the garage now. Cannot take a route.',
   off: 'Out of use for any other reason – no driver, no tyres, waiting on paperwork.',
-  unknown: 'This van has a status that is not one of the four. Pick one – until then it '
-    + 'is not counted as ready.'
+  unknown: 'This van has a status this app does not offer. Pick one – until then it is '
+    + 'not counted as ready.'
 };
 
-/** The one status that means "give it a route". */
+/**
+ * READY is our own van, working: the plain case, and the one the note rule
+ * hangs off (a van in service has no holdup to explain, so its reason line is
+ * cleared; a hire car very much does have one – which van it is covering, and
+ * until when – so its line is kept).
+ *
+ * CAN_WORK is the wider question the figures at the top of both vehicle pages
+ * actually ask: can this be given a route tomorrow. A hire car standing in for
+ * a van at the body shop is a vehicle a driver gets into, so it belongs here.
+ * Leaving it out would have the Team Manager plan one route fewer than he has
+ * vehicles for, which is the same class of mistake as planning one more.
+ */
 const READY = 'service';
+const CAN_WORK = new Set(['service', 'rental']);
 
 /**
  * The status to READ a row by.
@@ -59,7 +75,7 @@ const READY = 'service';
  * opposite of the obvious one. Reading an unrecognised status as In service
  * would add a van to the figure the Team Manager plans routes against, which
  * is the single mistake this column exists to prevent. So anything that is not
- * one of the four reads as UNKNOWN, and UNKNOWN is never ready.
+ * on that list reads as UNKNOWN, and UNKNOWN is never ready.
  *
  * Rows that predate the column are unaffected: they carry the column's own
  * DEFAULT of 'service', which is a real value and a true one.
@@ -78,9 +94,14 @@ function label(status) {
   return STATUS_LABEL[normalise(status)];
 }
 
-/** Ticked as ours AND not standing still. Both halves matter. */
+/** Ticked as in the fleet AND able to work. Both halves matter. */
 function isReady(v) {
-  return !!v.active && normalise(v.status) === READY;
+  return !!v.active && CAN_WORK.has(normalise(v.status));
+}
+
+/** Working, but not one of ours. */
+function isRental(v) {
+  return normalise(v.status) === 'rental';
 }
 
 /**
@@ -95,7 +116,8 @@ function isReady(v) {
  * `active` is then simply every van it was given.
  */
 function readiness(vehicles, order = ['box', 'home']) {
-  const blank = f => ({ fleet: f, total: 0, active: 0, ready: 0, inactive: 0, held: new Map() });
+  const blank = f => ({ fleet: f, total: 0, active: 0, ready: 0, inactive: 0,
+    rented: [], held: new Map() });
   /* A card per fleet that HAS vans, rather than per fleet this app knows the
      name of. A depot with no home-delivery vans was getting a green card
      reading "0 of 0 ready – every van is in service", which is a reassurance
@@ -109,7 +131,13 @@ function readiness(vehicles, order = ['box', 'home']) {
     if (!v.active) { r.inactive++; continue; }
     r.active++;
     const s = normalise(v.status);
-    if (s === READY) { r.ready++; continue; }
+    if (CAN_WORK.has(s)) {
+      r.ready++;
+      // Counted as ready, and also named, because "13 of 15" reads differently
+      // when two of the thirteen are on hire from OKQ8.
+      if (s !== READY) r.rented.push(v.plate);
+      continue;
+    }
     if (!r.held.has(s)) r.held.set(s, []);
     r.held.get(s).push(v.plate);
   }
@@ -128,5 +156,5 @@ function readiness(vehicles, order = ['box', 'home']) {
     rank(a[0]) - rank(b[0]) || String(a[0]).localeCompare(String(b[0]))));
 }
 
-module.exports = { STATUSES, STATUS_LABEL, STATUS_HINT, READY, UNKNOWN,
-  normalise, safe, label, isReady, readiness };
+module.exports = { STATUSES, STATUS_LABEL, STATUS_HINT, READY, CAN_WORK, UNKNOWN,
+  normalise, safe, label, isReady, isRental, readiness };

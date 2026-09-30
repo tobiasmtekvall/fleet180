@@ -31,6 +31,8 @@ function statusChip(v) {
  */
 function statusCell(v) {
   const s = vstatus.normalise(v.status);
+  /* READY, not CAN_WORK: a hire car is working and still has something to say
+     for itself -- which van it is covering, and until when. */
   if (s === vstatus.READY) return statusChip(v);
   const since = v.status_at ? fmtDate(v.status_at) : '';
   const tail = [v.status_note, since ? `since ${since}` : ''].filter(Boolean).join(' \u00b7 ');
@@ -60,8 +62,14 @@ function readinessBar(vehicles, { inactiveKnown = false } = {}) {
       <div class="fleet-name">${esc(FLEET_LABEL[fleet] || fleet)}</div>
       <div class="fleet-ready"><strong>${esc(r.ready)}</strong>
         <span>of ${esc(r.active)} ready</span></div>
-      <div class="fleet-held-list">${held || (r.active
-        ? '<span class="fleet-ok">Every van is in service.</span>'
+      <div class="fleet-held-list">${r.rented.length
+        ? `<span class="fleet-rented"><em class="st-dot st-rental"></em>${esc(r.rented.length)} of
+            ${r.rented.length === 1 ? 'those is' : 'those are'} on temporary hire
+            <span class="mono">${esc(r.rented.join(', '))}</span></span>` : ''}${held || (r.active
+        /* Not "every van is in service": two of them may be hire cars, named
+           on the line above. What this line actually says is that nothing is
+           being kept off the road. */
+        ? '<span class="fleet-ok">Nothing is off the road.</span>'
         : '<span class="fleet-inactive">No active vans in this fleet.</span>')}${
         inactiveKnown && r.inactive
           ? `<span class="fleet-inactive">${esc(r.inactive)} not active, not counted</span>` : ''}</div>
@@ -77,7 +85,8 @@ function fleetTable(title, vehicles, latest) {
   const rows = vehicles.map(v => {
     const l = latest.get(v.plate);
     // The stripe down the left of a held row takes the status's own colour,
-    // so the four rows a reader wants to skip are skippable at a glance.
+    // so the rows a reader wants to skip are skippable at a glance. A working
+    // hire car gets no stripe: it is not one of the rows to skip.
     return `<tr${vstatus.isReady(v) ? '' : ` class="row-held st-${esc(vstatus.normalise(v.status))}"`}>
       <td class="mono" style="font-size:17px;font-weight:700">${esc(v.plate)}</td>
       <td>${ownerChip(v.owner)}</td>
@@ -125,7 +134,8 @@ function indexPage({ vehicles, latest }) {
     <h1>Safety check</h1>
   </div>
   <p class="lede">${vehicles.length} ${vehicles.length === 1 ? 'vehicle' : 'vehicles'}. Scan the vehicle's QR code, or pick it from the list.
-     <strong>Ready</strong> below is how many can be given a route today; a van's status is set on
+     <strong>Ready</strong> below is how many can be given a route today \u2013 our own vans in
+     service, and any working hire cars standing in for them; a van's status is set on
      <a href="/admin/vehicles">Admin \u2192 Vehicles</a>.</p>
   ${empty}
 

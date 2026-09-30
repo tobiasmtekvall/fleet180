@@ -1208,13 +1208,15 @@ body.wide .wrap{max-width:1720px}
 .st-dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:7px;
   vertical-align:1px;background:var(--muted)}
 
-/* The four statuses, one colour each, used by the dot, the chip and the
+/* The five statuses, one colour each, used by the dot, the chip and the
    dropdown so a van reads the same in all three places. */
 .st-waiting,.st-dot.st-waiting{--st:#a86b00;--st-bg:#fdf6e8;--st-br:#e8cf9a}
 .st-workshop,.st-dot.st-workshop{--st:#1b5fa8;--st-bg:#eef4fb;--st-br:#b9cee6}
 .st-off,.st-dot.st-off{--st:#9a3b3b;--st-bg:#fdf1f1;--st-br:#e5b4b4}
 .st-service,.st-dot.st-service{--st:#256b38;--st-bg:#f3faf5;--st-br:#b7dfc2}
-/* Not one of the four: loud on purpose, because it means somebody has to look. */
+/* Working, but hired. Counted as ready, coloured apart from our own vans. */
+.st-rental,.st-dot.st-rental{--st:#0d6d78;--st-bg:#eef8f9;--st-br:#a9d6db}
+/* Not on the list: loud on purpose, because it means somebody has to look. */
 .st-unknown,.st-dot.st-unknown{--st:#7a3fa0;--st-bg:#f7f0fb;--st-br:#d4b8e4}
 .st-dot{background:var(--st,var(--muted))}
 .chip.st-chip{color:var(--st);background:var(--st-bg);border-color:var(--st-br);font-weight:600;
@@ -1226,11 +1228,16 @@ body.wide .wrap{max-width:1720px}
 
 /* The dropdown on the admin row carries the same colour, so a screenful of
    vans can be read without opening any of them. */
-.st-select{width:168px}
+.st-select{width:212px}
 .st-select.st-sel-waiting{border-color:#e8cf9a;background:#fdf6e8;color:#7d5100}
 .st-select.st-sel-workshop{border-color:#b9cee6;background:#eef4fb;color:#164a83}
 .st-select.st-sel-off{border-color:#e5b4b4;background:#fdf1f1;color:#7d2f2f}
+.st-select.st-sel-rental{border-color:#a9d6db;background:#eef8f9;color:#0a545d}
 .st-select.st-sel-unknown{border-color:#d4b8e4;background:#f7f0fb;color:#5f2b80;font-weight:600}
+/* Hire cars are part of the ready figure, so the line reads as information
+   rather than as a shortfall. */
+.fleet-rented{color:#0a545d}
+.fleet-rented .mono{color:var(--muted);font-size:12px}
 /* A fleet whose vans are all inactive: stated, not congratulated. */
 .fleet-card.fleet-empty{border-left-color:var(--border);opacity:.8}
 /* Six columns on the main list since Status arrived; on a phone the table
