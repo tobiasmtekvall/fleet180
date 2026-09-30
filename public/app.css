@@ -1268,6 +1268,10 @@ body.wide .wrap{max-width:1720px}
 .br-open{color:#a86b00}
 .br-vans{font-size:13px;margin:0 0 10px}
 .br-vans.br-short{color:#9a3b3b}
+/* The 3PL tail is a note about routes we do NOT need a van for, so it is
+   greyed away from the figure it is explaining rather than adding to it. */
+.br-vans-tpl{color:var(--muted);white-space:nowrap}
+.br-vans.br-short .br-vans-tpl{color:#a98}
 .br-table{font-size:13.5px;margin:0}
 .br-table th,.br-table td{padding:5px 8px;vertical-align:middle}
 .br-route{white-space:nowrap;font-weight:600}

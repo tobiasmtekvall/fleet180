@@ -101,8 +101,12 @@ check('a day on file: figures, the list, and the vans set against the routes', (
   assert.ok(/<strong>1<\/strong><span>3PL<\/span>/.test(aside));
   assert.ok(/<strong>1<\/strong><span>In-house \+ Flexio \+ Boxflow<\/span>/.test(aside));
   assert.ok(aside.includes('Kraft Guld') && aside.includes('Open shift'));
-  assert.ok(/ready now:\s*<strong>1<\/strong> for 3 routes/.test(aside), 'only box vans that are ready count');
-  assert.ok(/2 short/.test(aside));
+  /* One in-house route and one open shift are ours; the 3PL route arrives on
+     the supplier's own vehicle and is named apart rather than counted against
+     our vans (2026-09-30). */
+  assert.ok(/ready now:\s*<strong>1<\/strong> for 2 routes/.test(aside), 'only box vans that are ready count');
+  assert.ok(/\+ 1 3PL/.test(aside), 'the 3PL route is named, not counted');
+  assert.ok(/1 short/.test(aside) && !/2 short/.test(aside));
   assert.ok(!/nothing newer has arrived/.test(aside));
 });
 check('a read older than six hours is flagged as stale', () => {

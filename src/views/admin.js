@@ -296,9 +296,21 @@ function boxRoutesCard(p, vehicles) {
 
   const c = p.day.counts;
   const boxReady = vehicles.filter(v => v.fleet === 'box' && vstatus.isReady(v)).length;
-  const short = c.routes + c.open - boxReady;
+  /* A 3PL route arrives on the supplier's own vehicle, so it is a route we do
+     not have to find a van for. Counting it here was the difference between
+     "one short" and "enough" on a day where nothing was actually wrong: the
+     figures above already say how many there are, and this line is only about
+     our own fleet against our own routes.
+
+     An open shift IS ours. It has no driver yet, so it has no operator either
+     and there is no way to tell a 3PL route nobody has assigned from one of
+     ours -- and of the two guesses, the one that keeps a van spare is the one
+     that does not leave a route standing in the yard. */
+  const oursNeeded = c.rest + c.open;
+  const short = oursNeeded - boxReady;
   const vansLine = `<div class="br-vans ${short > 0 ? 'br-short' : ''}">Box vans ready now:
-      <strong>${esc(boxReady)}</strong> for ${esc(c.routes + c.open)} route${c.routes + c.open === 1 ? '' : 's'}
+      <strong>${esc(boxReady)}</strong> for ${esc(oursNeeded)} route${oursNeeded === 1 ? '' : 's'}${
+        c.tpl ? ` <span class="br-vans-tpl" title="Driven by a 3PL supplier on their own vehicle – not counted against our vans">+ ${esc(c.tpl)} 3PL</span>` : ''}
       – ${short > 0 ? `<strong>${esc(short)} short</strong>` : 'enough'}</div>`;
 
   const opChip = r => {
