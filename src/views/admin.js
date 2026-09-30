@@ -245,7 +245,106 @@ function statusSelect(v) {
   return select('status', options, known ? cur : '', 'st-select st-sel-' + cur);
 }
 
-function adminVehiclesPage({ vehicles, forms, message, counts }) {
+/* ------------------------------------------------------------------ *
+ * The next day's BOX routes, beside the Vehicles text (2026-09-30)    *
+ * ------------------------------------------------------------------ */
+
+const DAY_LONG = new Intl.DateTimeFormat('en-GB', {
+  timeZone: 'UTC', weekday: 'long', day: 'numeric', month: 'long'
+});
+const DAY_SHORT = new Intl.DateTimeFormat('en-GB', {
+  timeZone: 'UTC', weekday: 'short', day: 'numeric', month: 'short'
+});
+/* The day is a plain YYYY-MM-DD; read it as UTC midnight and print it in UTC,
+   so no time zone can move it to the day before. */
+const asDay = d => new Date(d + 'T00:00:00Z');
+
+function relDay(date, p) {
+  if (date === p.tomorrow) return 'Tomorrow';
+  if (date === p.today) return 'Today';
+  return date < p.today ? 'Past day' : 'Coming day';
+}
+
+/* A Planday read older than this is flagged: the suite sends every hour while
+   Chrome is open, so six hours of silence means it has stopped. */
+const STALE_MS = 6 * 3600 * 1000;
+
+function boxRoutesCard(p, vehicles) {
+  if (!p) return '';
+  const head = `<div class="card-header">Box routes
+      <span class="step-tag">${esc(relDay(p.date, p))} · ${esc(DAY_LONG.format(asDay(p.date)))} · from Planday</span>
+    </div>`;
+  const stepLink = (d, dir) => d
+    ? `<a href="/admin/vehicles?routes=${esc(d.date)}" class="br-step">${dir < 0 ? '‹ ' : ''}${esc(DAY_SHORT.format(asDay(d.date)))}${dir > 0 ? ' ›' : ''}</a>`
+    : '<span></span>';
+  const back = p.date !== p.tomorrow
+    ? `<a href="/admin/vehicles" class="br-step br-home">Tomorrow</a>` : '';
+  const nav = (p.prev || p.next || back)
+    ? `<div class="br-nav">${stepLink(p.prev, -1)}${back}${stepLink(p.next, 1)}</div>` : '';
+
+  if (!p.day) {
+    return `<aside class="card br-card">${head}
+    <div class="card-body">
+      ${nav}
+      <p class="br-empty">No Box routes for this day have reached Fleet 180 yet.</p>
+      <p class="muted br-small">The Route Suite reads them from Planday and sends them here every hour
+         while Chrome is open on the office computer${p.next ? ` – the next day on file is
+         <a href="/admin/vehicles?routes=${esc(p.next.date)}">${esc(DAY_LONG.format(asDay(p.next.date)))}</a>` : ''}.</p>
+    </div>
+  </aside>`;
+  }
+
+  const c = p.day.counts;
+  const boxReady = vehicles.filter(v => v.fleet === 'box' && vstatus.isReady(v)).length;
+  const short = c.routes + c.open - boxReady;
+  const vansLine = `<div class="br-vans ${short > 0 ? 'br-short' : ''}">Box vans ready now:
+      <strong>${esc(boxReady)}</strong> for ${esc(c.routes + c.open)} route${c.routes + c.open === 1 ? '' : 's'}
+      – ${short > 0 ? `<strong>${esc(short)} short</strong>` : 'enough'}</div>`;
+
+  const opChip = r => {
+    if (r.operator === 'unassigned') return '';
+    if (r.operator === 'inhouse') return '<span class="br-op br-inhouse">In-house</span>';
+    const label = r.operator === 'tpl' ? (r.company || '3PL') : (r.operator === 'boxflow' ? 'Boxflow' : 'Flexio');
+    return `<span class="br-op br-${esc(r.operator)}"${r.operator === 'tpl' ? ' title="3PL"' : ''}>${esc(label)}</span>`;
+  };
+  const rows = p.day.routes.map(r => `<tr${r.operator === 'tpl' ? ' class="br-row-tpl"' : ''}>
+        <td class="mono br-route">${esc(r.route)}</td>
+        <td>${r.operator === 'unassigned'
+          ? '<em class="muted">Open shift</em>'
+          : `<span title="${esc(r.planday || r.driver)}">${esc(r.driver)}</span>`}
+          ${r.handover ? '<span class="br-mark" title="More than one driver on this route in Planday">handover</span>' : ''}</td>
+        <td>${opChip(r)}</td>
+        <td class="muted br-shift">${esc(String(r.shift || '').replace(/\s*-\s*/, '\u2013'))}</td>
+      </tr>`).join('\n');
+
+  const at = p.day.fetched_at || p.day.received_at;
+  const stale = at && (Date.now() - new Date(at).getTime() > STALE_MS);
+
+  return `<aside class="card br-card">${head}
+    <div class="card-body">
+      ${nav}
+      <div class="br-figs">
+        <div class="br-fig"><strong>${esc(c.routes)}</strong><span>${c.open ? 'routes with a driver' : 'routes'}</span></div>
+        <div class="br-fig br-fig-tpl"><strong>${esc(c.tpl)}</strong><span>3PL</span></div>
+        <div class="br-fig br-fig-rest"><strong>${esc(c.rest)}</strong><span>In-house + Flexio + Boxflow</span></div>
+      </div>
+      <div class="br-split muted">In-house ${esc(c.inhouse)} · Flexio ${esc(c.flexio)} · Boxflow ${esc(c.boxflow)}${
+        c.open ? ` · <strong class="br-open">${esc(c.open)} open shift${c.open === 1 ? '' : 's'}</strong>` : ''}</div>
+      ${vansLine}
+      <div class="table-scroll"><table class="table br-table">
+        <thead><tr><th>Route</th><th>Driver</th><th>Company</th><th class="br-shift">Shift</th></tr></thead>
+        <tbody>
+${rows}
+        </tbody>
+      </table></div>
+      <p class="br-small ${stale ? 'br-stale' : 'muted'}">Read from Planday ${esc(fmtDateTime(at))}${stale
+        ? ' – nothing newer has arrived since. The Route Suite sends every hour while Chrome is open.'
+        : ''}</p>
+    </div>
+  </aside>`;
+}
+
+function adminVehiclesPage({ vehicles, forms, message, counts, boxRoutes }) {
   const ready = vehicles.filter(vstatus.isReady).length;
   const formOptions = [{ value: '', label: 'Default form' }]
     .concat(forms.filter(f => !f.is_default).map(f => ({ value: String(f.id), label: f.title })));
@@ -304,6 +403,8 @@ ${flash(message)}
 
 ${vehicles.length ? readinessBar(vehicles, { inactiveKnown: true }) : ''}
 
+  <div class="veh-intro">
+  <div class="veh-intro-text">
   <p class="lede">A vehicle added here immediately gets its own page and its own QR code
      on the <a href="/qr">QR page</a>. A vehicle no longer in use is unticked as
      <em>Active</em> \u2013 it then disappears from the lists and the QR sheet, but its old checks
@@ -334,6 +435,9 @@ ${vehicles.length ? readinessBar(vehicles, { inactiveKnown: true }) : ''}
      that needs a different file from the rest of its model – a file name in
      <span class="mono">public/manualer/</span>, nothing else. Leave it empty and the van gets the
      model's own manual.</p>
+  </div>
+  ${boxRoutesCard(boxRoutes, vehicles)}
+  </div>
 
   <div class="card">
     <div class="card-header">New vehicle</div>

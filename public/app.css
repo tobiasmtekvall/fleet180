@@ -1244,3 +1244,43 @@ body.wide .wrap{max-width:1720px}
    scrolls inside its card rather than pushing the whole page sideways. */
 .table-scroll{overflow-x:auto}
 @media print{.fleet-card{break-inside:avoid}}
+
+/* ---------- Vehicles: the text on the left, tomorrow's BOX routes on the
+   right (2026-09-30). The routes come from Planday via the Route Suite; the
+   split is 3PL against everybody else, which is the figure he plans with. */
+.veh-intro{display:grid;grid-template-columns:minmax(0,1fr) minmax(360px,500px);gap:24px;
+  align-items:start;margin:4px 0 22px}
+.veh-intro-text .lede:first-child{margin-top:0}
+.veh-intro-text .lede{margin-bottom:10px}
+.br-card{margin-bottom:0}
+.br-card .card-body{padding:14px 16px 12px}
+.br-nav{display:flex;justify-content:space-between;align-items:center;gap:8px;margin:-4px 0 10px;
+  font-size:13px}
+.br-step{text-decoration:none;white-space:nowrap}
+.br-home{font-weight:600}
+.br-figs{display:grid;grid-template-columns:1fr 1fr 1.5fr;gap:8px}
+.br-fig{border:1px solid var(--border);border-radius:8px;padding:8px 10px;background:#fff}
+.br-fig strong{display:block;font-size:28px;line-height:1.05;font-variant-numeric:tabular-nums}
+.br-fig span{display:block;font-size:12px;color:var(--muted);line-height:1.3}
+.br-fig-tpl{border-left:4px solid #b4532a}
+.br-fig-rest{border-left:4px solid #3f9a5a}
+.br-split{font-size:13px;margin:8px 0 4px}
+.br-open{color:#a86b00}
+.br-vans{font-size:13px;margin:0 0 10px}
+.br-vans.br-short{color:#9a3b3b}
+.br-table{font-size:13.5px;margin:0}
+.br-table th,.br-table td{padding:5px 8px;vertical-align:middle}
+.br-route{white-space:nowrap;font-weight:600}
+.br-shift{white-space:nowrap;font-size:12px;font-variant-numeric:tabular-nums}
+.br-row-tpl td:first-child{box-shadow:inset 3px 0 0 #b4532a}
+.br-op{display:inline-block;font-size:11.5px;font-weight:600;padding:1px 7px;border-radius:999px;
+  border:1px solid var(--border);white-space:nowrap;color:var(--muted)}
+.br-op.br-tpl{color:#8a3d1c;background:#fcf1ec;border-color:#e9c3b2}
+.br-op.br-boxflow{color:#1b5fa8;background:#eef4fb;border-color:#b9cee6}
+.br-op.br-flexio{color:#5f2b80;background:#f7f0fb;border-color:#d4b8e4}
+.br-mark{font-size:11px;color:#a86b00;margin-left:6px}
+.br-empty{margin:4px 0 6px;font-weight:600}
+.br-small{font-size:12px;margin:8px 0 0}
+.br-stale{color:#a86b00}
+@media (max-width:1000px){.veh-intro{grid-template-columns:minmax(0,1fr)}}
+@media (max-width:420px){.br-figs{grid-template-columns:1fr 1fr}.br-fig-rest{grid-column:1 / -1}.br-shift{display:none}}

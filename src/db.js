@@ -443,6 +443,16 @@ CREATE INDEX IF NOT EXISTS assignments_driver_idx ON assignments (driver);
 -- The form asks "who has this van today" on every scan, and "who had it the
 -- last seven days" beside it. Both read by plate.
 CREATE INDEX IF NOT EXISTS assignments_plate_date_idx ON assignments (plate, date DESC);
+
+-- The BOX routes Planday holds for the coming days, posted by the Route Suite
+-- (2026-09-30). One row per day, the routes as they came: this app never reads
+-- Planday and never decides who counts as 3PL -- the suite does both.
+CREATE TABLE IF NOT EXISTS planday_box_days (
+  date         DATE PRIMARY KEY,
+  routes       JSONB       NOT NULL DEFAULT '[]'::jsonb,
+  fetched_at   TIMESTAMPTZ,
+  received_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 -- The name exactly as Planday writes it -- "(EXT) Flexio Abdo Ghannoum" --
 -- pushed beside the roster name since 2026-09-28. The roster name is what a
 -- check is signed with; this one carries the staffing company, which is what
@@ -2417,6 +2427,53 @@ async function assignmentsForDay(date, fleet) {
   return r.rows;
 }
 
+/**
+ * Store the Planday BOX routes for the days in this push, one row per day.
+ * A day is replaced whole; `cleared` days (found empty by the same read) are
+ * removed; any other day is left as it was.
+ */
+async function replacePlandayBoxDays(days, fetchedAt, cleared) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    let gone = 0;
+    for (const date of cleared || []) {
+      gone += (await client.query('DELETE FROM planday_box_days WHERE date = $1::date', [date])).rowCount;
+    }
+    for (const d of days) {
+      await client.query(
+        `INSERT INTO planday_box_days (date, routes, fetched_at, received_at)
+         VALUES ($1::date, $2::jsonb, $3, now())
+         ON CONFLICT (date) DO UPDATE
+           SET routes = EXCLUDED.routes, fetched_at = EXCLUDED.fetched_at, received_at = now()`,
+        [d.date, JSON.stringify(d.routes), fetchedAt || null]);
+    }
+    await client.query('COMMIT');
+    return { days: days.length, dates: days.map(d => d.date).sort(), cleared: gone };
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+/** One day's Planday BOX routes, or null when none has been received. */
+async function plandayBoxDay(date) {
+  const r = await pool.query(
+    `SELECT to_char(date, 'YYYY-MM-DD') AS date, routes, fetched_at, received_at
+       FROM planday_box_days WHERE date = $1::date`, [date]);
+  return r.rows[0] || null;
+}
+
+/** The days on file between two dates, for stepping from one to the next. */
+async function plandayBoxDates(from, to) {
+  const r = await pool.query(
+    `SELECT to_char(date, 'YYYY-MM-DD') AS date, jsonb_array_length(routes)::int AS n
+       FROM planday_box_days WHERE date BETWEEN $1::date AND $2::date ORDER BY date`, [from, to]);
+  return r.rows;
+}
+
 async function assignmentRange() {
   const r = await pool.query(
     `SELECT to_char(MIN(date),'YYYY-MM-DD') AS first,
@@ -2727,6 +2784,7 @@ module.exports = {
   updateForm, deleteForm, addField, getField, updateField, deleteField, moveField,
   saveSubmission, listSubmissions, getSubmission, getPhoto, latestPerVehicle,
   listDrivers, replaceDrivers, claimJob, jobState, submissionsBetween, photoIdsFor,
+  replacePlandayBoxDays, plandayBoxDay, plandayBoxDates,
   replaceAssignments, assignmentsBetween, assignmentRange, assignmentDays, assignmentsForDay,
   assignmentsForPlate, plateHistory, lastOdometer, deleteSubmission, routeChoices,
   getSetting, setSetting, getStatsEpoch, setStatsEpoch, countsBefore,

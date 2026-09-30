@@ -36,6 +36,7 @@ const wheels = require('./wheels');
 const { wheelsPage } = require('./views/wheels');
 const { licencePage } = require('./views/licence');
 const licenceLib = require('./licence');
+const plandayBox = require('./planday-box');
 const statsLib = require('./stats');
 const { buildDriverStats } = statsLib;
 const { badgeText } = require('./badges');
@@ -734,6 +735,57 @@ app.post('/api/assignments', apiAuth, async (req, res, next) => {
     console.log(`[api] assignments: ${result.rows} rader över ${result.days} dagar ` +
       `(${result.dates[0]} – ${result.dates[result.dates.length - 1]})`);
     res.json({ ok: true, ...result });
+  } catch (err) { next(err); }
+});
+
+/**
+ * The coming days' BOX routes from Planday, posted by the Route Suite
+ * (2026-09-30). The suite reads Planday on its own schedule and sends every
+ * day from today onwards that has routes in it; each day it sends replaces
+ * that day here, and a day it does not send is left alone. A day with no
+ * usable routes is refused rather than stored: an empty read and a failed
+ * one look the same, and the second must not wipe tomorrow's list.
+ */
+app.post('/api/planday/box', apiAuth, async (req, res, next) => {
+  try {
+    const list = Array.isArray(req.body && req.body.days) ? req.body.days : null;
+    if (!list) {
+      return res.status(400).json({ ok: false,
+        error: 'Skicka {"days":[{"date":"YYYY-MM-DD","routes":[{"route":"JKP-EM-1","driver":"...","operator":"inhouse"}]}]}.' });
+    }
+    const days = [];
+    let rejected = 0, emptyDays = 0;
+    for (const d of list) {
+      const c = plandayBox.cleanDay(d);
+      if (!c) { emptyDays++; continue; }
+      rejected += c.rejected;
+      days.push({ date: c.date, routes: c.routes });
+    }
+    if (!days.length) {
+      return res.status(400).json({ ok: false, error: 'Inga dagar med giltiga rutter i listan.' });
+    }
+    // Days the same read found empty while it found routes on others: those
+    // were emptied in Planday (a cancelled day), so the old list goes. Never a
+    // day this push also carries routes for.
+    const sent = new Set(days.map(d => d.date));
+    const cleared = [...new Set((Array.isArray(req.body.cleared) ? req.body.cleared : [])
+      .map(v => String(v || '')).filter(v => plandayBox.isDay(v) && !sent.has(v)))].slice(0, 62);
+    const at = req.body.fetchedAt && !isNaN(Date.parse(req.body.fetchedAt))
+      ? new Date(req.body.fetchedAt) : null;
+    const result = await db.replacePlandayBoxDays(days, at, cleared);
+    console.log(`[api] planday box: ${result.days} dagar (${result.dates[0]} – ` +
+      `${result.dates[result.dates.length - 1]}), ${result.cleared} tömda, ${rejected} rader avvisade`);
+    res.json({ ok: true, ...result, rejected, emptyDays,
+      routes: Object.fromEntries(days.map(d => [d.date, d.routes.length])) });
+  } catch (err) { next(err); }
+});
+
+app.get('/api/planday/box', apiAuth, async (req, res, next) => {
+  try {
+    const q = String(req.query.date || '');
+    const date = plandayBox.isDay(q) ? q : plandayBox.addDays(summaryLib.dayKey(), 1);
+    const day = await db.plandayBoxDay(date);
+    res.json({ ok: true, date, day: day ? { ...day, counts: plandayBox.summarise(day.routes) } : null });
   } catch (err) { next(err); }
 });
 
@@ -2711,6 +2763,28 @@ function readVehicleBody(body, existing = null) {
   };
 }
 
+/**
+ * What the Vehicles page shows beside its text: the next day's BOX routes from
+ * Planday. `wanted` is ?routes=YYYY-MM-DD for stepping to another day; without
+ * it the page shows tomorrow (the Swedish tomorrow, not the server's UTC one).
+ */
+async function boxRoutesPanel(wanted) {
+  const today = summaryLib.dayKey();
+  const tomorrow = plandayBox.addDays(today, 1);
+  const date = plandayBox.isDay(wanted) ? String(wanted) : tomorrow;
+  const [day, around] = await Promise.all([
+    db.plandayBoxDay(date),
+    db.plandayBoxDates(plandayBox.addDays(date, -14), plandayBox.addDays(date, 14))
+  ]);
+  const others = around.filter(d => d.n > 0);
+  return {
+    date, today, tomorrow,
+    day: day ? { ...day, counts: plandayBox.summarise(day.routes) } : null,
+    prev: [...others].reverse().find(d => d.date < date) || null,
+    next: others.find(d => d.date > date) || null
+  };
+}
+
 app.get('/admin/vehicles', async (req, res, next) => {
   try {
     const [vehicles, forms] = await Promise.all([
@@ -2718,7 +2792,8 @@ app.get('/admin/vehicles', async (req, res, next) => {
     ]);
     const counts = new Map();
     for (const v of vehicles) counts.set(v.plate, await db.countSubmissionsForPlate(v.plate));
-    res.send(adminVehiclesPage({ vehicles, forms, counts, message: flashOf(req) }));
+    res.send(adminVehiclesPage({ vehicles, forms, counts, message: flashOf(req),
+      boxRoutes: await boxRoutesPanel(req.query.routes) }));
   } catch (err) { next(err); }
 });
 
