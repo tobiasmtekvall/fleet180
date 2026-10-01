@@ -1,5 +1,7 @@
 'use strict';
 
+const { maskName } = require('../mask');
+
 const { page, esc, fmtDateTime, fmtDate } = require('./layout');
 const vstatus = require('../vehicle-status');
 
@@ -92,7 +94,7 @@ function fleetTable(title, vehicles, latest) {
       <td>${ownerChip(v.owner)}</td>
       <td>${statusCell(v)}</td>
       <td>${l ? esc(fmtDateTime(l.submitted_at)) : '<span class="muted">\u2014</span>'}</td>
-      <td>${l && l.driver_name ? esc(l.driver_name) : '<span class="muted">\u2014</span>'}</td>
+      <td>${l && l.driver_name ? esc(maskName(l.driver_name)) : '<span class="muted">\u2014</span>'}</td>
       <td><a class="btn btn-primary" href="/v/${esc(v.plate)}">Open check</a></td>
     </tr>`;
   }).join('\n');

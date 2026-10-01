@@ -1,4 +1,6 @@
 'use strict';
+
+const { maskName } = require('../mask');
 /**
  * The attention report: one page that says what is wrong with the vans.
  *
@@ -80,7 +82,7 @@ const LAST_WORD = {
 /** "Reported 3 times on 2 days by Simon B, Ali K", when that is the truth. */
 function saidBy(item) {
   const who = item.drivers.length
-    ? ' by ' + item.drivers.slice(0, 4).map(esc).join(', ') +
+    ? ' by ' + item.drivers.slice(0, 4).map(n => esc(maskName(n))).join(', ') +
       (item.drivers.length > 4 ? ` and ${item.drivers.length - 4} more` : '')
     : '';
   // Their own notes say it better: how long it has been in the shop, how

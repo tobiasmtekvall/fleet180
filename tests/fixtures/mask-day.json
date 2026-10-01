@@ -1,0 +1,517 @@
+{
+ "date": "2026-10-01",
+ "checks": [
+  {
+   "id": "1",
+   "plate": "ODW03R",
+   "driver": "Sara Yxmarken",
+   "route": "JKP-EM-1",
+   "odometer": "123450",
+   "assignedDriver": "Simon Zebraqvist",
+   "driverChanged": true,
+   "approver": "OC Ville Ulfsparre",
+   "at": "2026-10-01T06:04:21.379Z",
+   "time": "08:04",
+   "photos": 0,
+   "lang": "sv",
+   "flags": [
+    {
+     "question": "Har du stängt av bakgavellyftens strömbrytare och lastutrymmets belysning (när det är aktuellt)?",
+     "answer": "nej"
+    },
+    {
+     "question": "Fungerar utvändig belysning som tex hel/halvjus, blinkers, bromsljus, sidopositions ljus? Om nej, beskriv vilken lampa som inte fungerar",
+     "answer": "nej"
+    },
+    {
+     "question": "Är däck i bra skick? Om nej, beskriv problemet och rapportera till närmsta ansvarig.",
+     "answer": "nej"
+    },
+    {
+     "question": "Fungerar bakgavellyft som den ska? Om nej, beskriv problemet och rapportera till närmsta ansvarig.",
+     "answer": "nej"
+    },
+    {
+     "question": "Är vätskor kontrollerade tex, olja, glykol, spolarvätska? Svara ja eller nej.",
+     "answer": "nej"
+    },
+    {
+     "question": "Är bilen fulltankad (HVO)? Svara ja eller nej.",
+     "answer": "nej"
+    },
+    {
+     "question": "Fungerar bältes lås som det ska? Svara ja eller nej.",
+     "answer": "nej"
+    },
+    {
+     "question": "Är hytten städad? (inga matrester, inga omslagspapper, inga tomma burkar eller flaskor, inga lösa föremål). Om nej – svara nej och städa upp!",
+     "answer": "nej"
+    },
+    {
+     "question": "Fungerar vindrutetorkarna? Svara ja eller nej. Om nej, rapportera till närmast ansvarig.",
+     "answer": "nej"
+    },
+    {
+     "question": "Fungerar backkameran om denna finns på fordonet? Svara ja eller nej.",
+     "answer": "nej"
+    }
+   ]
+  },
+  {
+   "id": "2",
+   "plate": "RBE87T",
+   "driver": "Wille Xanderlund",
+   "route": "JKP-EM-2",
+   "odometer": "123451",
+   "assignedDriver": "Sara Yxmarken",
+   "driverChanged": true,
+   "approver": "OC Ville Ulfsparre",
+   "at": "2026-10-01T06:04:21.387Z",
+   "time": "08:04",
+   "photos": 0,
+   "lang": "sv",
+   "flags": [
+    {
+     "question": "Har du stängt av bakgavellyftens strömbrytare och lastutrymmets belysning (när det är aktuellt)?",
+     "answer": "nej"
+    },
+    {
+     "question": "Fungerar utvändig belysning som tex hel/halvjus, blinkers, bromsljus, sidopositions ljus? Om nej, beskriv vilken lampa som inte fungerar",
+     "answer": "nej"
+    },
+    {
+     "question": "Är däck i bra skick? Om nej, beskriv problemet och rapportera till närmsta ansvarig.",
+     "answer": "nej"
+    },
+    {
+     "question": "Fungerar bakgavellyft som den ska? Om nej, beskriv problemet och rapportera till närmsta ansvarig.",
+     "answer": "nej"
+    },
+    {
+     "question": "Är vätskor kontrollerade tex, olja, glykol, spolarvätska? Svara ja eller nej.",
+     "answer": "nej"
+    },
+    {
+     "question": "Är bilen fulltankad (HVO)? Svara ja eller nej.",
+     "answer": "nej"
+    },
+    {
+     "question": "Fungerar bältes lås som det ska? Svara ja eller nej.",
+     "answer": "nej"
+    },
+    {
+     "question": "Är hytten städad? (inga matrester, inga omslagspapper, inga tomma burkar eller flaskor, inga lösa föremål). Om nej – svara nej och städa upp!",
+     "answer": "nej"
+    },
+    {
+     "question": "Fungerar vindrutetorkarna? Svara ja eller nej. Om nej, rapportera till närmast ansvarig.",
+     "answer": "nej"
+    },
+    {
+     "question": "Fungerar backkameran om denna finns på fordonet? Svara ja eller nej.",
+     "answer": "nej"
+    }
+   ]
+  },
+  {
+   "id": "3",
+   "plate": "XWA50L",
+   "driver": "Naveen Wolfsgruber",
+   "route": "JKP-EM-3",
+   "odometer": "123452",
+   "assignedDriver": "Wille Xanderlund",
+   "driverChanged": true,
+   "approver": "OC Ville Ulfsparre",
+   "at": "2026-10-01T06:04:21.393Z",
+   "time": "08:04",
+   "photos": 0,
+   "lang": "sv",
+   "flags": [
+    {
+     "question": "Har du stängt av bakgavellyftens strömbrytare och lastutrymmets belysning (när det är aktuellt)?",
+     "answer": "nej"
+    },
+    {
+     "question": "Fungerar utvändig belysning som tex hel/halvjus, blinkers, bromsljus, sidopositions ljus? Om nej, beskriv vilken lampa som inte fungerar",
+     "answer": "nej"
+    },
+    {
+     "question": "Är däck i bra skick? Om nej, beskriv problemet och rapportera till närmsta ansvarig.",
+     "answer": "nej"
+    },
+    {
+     "question": "Fungerar bakgavellyft som den ska? Om nej, beskriv problemet och rapportera till närmsta ansvarig.",
+     "answer": "nej"
+    },
+    {
+     "question": "Är vätskor kontrollerade tex, olja, glykol, spolarvätska? Svara ja eller nej.",
+     "answer": "nej"
+    },
+    {
+     "question": "Är bilen fulltankad (HVO)? Svara ja eller nej.",
+     "answer": "nej"
+    },
+    {
+     "question": "Fungerar bältes lås som det ska? Svara ja eller nej.",
+     "answer": "nej"
+    },
+    {
+     "question": "Är hytten städad? (inga matrester, inga omslagspapper, inga tomma burkar eller flaskor, inga lösa föremål). Om nej – svara nej och städa upp!",
+     "answer": "nej"
+    },
+    {
+     "question": "Fungerar vindrutetorkarna? Svara ja eller nej. Om nej, rapportera till närmast ansvarig.",
+     "answer": "nej"
+    },
+    {
+     "question": "Fungerar backkameran om denna finns på fordonet? Svara ja eller nej.",
+     "answer": "nej"
+    }
+   ]
+  }
+ ],
+ "issues": [
+  {
+   "question": "Har du stängt av bakgavellyftens strömbrytare och lastutrymmets belysning (när det är aktuellt)?",
+   "answer": "nej",
+   "plate": "ODW03R",
+   "driver": "Sara Yxmarken",
+   "time": "08:04",
+   "id": "1"
+  },
+  {
+   "question": "Fungerar utvändig belysning som tex hel/halvjus, blinkers, bromsljus, sidopositions ljus? Om nej, beskriv vilken lampa som inte fungerar",
+   "answer": "nej",
+   "plate": "ODW03R",
+   "driver": "Sara Yxmarken",
+   "time": "08:04",
+   "id": "1"
+  },
+  {
+   "question": "Är däck i bra skick? Om nej, beskriv problemet och rapportera till närmsta ansvarig.",
+   "answer": "nej",
+   "plate": "ODW03R",
+   "driver": "Sara Yxmarken",
+   "time": "08:04",
+   "id": "1"
+  },
+  {
+   "question": "Fungerar bakgavellyft som den ska? Om nej, beskriv problemet och rapportera till närmsta ansvarig.",
+   "answer": "nej",
+   "plate": "ODW03R",
+   "driver": "Sara Yxmarken",
+   "time": "08:04",
+   "id": "1"
+  },
+  {
+   "question": "Är vätskor kontrollerade tex, olja, glykol, spolarvätska? Svara ja eller nej.",
+   "answer": "nej",
+   "plate": "ODW03R",
+   "driver": "Sara Yxmarken",
+   "time": "08:04",
+   "id": "1"
+  },
+  {
+   "question": "Är bilen fulltankad (HVO)? Svara ja eller nej.",
+   "answer": "nej",
+   "plate": "ODW03R",
+   "driver": "Sara Yxmarken",
+   "time": "08:04",
+   "id": "1"
+  },
+  {
+   "question": "Fungerar bältes lås som det ska? Svara ja eller nej.",
+   "answer": "nej",
+   "plate": "ODW03R",
+   "driver": "Sara Yxmarken",
+   "time": "08:04",
+   "id": "1"
+  },
+  {
+   "question": "Är hytten städad? (inga matrester, inga omslagspapper, inga tomma burkar eller flaskor, inga lösa föremål). Om nej – svara nej och städa upp!",
+   "answer": "nej",
+   "plate": "ODW03R",
+   "driver": "Sara Yxmarken",
+   "time": "08:04",
+   "id": "1"
+  },
+  {
+   "question": "Fungerar vindrutetorkarna? Svara ja eller nej. Om nej, rapportera till närmast ansvarig.",
+   "answer": "nej",
+   "plate": "ODW03R",
+   "driver": "Sara Yxmarken",
+   "time": "08:04",
+   "id": "1"
+  },
+  {
+   "question": "Fungerar backkameran om denna finns på fordonet? Svara ja eller nej.",
+   "answer": "nej",
+   "plate": "ODW03R",
+   "driver": "Sara Yxmarken",
+   "time": "08:04",
+   "id": "1"
+  },
+  {
+   "question": "Har du stängt av bakgavellyftens strömbrytare och lastutrymmets belysning (när det är aktuellt)?",
+   "answer": "nej",
+   "plate": "RBE87T",
+   "driver": "Wille Xanderlund",
+   "time": "08:04",
+   "id": "2"
+  },
+  {
+   "question": "Fungerar utvändig belysning som tex hel/halvjus, blinkers, bromsljus, sidopositions ljus? Om nej, beskriv vilken lampa som inte fungerar",
+   "answer": "nej",
+   "plate": "RBE87T",
+   "driver": "Wille Xanderlund",
+   "time": "08:04",
+   "id": "2"
+  },
+  {
+   "question": "Är däck i bra skick? Om nej, beskriv problemet och rapportera till närmsta ansvarig.",
+   "answer": "nej",
+   "plate": "RBE87T",
+   "driver": "Wille Xanderlund",
+   "time": "08:04",
+   "id": "2"
+  },
+  {
+   "question": "Fungerar bakgavellyft som den ska? Om nej, beskriv problemet och rapportera till närmsta ansvarig.",
+   "answer": "nej",
+   "plate": "RBE87T",
+   "driver": "Wille Xanderlund",
+   "time": "08:04",
+   "id": "2"
+  },
+  {
+   "question": "Är vätskor kontrollerade tex, olja, glykol, spolarvätska? Svara ja eller nej.",
+   "answer": "nej",
+   "plate": "RBE87T",
+   "driver": "Wille Xanderlund",
+   "time": "08:04",
+   "id": "2"
+  },
+  {
+   "question": "Är bilen fulltankad (HVO)? Svara ja eller nej.",
+   "answer": "nej",
+   "plate": "RBE87T",
+   "driver": "Wille Xanderlund",
+   "time": "08:04",
+   "id": "2"
+  },
+  {
+   "question": "Fungerar bältes lås som det ska? Svara ja eller nej.",
+   "answer": "nej",
+   "plate": "RBE87T",
+   "driver": "Wille Xanderlund",
+   "time": "08:04",
+   "id": "2"
+  },
+  {
+   "question": "Är hytten städad? (inga matrester, inga omslagspapper, inga tomma burkar eller flaskor, inga lösa föremål). Om nej – svara nej och städa upp!",
+   "answer": "nej",
+   "plate": "RBE87T",
+   "driver": "Wille Xanderlund",
+   "time": "08:04",
+   "id": "2"
+  },
+  {
+   "question": "Fungerar vindrutetorkarna? Svara ja eller nej. Om nej, rapportera till närmast ansvarig.",
+   "answer": "nej",
+   "plate": "RBE87T",
+   "driver": "Wille Xanderlund",
+   "time": "08:04",
+   "id": "2"
+  },
+  {
+   "question": "Fungerar backkameran om denna finns på fordonet? Svara ja eller nej.",
+   "answer": "nej",
+   "plate": "RBE87T",
+   "driver": "Wille Xanderlund",
+   "time": "08:04",
+   "id": "2"
+  },
+  {
+   "question": "Har du stängt av bakgavellyftens strömbrytare och lastutrymmets belysning (när det är aktuellt)?",
+   "answer": "nej",
+   "plate": "XWA50L",
+   "driver": "Naveen Wolfsgruber",
+   "time": "08:04",
+   "id": "3"
+  },
+  {
+   "question": "Fungerar utvändig belysning som tex hel/halvjus, blinkers, bromsljus, sidopositions ljus? Om nej, beskriv vilken lampa som inte fungerar",
+   "answer": "nej",
+   "plate": "XWA50L",
+   "driver": "Naveen Wolfsgruber",
+   "time": "08:04",
+   "id": "3"
+  },
+  {
+   "question": "Är däck i bra skick? Om nej, beskriv problemet och rapportera till närmsta ansvarig.",
+   "answer": "nej",
+   "plate": "XWA50L",
+   "driver": "Naveen Wolfsgruber",
+   "time": "08:04",
+   "id": "3"
+  },
+  {
+   "question": "Fungerar bakgavellyft som den ska? Om nej, beskriv problemet och rapportera till närmsta ansvarig.",
+   "answer": "nej",
+   "plate": "XWA50L",
+   "driver": "Naveen Wolfsgruber",
+   "time": "08:04",
+   "id": "3"
+  },
+  {
+   "question": "Är vätskor kontrollerade tex, olja, glykol, spolarvätska? Svara ja eller nej.",
+   "answer": "nej",
+   "plate": "XWA50L",
+   "driver": "Naveen Wolfsgruber",
+   "time": "08:04",
+   "id": "3"
+  },
+  {
+   "question": "Är bilen fulltankad (HVO)? Svara ja eller nej.",
+   "answer": "nej",
+   "plate": "XWA50L",
+   "driver": "Naveen Wolfsgruber",
+   "time": "08:04",
+   "id": "3"
+  },
+  {
+   "question": "Fungerar bältes lås som det ska? Svara ja eller nej.",
+   "answer": "nej",
+   "plate": "XWA50L",
+   "driver": "Naveen Wolfsgruber",
+   "time": "08:04",
+   "id": "3"
+  },
+  {
+   "question": "Är hytten städad? (inga matrester, inga omslagspapper, inga tomma burkar eller flaskor, inga lösa föremål). Om nej – svara nej och städa upp!",
+   "answer": "nej",
+   "plate": "XWA50L",
+   "driver": "Naveen Wolfsgruber",
+   "time": "08:04",
+   "id": "3"
+  },
+  {
+   "question": "Fungerar vindrutetorkarna? Svara ja eller nej. Om nej, rapportera till närmast ansvarig.",
+   "answer": "nej",
+   "plate": "XWA50L",
+   "driver": "Naveen Wolfsgruber",
+   "time": "08:04",
+   "id": "3"
+  },
+  {
+   "question": "Fungerar backkameran om denna finns på fordonet? Svara ja eller nej.",
+   "answer": "nej",
+   "plate": "XWA50L",
+   "driver": "Naveen Wolfsgruber",
+   "time": "08:04",
+   "id": "3"
+  }
+ ],
+ "missing": [
+  "BPM38R",
+  "HJA34R",
+  "BBR00N",
+  "WAT90D",
+  "RBE26H",
+  "RPH54L",
+  "DHN13H",
+  "GJR88K",
+  "ODJ63H",
+  "ELZ35L",
+  "SSB55B",
+  "TTJ00A",
+  "RAH84S",
+  "MER05W",
+  "BZU92Z",
+  "RLX94A",
+  "CDK93M",
+  "DTE97W",
+  "WBH37M"
+ ],
+ "doubled": [],
+ "changes": [
+  {
+   "plate": "ODW03R",
+   "driver": "Sara Yxmarken",
+   "assignedDriver": "Simon Zebraqvist",
+   "approver": "OC Ville Ulfsparre",
+   "time": "08:04",
+   "id": "1"
+  },
+  {
+   "plate": "RBE87T",
+   "driver": "Wille Xanderlund",
+   "assignedDriver": "Sara Yxmarken",
+   "approver": "OC Ville Ulfsparre",
+   "time": "08:04",
+   "id": "2"
+  },
+  {
+   "plate": "XWA50L",
+   "driver": "Naveen Wolfsgruber",
+   "assignedDriver": "Wille Xanderlund",
+   "approver": "OC Ville Ulfsparre",
+   "time": "08:04",
+   "id": "3"
+  }
+ ],
+ "assigned": [
+  {
+   "plate": "ODW03R",
+   "driver": "Simon Zebraqvist",
+   "route": "JKP-EM-1",
+   "type": "",
+   "done": false,
+   "checkedPlate": "",
+   "time": "",
+   "flags": 0
+  },
+  {
+   "plate": "RBE87T",
+   "driver": "Sara Yxmarken",
+   "route": "JKP-EM-2",
+   "type": "",
+   "done": true,
+   "checkedPlate": "ODW03R",
+   "time": "08:04",
+   "flags": 10
+  },
+  {
+   "plate": "XWA50L",
+   "driver": "Wille Xanderlund",
+   "route": "JKP-EM-3",
+   "type": "",
+   "done": true,
+   "checkedPlate": "RBE87T",
+   "time": "08:04",
+   "flags": 10
+  },
+  {
+   "plate": "BPM38R",
+   "driver": "Naveen Wolfsgruber",
+   "route": "JKP-EM-4",
+   "type": "",
+   "done": true,
+   "checkedPlate": "XWA50L",
+   "time": "08:04",
+   "flags": 10
+  }
+ ],
+ "counts": {
+  "checks": 3,
+  "vehicles": 22,
+  "checked": 3,
+  "missing": 19,
+  "issues": 30,
+  "photos": 0,
+  "assigned": 4,
+  "assignedDone": 3,
+  "assignedMissing": 1,
+  "changes": 3
+ }
+}

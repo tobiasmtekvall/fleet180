@@ -1,5 +1,7 @@
 'use strict';
 
+const { maskName } = require('../mask');
+
 const { page, esc, fmtDateTime } = require('./layout');
 const { icon: badgeIcon, badgeText, BADGES, FLOORS } = require('../badges');
 
@@ -48,7 +50,7 @@ function statsPage({ stats, from, to, range, epoch, clamped, message, nav }) {
 
   const rankedRows = ranked.map((r, i) => `<tr>
       <td class="rank">${i + 1}</td>
-      <td><strong>${esc(r.name)}</strong>${r.note ? `<div class="muted" style="font-size:12px">${esc(r.note)}</div>` : ''}</td>
+      <td><strong>${esc(maskName(r.name))}</strong>${r.note ? `<div class="muted" style="font-size:12px">${esc(r.note)}</div>` : ''}</td>
       <td class="mono">${esc(r.done)}/${esc(r.expected)}${r.extra ? `<span class="muted"> +${esc(r.extra)}</span>` : ''}</td>
       <td>${bar(r.completion, scoreTone(r.completion))}</td>
       <td>${r.care === null ? '<span class="muted">—</span>' : bar(r.care, scoreTone(r.care))}</td>
@@ -61,7 +63,7 @@ function statsPage({ stats, from, to, range, epoch, clamped, message, nav }) {
 
   const unrankedRows = unranked.map(r => `<tr>
       <td></td>
-      <td>${esc(r.name)}</td>
+      <td>${esc(maskName(r.name))}</td>
       <td class="mono">${esc(r.done)}/${esc(r.expected)}${r.extra ? `<span class="muted"> +${esc(r.extra)}</span>` : ''}</td>
       <td colspan="5" class="muted">${esc(r.note)}</td>
       <td class="marks-cell">${marks(r)}</td>

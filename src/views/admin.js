@@ -6,6 +6,9 @@ const i18n = require('../i18n');
 const { OWNER_LABEL, FLEET_LABEL, readinessBar } = require('./index');
 const vstatus = require('../vehicle-status');
 const telltales = require('../telltales');
+/* Driver surnames are masked on every page Fleet 180 draws (2026-10-01), the
+   admin pages included -- see src/mask.js. */
+const { maskName } = require('../mask');
 
 const LINKS = [
   { href: '/', text: 'Vehicles' },
@@ -78,7 +81,7 @@ function adminListPage({ rows, total, filters, limit, offset, vehicles }) {
       <td class="mono">${esc(fmtDateTime(r.submitted_at))}</td>
       <td class="mono" style="font-weight:700"><a href="/admin?plate=${esc(r.plate)}"
           title="Only ${esc(r.plate)}">${esc(r.plate)}</a></td>
-      <td>${esc(r.driver_name || '—')}</td>
+      <td>${esc(maskName(r.driver_name) || '—')}</td>
       <td>${esc(r.route || '—')}</td>
       <td class="mono">${esc(r.odometer || '—')}</td>
       <td>${r.photo_count ? esc(r.photo_count) + ' 📷' : '<span class="muted">—</span>'}</td>
@@ -161,7 +164,11 @@ function adminDetailPage({ s, fallbackFields }) {
       return `<tr><td>${qLabel(q)}</td><td>${grid}</td></tr>`;
     }
     if (q.kind === 'info') return `<tr><td colspan="2" class="muted">${qLabel(q)}</td></tr>`;
-    return `<tr><td>${qLabel(q)}</td><td>${esc(formatAnswer(q, answers[q.name], 'en'))}</td></tr>`;
+    /* The driver question's answer is the driver's name: masked like the rest.
+       Same test as the receipt -- role, or source for snapshots with no role. */
+    const shown = (q.role === 'driver' || q.source === 'drivers')
+      ? maskName(formatAnswer(q, answers[q.name], 'en')) : formatAnswer(q, answers[q.name], 'en');
+    return `<tr><td>${qLabel(q)}</td><td>${esc(shown)}</td></tr>`;
   }).join('\n');
 
   /* Who the van was given to that day, and -- when the check was signed by
@@ -172,9 +179,9 @@ function adminDetailPage({ s, fallbackFields }) {
   <div class="card${s.driver_changed ? ' card-warn' : ''}">
     <div class="card-header">Assignment${s.driver_changed ? '<span class="step-tag">Driver was changed</span>' : ''}</div>
     <div class="card-body"><table class="kv">
-      <tr><td>Assigned driver</td><td>${esc(s.assigned_driver || '—')}</td></tr>
+      <tr><td>Assigned driver</td><td>${esc(maskName(s.assigned_driver) || '—')}</td></tr>
       <tr><td>Assigned route</td><td>${esc(s.assigned_route || '—')}</td></tr>
-      ${s.driver_changed ? `<tr><td>Check done by</td><td>${esc(s.driver_name || '—')}</td></tr>
+      ${s.driver_changed ? `<tr><td>Check done by</td><td>${esc(maskName(s.driver_name) || '—')}</td></tr>
       <tr><td>Approved by (OC / Fleet Manager)</td><td>${esc(s.change_approver || '—')}</td></tr>` : ''}
     </table></div>
   </div>
@@ -184,7 +191,7 @@ function adminDetailPage({ s, fallbackFields }) {
     <h1>Check #${esc(s.id)}</h1>
     <div class="plate">${esc(s.plate)}</div>
   </div>
-  <p class="lede">${esc(fmtDateTime(s.submitted_at))} · driver ${esc(s.driver_name || '—')} ·
+  <p class="lede">${esc(fmtDateTime(s.submitted_at))} · driver ${esc(maskName(s.driver_name) || '—')} ·
      route ${esc(s.route || '—')} · odometer ${esc(s.odometer || '—')}${
        s.driver_changed ? ' · <strong>vehicle change approved by ' + esc(s.change_approver || '—') + '</strong>' : ''}</p>
 ${assignedBlock}
@@ -323,7 +330,7 @@ function boxRoutesCard(p, vehicles) {
         <td class="mono br-route">${esc(r.route)}</td>
         <td>${r.operator === 'unassigned'
           ? '<em class="muted">Open shift</em>'
-          : `<span title="${esc(r.planday || r.driver)}">${esc(r.driver)}</span>`}
+          : esc(maskName(r.driver))}
           ${r.handover ? '<span class="br-mark" title="More than one driver on this route in Planday">handover</span>' : ''}</td>
         <td>${opChip(r)}</td>
         <td class="muted br-shift">${esc(String(r.shift || '').replace(/\s*-\s*/, '\u2013'))}</td>
@@ -735,7 +742,7 @@ ${nav('checks')}
     <div class="card-body">
       <table class="kv">
         <tr><td>Vehicle</td><td>${esc(s.plate)}</td></tr>
-        <tr><td>Driver</td><td>${esc(s.driver_name || '—')}</td></tr>
+        <tr><td>Driver</td><td>${esc(maskName(s.driver_name) || '—')}</td></tr>
         <tr><td>Route</td><td>${esc(s.route || '—')}</td></tr>
         <tr><td>Time</td><td>${esc(fmtDateTime(s.submitted_at))}</td></tr>
         <tr><td>Photos</td><td>${esc((s.photos || []).length)}</td></tr>
@@ -753,7 +760,7 @@ ${nav('checks')}
 
 function adminDriversPage({ drivers, message, lastSync }) {
   const rows = drivers.length ? drivers.map(d => `<tr>
-      <td>${esc(d.name)}</td>
+      <td>${esc(maskName(d.name))}</td>
       <td><span class="chip">${esc(d.type || '—')}</span></td>
       <td>${esc(d.fleet || '—')}</td>
       <td>${d.active ? 'Active' : '<span class="muted">Inactive</span>'}</td>

@@ -9,6 +9,10 @@
 
 const { isAnswerable, isAlerting, formatAnswer } = require('./fields');
 const { normName } = require('./stats');
+/* The mail and its preview mask driver surnames like every other page
+   (2026-10-01). buildDay() does not: /api/checks feeds the extension from it
+   and keeps the names whole. */
+const { maskName } = require('./mask');
 
 const STOCKHOLM = 'Europe/Stockholm';
 
@@ -179,14 +183,14 @@ function renderHtml(day, baseUrl) {
         <td style="padding:6px 10px;border-bottom:1px solid #e6e6e6;white-space:nowrap"><strong>${esc(i.plate)}</strong></td>
         <td style="padding:6px 10px;border-bottom:1px solid #e6e6e6">${esc(i.question)}</td>
         <td style="padding:6px 10px;border-bottom:1px solid #e6e6e6"><strong>${esc(i.answer)}</strong></td>
-        <td style="padding:6px 10px;border-bottom:1px solid #e6e6e6;white-space:nowrap">${esc(i.driver)} ${esc(i.time)}</td>
+        <td style="padding:6px 10px;border-bottom:1px solid #e6e6e6;white-space:nowrap">${esc(maskName(i.driver))} ${esc(i.time)}</td>
       </tr>`).join('')
     : `<tr><td colspan="4" style="padding:10px;color:#6c757d">Nothing reported that needs action.</td></tr>`;
 
   const checkRows = day.checks.length
     ? day.checks.map(c => `<tr>
         <td style="padding:5px 10px;border-bottom:1px solid #eee;white-space:nowrap"><strong>${esc(c.plate)}</strong></td>
-        <td style="padding:5px 10px;border-bottom:1px solid #eee">${esc(c.driver || '—')}</td>
+        <td style="padding:5px 10px;border-bottom:1px solid #eee">${esc(maskName(c.driver) || '—')}</td>
         <td style="padding:5px 10px;border-bottom:1px solid #eee">${esc(c.route || '—')}</td>
         <td style="padding:5px 10px;border-bottom:1px solid #eee;white-space:nowrap">${esc(c.time)}</td>
         <td style="padding:5px 10px;border-bottom:1px solid #eee;white-space:nowrap">${c.flags.length ? esc(c.flags.length) + ' ⚠' : ''}${c.photos ? ' ' + esc(c.photos) + ' 📷' : ''}</td>
@@ -196,7 +200,7 @@ function renderHtml(day, baseUrl) {
   const assignedRows = (day.assigned || []).length
     ? day.assigned.map(a => `<tr>
         <td style="padding:5px 10px;border-bottom:1px solid #eee;white-space:nowrap"><strong>${esc(a.plate)}</strong></td>
-        <td style="padding:5px 10px;border-bottom:1px solid #eee">${esc(a.driver)}</td>
+        <td style="padding:5px 10px;border-bottom:1px solid #eee">${esc(maskName(a.driver))}</td>
         <td style="padding:5px 10px;border-bottom:1px solid #eee">${esc(a.route || '—')}</td>
         <td style="padding:5px 10px;border-bottom:1px solid #eee;white-space:nowrap">${a.done
           ? `<span style="color:#256b38">✓ ${esc(a.time)}</span>` +
@@ -207,7 +211,7 @@ function renderHtml(day, baseUrl) {
 
   const changeRows = (day.changes || []).map(c => `<tr>
         <td style="padding:5px 10px;border-bottom:1px solid #eee;white-space:nowrap"><strong>${esc(c.plate)}</strong></td>
-        <td style="padding:5px 10px;border-bottom:1px solid #eee">${esc(c.assignedDriver || '—')} → <strong>${esc(c.driver || '—')}</strong></td>
+        <td style="padding:5px 10px;border-bottom:1px solid #eee">${esc(maskName(c.assignedDriver) || '—')} → <strong>${esc(maskName(c.driver) || '—')}</strong></td>
         <td style="padding:5px 10px;border-bottom:1px solid #eee">${esc(c.approver || '—')}</td>
         <td style="padding:5px 10px;border-bottom:1px solid #eee;white-space:nowrap">${esc(c.time)}</td>
       </tr>`).join('');
@@ -273,7 +277,7 @@ function renderText(day) {
   if ((day.assigned || []).length) {
     lines.push(`ASSIGNMENT (${day.counts.assignedDone}/${day.counts.assigned} submitted):`);
     for (const a of day.assigned) {
-      lines.push(`  ${a.plate}  ${a.driver}  ${a.route || '—'}  ` +
+      lines.push(`  ${a.plate}  ${maskName(a.driver)}  ${a.route || '—'}  ` +
         (a.done ? `OK ${a.time}` : 'NO CHECK'));
     }
     lines.push('');
@@ -281,19 +285,19 @@ function renderText(day) {
   if ((day.changes || []).length) {
     lines.push('VEHICLE CHANGES (a driver other than the assigned one):');
     for (const c of day.changes) {
-      lines.push(`  ${c.plate}  ${c.assignedDriver || '—'} -> ${c.driver || '—'}  ` +
+      lines.push(`  ${c.plate}  ${maskName(c.assignedDriver) || '—'} -> ${maskName(c.driver) || '—'}  ` +
         `approved by ${c.approver || '—'}  ${c.time}`);
     }
     lines.push('');
   }
   lines.push('NEEDS ACTION:');
   if (day.issues.length) {
-    for (const i of day.issues) lines.push(`  ${i.plate}  ${i.question} -> ${i.answer}  (${i.driver} ${i.time})`);
+    for (const i of day.issues) lines.push(`  ${i.plate}  ${i.question} -> ${i.answer}  (${maskName(i.driver)} ${i.time})`);
   } else lines.push('  nothing reported');
   lines.push('', 'SUBMITTED:');
   if (day.checks.length) {
     for (const c of day.checks) {
-      lines.push(`  ${c.plate}  ${c.driver || '—'}  ${c.route || '—'}  ${c.time}` +
+      lines.push(`  ${c.plate}  ${maskName(c.driver) || '—'}  ${c.route || '—'}  ${c.time}` +
         (c.flags.length ? `  (${c.flags.length} ${c.flags.length === 1 ? 'needs' : 'need'} action)` : ''));
     }
   } else lines.push('  none');

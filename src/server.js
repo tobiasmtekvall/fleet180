@@ -1887,6 +1887,12 @@ app.post('/admin/incidents/:id', softUpload, async (req, res, next) => {
     if (!inc) return back(res, to, 'That entry no longer exists.');
     // A row never changes section by being saved: the page it was on decides.
     const data = readIncidentBody({ ...req.body, scope: inc.scope });
+    /* The driver box is drawn masked ("Simon B****"). Posted back untouched it
+       means "unchanged", so the stored name stays whole; anything else typed
+       there is a correction and is stored as typed. */
+    if (inc.driver_name && data.driverName === mask.maskName(inc.driver_name)) {
+      data.driverName = inc.driver_name;
+    }
     const problem = entryProblem(data);
     if (problem) return back(res, to, problem);
     const result = await db.updateIncident(inc.id, data);

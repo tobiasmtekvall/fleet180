@@ -103,9 +103,12 @@ check('the last-check line carries what the server masked', () =>
 const preview = strip(formPage({ vehicle, form, sources, preview: true, lang: 'sv',
   assignment: null, week: null, board: null }));
 console.log('\n3. the admin preview');
-check('keeps the roster unmasked', () => {
-  assert.ok(preview.includes('>Simon Bergman</option>'), 'preview should not mask');
-  assert.ok(!preview.includes('Simon B****'));
+// Since 2026-10-01 surnames are masked on every page Fleet 180 draws, the
+// admin's preview included. The option VALUE stays whole, as on the real form.
+check('masks the roster labels like the real form, values whole', () => {
+  assert.ok(preview.includes('Simon B****</option>'), 'preview label should be masked');
+  assert.ok(!preview.includes('>Simon Bergman</option>'));
+  assert.ok(preview.includes('value="Simon Bergman"'), 'the value is what is posted and stays whole');
 });
 
 /* ---- the receipt ----------------------------------------------------- */

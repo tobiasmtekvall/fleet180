@@ -108,12 +108,13 @@ function renderField(f, lang, sources, ctx = {}) {
        label is masked, the value is not. The server resolves the name against
        the roster, the assignment and the standings key, none of which can work
        on a mask -- see src/mask.js for why that is a curtain and not a lock.
-       The admin's preview of the form shows the roster unmasked.
+       The admin's preview is masked as well since 2026-10-01: surnames are
+       masked on every page Fleet 180 draws.
 
        Masked on the ROLE or the SOURCE, the same pair the receipt tests: the
        roles are younger than the form, and a question re-saved without one
        would otherwise put the whole roster on a page with no login. */
-    const masked = (keyed || f.source === 'drivers') && !ctx.preview;
+    const masked = keyed || f.source === 'drivers';
     const options = [`<option value="" ${uiAttrs('choose')}>${esc(i18n.t(lang, 'choose'))}</option>`]
       .concat(opts.map(o =>
         `<option value="${esc(o)}"${keyed ? ` data-key="${esc(driverKey(o))}"` : ''}${

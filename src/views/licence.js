@@ -1,4 +1,6 @@
 'use strict';
+
+const { maskName } = require('../mask');
 /**
  * License control (Box) -- one admin tab. Pick a route from the newest day's
  * box assignment and open the "Arrival Inspection Box" Google form with the
@@ -24,7 +26,7 @@ const json = v => JSON.stringify(v).replace(/</g, '\\u003c')
   .replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
 
 function optionLabel(o) {
-  return `${o.route || '(no route)'} — ${o.plate} — ${o.driver}${o.company ? ' · ' + o.company : ''}`;
+  return `${o.route || '(no route)'} — ${o.plate} — ${maskName(o.driver)}${o.company ? ' · ' + o.company : ''}`;
 }
 
 function licencePage({ days, date, options, message, nav, newest, today }) {
@@ -101,7 +103,7 @@ function licencePage({ days, date, options, message, nav, newest, today }) {
       <tbody>${options.map(o => `<tr>
         <td class="mono">${esc(o.route || '—')}</td>
         <td class="mono" style="font-weight:700">${esc(o.plate)}</td>
-        <td>${esc(o.driver)}</td>
+        <td>${esc(maskName(o.driver))}</td>
         <td>${o.company ? `<span class="dl-co dl-co-${esc(o.company.toLowerCase())}">${esc(o.company)}</span>` : '<span class="muted">—</span>'}</td>
         <td>${o.terminal ? esc(o.terminal) : '<span class="muted">—</span>'}</td>
         <td><a class="btn btn-secondary btn-sm" target="_blank" rel="noopener" href="${esc(licence.prefillUrl({

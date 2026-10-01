@@ -17,11 +17,16 @@
  * colleague can still read the roster; here the first name already does that
  * job, so the surname gives nothing away.
  *
- * WHERE IT IS APPLIED: only where a driver can see it -- the /v/<PLATE> form
- * and the /kvitto receipt, neither of which has a login. /admin, the daily
- * mail and the extension's FLEET180 tab sit behind Tobias's login and keep
- * the full names, and nothing masked is ever stored: the mask happens at the
- * moment a page is drawn, and the database keeps the name the driver picked.
+ * WHERE IT IS APPLIED: everywhere Fleet 180 draws a driver's name for a
+ * person to read (since 2026-10-01; before that only the driver-facing form
+ * and receipt) -- the form, the receipt, the vehicle list, every /admin page
+ * including the form preview, Box routes and License control, and the daily
+ * mail with its preview. What stays whole: the API (/api/*, which feeds the
+ * extension), the CSV downloads, and every form VALUE that is posted back or
+ * compared. Nothing masked is ever stored: the mask happens at the moment a
+ * page is drawn, and the database keeps the name the driver picked. The one
+ * editable name box (an incident's driver) is drawn masked and the server
+ * treats the masked text posted back as "unchanged".
  *
  * THIS IS A CURTAIN, NOT A LOCK -- the same caveat the standings board
  * carries. The driver dropdown has to post a name the server can resolve, so

@@ -1,5 +1,7 @@
 'use strict';
 
+const { maskName } = require('../mask');
+
 /**
  * Incidents and Expenses.
  *
@@ -515,7 +517,7 @@ function vehicleRow(inc, plates, today, ret) {
         <input class="form-control inc-desc" type="text" name="description" maxlength="600"
                value="${esc(inc.description)}" placeholder="${DESC_HINT[parts ? 'parts' : 'damage']}" title="${esc(inc.description)}">
         <input class="form-control inc-driver" type="text" name="driverName" maxlength="120"
-               value="${esc(inc.driver_name)}" placeholder="Driver" title="${esc(inc.driver_name)}">
+               value="${esc(maskName(inc.driver_name))}" placeholder="Driver">
         ${shopIn}
         ${shopOut}
         <span class="inc-days${d.open ? ' open' : ''}" title="${parts ? 'Not applicable to spare parts' : d.open ? 'Still at the workshop' : 'Days off the road'}">${esc(d.text || '–')}</span>
@@ -857,7 +859,7 @@ function pending(list) {
       <form method="post" action="/admin/incidents/from-check/${esc(p.id)}" class="pending-row">
         <span class="mono pending-plate">${esc(p.plate)}</span>
         <span class="pending-date">${esc(p.day)}</span>
-        <span class="pending-who">${esc(p.driver || '—')}</span>
+        <span class="pending-who">${esc(maskName(p.driver) || '—')}</span>
         <span class="pending-what" title="${esc(p.text)}">${esc(p.text)}</span>
         ${p.photos ? `<span class="chip">${esc(p.photos)} ${p.photos === 1 ? 'photo' : 'photos'}</span>` : ''}
         <a class="btn btn-ghost btn-sm" href="/admin/s/${esc(p.id)}" target="_blank" rel="noopener">The check</a>
